@@ -1,26 +1,28 @@
 import type { BotContext } from '../../types/context.js'
 
 const HELP_TEXT = `
-*ClaudeBot Commands*
+*ClaudeBot* \u{2014} Remote Claude Code CLI
 
-/start - Welcome message
-/login <password> - Authenticate (auto-deletes password)
-/logout - Log out
-/projects - List & select projects (inline keyboard)
-/select <name> - Select project by name
-/status - Current project, model, queue status
-/model - Switch Claude model (haiku/sonnet/opus)
-/cancel - Cancel running Claude process
-/new - Clear session, start fresh conversation
-/help - Show this help
+\u{2500}\u{2500}\u{2500} *Commands* \u{2500}\u{2500}\u{2500}
+/projects \u{2014} Browse & select project
+/select \`<name>\` \u{2014} Quick switch project
+/model \u{2014} Switch model (haiku/sonnet/opus)
+/status \u{2014} Active projects & queue
+/cancel \u{2014} Stop current project's process
+/new \u{2014} Fresh session (clear history)
+/help \u{2014} This message
 
-*Usage:*
-1. /login with your password
-2. /projects to pick a project
-3. Send any text message to chat with Claude
-4. Claude responds with streaming updates
+\u{2500}\u{2500}\u{2500} *Smart Features* \u{2500}\u{2500}\u{2500}
+\u{1F4AC} *Live Streaming* \u{2014} See responses in real-time
+\u{1F527} *Tool Tracking* \u{2014} Tool count shown inline
+\u{1F4DD} *Message Batching* \u{2014} Rapid messages merged (2s window)
+\u{26A1} *Parallel Processing* \u{2014} Multiple projects run simultaneously
+\u{1F504} *Steer Mode* \u{2014} Prefix with \`!\` to cancel & redirect
 
-Messages are queued - one Claude process runs at a time.
+\u{2500}\u{2500}\u{2500} *Quick Start* \u{2500}\u{2500}\u{2500}
+1. /projects \u{2192} pick a project
+2. Type your prompt
+3. Watch Claude work in real-time
 `.trim()
 
 export async function helpCommand(ctx: BotContext): Promise<void> {

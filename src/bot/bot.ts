@@ -2,6 +2,7 @@ import { Telegraf } from 'telegraf'
 import { env } from '../config/env.js'
 import type { BotContext } from '../types/context.js'
 import { errorHandler } from './middleware/error-handler.js'
+import { dedupMiddleware } from './middleware/dedup.js'
 import { authMiddleware } from './middleware/auth.js'
 import { rateLimitMiddleware } from './middleware/rate-limit.js'
 import { startCommand } from './commands/start.js'
@@ -16,6 +17,7 @@ import { helpCommand } from './commands/help.js'
 import { newSessionCommand } from './commands/new-session.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
+import { photoHandler, documentHandler } from './handlers/photo-handler.js'
 import { setupQueueProcessor } from './queue-processor.js'
 
 export function createBot(): Telegraf<BotContext> {
@@ -23,6 +25,7 @@ export function createBot(): Telegraf<BotContext> {
 
   // Middleware (order matters)
   bot.use(errorHandler())
+  bot.use(dedupMiddleware())
   bot.use(rateLimitMiddleware())
   bot.use(authMiddleware())
 
@@ -40,6 +43,10 @@ export function createBot(): Telegraf<BotContext> {
 
   // Callback queries (inline keyboard)
   bot.on('callback_query', callbackHandler)
+
+  // Photo and document messages → Claude
+  bot.on('photo', photoHandler)
+  bot.on('document', documentHandler)
 
   // Text messages → Claude
   bot.on('text', messageHandler)

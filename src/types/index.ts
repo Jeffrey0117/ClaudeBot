@@ -18,6 +18,7 @@ export interface QueueItem {
   readonly project: ProjectInfo
   readonly model: ClaudeModel
   readonly sessionId: string | null
+  readonly imagePaths: readonly string[]
 }
 
 export interface ClaudeResult {
@@ -25,4 +26,5 @@ export interface ClaudeResult {
   readonly costUsd: number
   readonly durationMs: number
   readonly cancelled: boolean
+  readonly resultText: string
 }

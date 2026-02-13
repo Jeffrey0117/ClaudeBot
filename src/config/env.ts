@@ -1,5 +1,11 @@
 import { z } from 'zod'
-import 'dotenv/config'
+import dotenv from 'dotenv'
+import { resolve } from 'node:path'
+
+const envFileArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
+const envPath = envFileArg ? resolve(envFileArg) : undefined
+
+dotenv.config(envPath ? { path: envPath } : undefined)
 
 const envSchema = z.object({
   BOT_TOKEN: z.string().min(1, 'BOT_TOKEN is required'),

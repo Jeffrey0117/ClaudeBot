@@ -1,6 +1,7 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, execSync, type ChildProcess } from 'node:child_process'
+import path from 'node:path'
 import type { ClaudeModel, ClaudeResult } from '../types/index.js'
-import type { StreamEvent, StreamResult, StreamContentBlockDelta } from '../types/claude-stream.js'
+import type { StreamEvent, StreamResult, StreamContentBlockDelta, StreamAssistantMessage } from '../types/claude-stream.js'
 import { setSessionId } from './session-store.js'
 import { validateProjectPath } from '../utils/path-validator.js'
 
@@ -14,31 +15,76 @@ interface RunOptions {
   readonly projectPath: string
   readonly model: ClaudeModel
   readonly sessionId: string | null
+  readonly imagePaths: readonly string[]
   readonly onTextDelta: OnTextDelta
   readonly onToolUse: OnToolUse
   readonly onResult: OnResult
   readonly onError: OnError
 }
 
-const MAX_ACCUMULATED_LENGTH = 100_000
-
-let activeProcess: ChildProcess | null = null
-
-export function isRunning(): boolean {
-  return activeProcess !== null
+function resolveClaudeCli(): { cmd: string; prefix: readonly string[] } {
+  if (process.platform !== 'win32') {
+    return { cmd: 'claude', prefix: [] }
+  }
+  try {
+    const cmdPath = execSync('where claude.cmd', { encoding: 'utf-8' }).trim().split('\n')[0].trim()
+    const dir = path.dirname(cmdPath)
+    const cliJs = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js')
+    return { cmd: process.execPath, prefix: [cliJs] }
+  } catch {
+    return { cmd: 'claude', prefix: [] }
+  }
 }
 
-export function cancelRunning(): boolean {
-  if (activeProcess) {
-    activeProcess.kill('SIGTERM')
-    activeProcess = null
-    return true
+const claudeCli = resolveClaudeCli()
+const MAX_ACCUMULATED_LENGTH = 100_000
+
+interface ActiveProcess {
+  readonly proc: ChildProcess
+  readonly abort: AbortController
+  readonly startedAt: number
+}
+
+const activeProcesses = new Map<string, ActiveProcess>()
+
+export function isRunning(projectPath?: string): boolean {
+  if (projectPath) {
+    return activeProcesses.has(projectPath)
   }
-  return false
+  return activeProcesses.size > 0
+}
+
+export function cancelRunning(projectPath?: string): boolean {
+  if (projectPath) {
+    const active = activeProcesses.get(projectPath)
+    if (active) {
+      active.abort.abort()
+      active.proc.kill('SIGTERM')
+      activeProcesses.delete(projectPath)
+      return true
+    }
+    return false
+  }
+  if (activeProcesses.size === 0) return false
+  for (const [key, active] of activeProcesses) {
+    active.abort.abort()
+    active.proc.kill('SIGTERM')
+    activeProcesses.delete(key)
+  }
+  return true
+}
+
+export function getActiveProjects(): readonly string[] {
+  return [...activeProcesses.keys()]
+}
+
+export function getElapsedMs(projectPath: string): number {
+  const active = activeProcesses.get(projectPath)
+  return active ? Date.now() - active.startedAt : 0
 }
 
 export function runClaude(options: RunOptions): void {
-  const { prompt, projectPath, model, sessionId, onTextDelta, onToolUse, onResult, onError } =
+  const { prompt, projectPath, model, sessionId, imagePaths, onTextDelta, onToolUse, onResult, onError } =
     options
 
   let validatedPath: string
@@ -49,14 +95,19 @@ export function runClaude(options: RunOptions): void {
     return
   }
 
+  const fullPrompt = imagePaths.length > 0
+    ? `${prompt}\n\n[Attached images - use your Read tool to view them]:\n${imagePaths.map((p) => `- ${p}`).join('\n')}`
+    : prompt
+
   const args = [
     '-p',
-    prompt,
+    fullPrompt,
     '--output-format',
     'stream-json',
     '--verbose',
     '--model',
     model,
+    '--dangerously-skip-permissions',
   ]
 
   if (sessionId) {
@@ -66,17 +117,17 @@ export function runClaude(options: RunOptions): void {
   console.log('[claude-runner] spawning claude, cwd:', validatedPath)
   console.log('[claude-runner] prompt:', prompt.slice(0, 50))
 
-  const proc = spawn('claude', args, {
+  const abort = new AbortController()
+  const proc = spawn(claudeCli.cmd, [...claudeCli.prefix, ...args], {
     cwd: validatedPath,
-    shell: true,
+    shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
+    signal: abort.signal,
   })
 
   console.log('[claude-runner] process spawned, pid:', proc.pid)
-  console.log('[claude-runner] stdout exists:', !!proc.stdout)
-  console.log('[claude-runner] stderr exists:', !!proc.stderr)
 
-  activeProcess = proc
+  activeProcesses.set(validatedPath, { proc, abort, startedAt: Date.now() })
   let accumulated = ''
   let buffer = ''
 
@@ -123,8 +174,8 @@ export function runClaude(options: RunOptions): void {
   })
 
   proc.on('close', (code) => {
-    console.log('[claude-runner] process closed, code:', code)
-    activeProcess = null
+    console.log('[claude-runner] process closed, code:', code, 'project:', validatedPath)
+    activeProcesses.delete(validatedPath)
     if (buffer.trim()) {
       try {
         const event = JSON.parse(buffer.trim()) as StreamEvent
@@ -157,7 +208,7 @@ export function runClaude(options: RunOptions): void {
   })
 
   proc.on('error', (error) => {
-    activeProcess = null
+    activeProcesses.delete(validatedPath)
     onError(`Failed to spawn Claude: ${error.message}`)
   })
 }
@@ -171,6 +222,19 @@ interface EventHandlers {
 
 function handleStreamEvent(event: StreamEvent, handlers: EventHandlers): void {
   switch (event.type) {
+    case 'assistant': {
+      const msg = (event as StreamAssistantMessage).message
+      if (msg?.content) {
+        for (const block of msg.content) {
+          if (block.type === 'text' && block.text) {
+            handlers.onTextDelta(block.text)
+          } else if (block.type === 'tool_use' && block.name) {
+            handlers.onToolUse(block.name)
+          }
+        }
+      }
+      break
+    }
     case 'content_block_delta': {
       const delta = event as StreamContentBlockDelta
       if (delta.delta.type === 'text_delta' && delta.delta.text) {
@@ -186,14 +250,16 @@ function handleStreamEvent(event: StreamEvent, handlers: EventHandlers): void {
     }
     case 'result': {
       const result = event as StreamResult
+      console.log('[claude-runner] result.result length:', result.result?.length ?? 0, 'preview:', result.result?.slice(0, 100) ?? '(empty)')
       if (result.is_error) {
         handlers.onError(result.error ?? 'Unknown Claude error')
       } else {
         handlers.onResult({
           sessionId: result.session_id,
-          costUsd: result.cost_usd,
+          costUsd: result.total_cost_usd ?? result.cost_usd ?? 0,
           durationMs: result.duration_ms,
           cancelled: false,
+          resultText: result.result ?? '',
         })
       }
       break

@@ -34,13 +34,25 @@ export interface StreamResult {
   readonly type: 'result'
   readonly subtype: 'success' | 'error'
   readonly session_id: string
-  readonly cost_usd: number
+  readonly cost_usd?: number
+  readonly total_cost_usd?: number
   readonly duration_ms: number
   readonly duration_api_ms: number
   readonly is_error: boolean
   readonly num_turns: number
   readonly result?: string
   readonly error?: string
+}
+
+export interface StreamAssistantMessage {
+  readonly type: 'assistant'
+  readonly message: {
+    readonly content: ReadonlyArray<{
+      readonly type: 'text' | 'tool_use'
+      readonly text?: string
+      readonly name?: string
+    }>
+  }
 }
 
 export interface StreamSystemMessage {
@@ -54,5 +66,6 @@ export type StreamEvent =
   | StreamContentBlockStart
   | StreamContentBlockDelta
   | StreamContentBlockStop
+  | StreamAssistantMessage
   | StreamResult
   | StreamSystemMessage

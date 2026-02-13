@@ -14,11 +14,15 @@ export function splitText(text: string, maxLength = TELEGRAM_MAX_LENGTH): readon
       break
     }
 
-    let splitIndex = remaining.lastIndexOf('\n', maxLength)
-    if (splitIndex === -1 || splitIndex < maxLength * 0.5) {
+    // Priority: paragraph boundary > single newline > space > hard cut
+    let splitIndex = remaining.lastIndexOf('\n\n', maxLength)
+    if (splitIndex === -1 || splitIndex < maxLength * 0.3) {
+      splitIndex = remaining.lastIndexOf('\n', maxLength)
+    }
+    if (splitIndex === -1 || splitIndex < maxLength * 0.3) {
       splitIndex = remaining.lastIndexOf(' ', maxLength)
     }
-    if (splitIndex === -1 || splitIndex < maxLength * 0.5) {
+    if (splitIndex === -1 || splitIndex < maxLength * 0.3) {
       splitIndex = maxLength
     }
 

@@ -115,3 +115,25 @@ async function safeEdit(
     throw error
   }
 }
+
+export async function safeSendMessage(
+  telegram: Telegram,
+  chatId: number,
+  text: string,
+  parseMode?: 'Markdown' | 'MarkdownV2' | 'HTML'
+): Promise<number> {
+  if (!parseMode) {
+    const msg = await telegram.sendMessage(chatId, text)
+    return msg.message_id
+  }
+  try {
+    const msg = await telegram.sendMessage(chatId, text, { parse_mode: parseMode })
+    return msg.message_id
+  } catch (error) {
+    if (error instanceof Error && /can't parse entities|Bad Request/i.test(error.message)) {
+      const msg = await telegram.sendMessage(chatId, text)
+      return msg.message_id
+    }
+    throw error
+  }
+}

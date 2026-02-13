@@ -29,9 +29,11 @@ async function handleProjectSelect(ctx: BotContext, chatId: number, name: string
     return
   }
 
+  const msg = ctx.callbackQuery?.message
+  const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
   validateProjectPath(project.path)
-  setUserProject(chatId, project)
-  const state = getUserState(chatId)
+  setUserProject(chatId, project, threadId)
+  const state = getUserState(chatId, threadId)
 
   await ctx.editMessageText(
     `✅ Selected: *${project.name}*\nModel: ${state.model}\n\nSend a message to start chatting with Claude.`,
@@ -45,7 +47,9 @@ async function handleModelSelect(ctx: BotContext, chatId: number, model: string)
     return
   }
 
-  setUserModel(chatId, model as ClaudeModel)
+  const msg = ctx.callbackQuery?.message
+  const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
+  setUserModel(chatId, model as ClaudeModel, threadId)
 
   await ctx.editMessageText(`✅ Model switched to *${model}*`, { parse_mode: 'Markdown' })
 }
