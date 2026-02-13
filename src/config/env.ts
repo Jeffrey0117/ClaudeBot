@@ -20,6 +20,7 @@ const envSchema = z.object({
   DEFAULT_MODEL: z.enum(['haiku', 'sonnet', 'opus']).default('sonnet'),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
+  MAX_TURNS: z.coerce.number().int().positive().optional(),
 })
 
 export type Env = z.infer<typeof envSchema>

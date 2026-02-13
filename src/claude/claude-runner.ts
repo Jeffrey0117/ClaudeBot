@@ -4,6 +4,7 @@ import type { ClaudeModel, ClaudeResult } from '../types/index.js'
 import type { StreamEvent, StreamResult, StreamContentBlockDelta, StreamAssistantMessage } from '../types/claude-stream.js'
 import { setSessionId } from './session-store.js'
 import { validateProjectPath } from '../utils/path-validator.js'
+import { env } from '../config/env.js'
 
 export type OnTextDelta = (text: string, accumulated: string) => void
 export type OnToolUse = (toolName: string) => void
@@ -104,11 +105,14 @@ export function runClaude(options: RunOptions): void {
     fullPrompt,
     '--output-format',
     'stream-json',
-    '--verbose',
     '--model',
     model,
     '--dangerously-skip-permissions',
   ]
+
+  if (env.MAX_TURNS) {
+    args.push('--max-turns', String(env.MAX_TURNS))
+  }
 
   if (sessionId) {
     args.push('--resume', sessionId)

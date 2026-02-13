@@ -4,7 +4,7 @@ import { getSessionId } from '../../claude/session-store.js'
 import { enqueue, isProcessing, getQueueLength } from '../../claude/queue.js'
 import { cancelRunning } from '../../claude/claude-runner.js'
 
-const COLLECT_MS = 2000
+const COLLECT_MS = 1000
 const pendingMessages = new Map<number, { texts: string[]; timer: ReturnType<typeof setTimeout> }>()
 
 export async function messageHandler(ctx: BotContext): Promise<void> {
