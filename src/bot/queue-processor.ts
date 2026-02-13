@@ -7,7 +7,7 @@ import { cleanupImage } from '../utils/image-downloader.js'
 import { updateStreamMessage, cancelPendingEdit } from '../telegram/message-sender.js'
 import { splitText } from '../utils/text-splitter.js'
 
-const TIMEOUT_MS = 5 * 60 * 1000
+const TIMEOUT_MS = 30 * 60 * 1000
 
 export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
   setProcessor(async (item: QueueItem) => {
@@ -54,7 +54,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
           item.chatId,
           thinkingMsg.message_id,
           undefined,
-          `\u{23F0} *[${tag}]* Timeout (5 min)\nUse /cancel if stuck.`,
+          `\u{23F0} *[${tag}]* Timeout (30 min)\nUse /cancel if stuck.`,
           { parse_mode: 'Markdown' }
         ).catch(() => {})
         done()
@@ -86,6 +86,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
           updateStreamMessage(item.chatId, thinkingMsg.message_id, display, telegram)
         },
         onResult: (result) => {
+          if (resolved) return
           clearTimeout(timer)
           cancelPendingEdit(item.chatId, thinkingMsg.message_id)
           try {
@@ -118,6 +119,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
           }
         },
         onError: (error) => {
+          if (resolved) return
           clearTimeout(timer)
           cancelPendingEdit(item.chatId, thinkingMsg.message_id)
           telegram.editMessageText(

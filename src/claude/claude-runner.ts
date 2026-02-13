@@ -41,8 +41,8 @@ const MAX_ACCUMULATED_LENGTH = 100_000
 
 interface ActiveProcess {
   readonly proc: ChildProcess
-  readonly abort: AbortController
   readonly startedAt: number
+  cancelled: boolean
 }
 
 const activeProcesses = new Map<string, ActiveProcess>()
@@ -58,7 +58,7 @@ export function cancelRunning(projectPath?: string): boolean {
   if (projectPath) {
     const active = activeProcesses.get(projectPath)
     if (active) {
-      active.abort.abort()
+      active.cancelled = true
       active.proc.kill('SIGTERM')
       activeProcesses.delete(projectPath)
       return true
@@ -67,7 +67,7 @@ export function cancelRunning(projectPath?: string): boolean {
   }
   if (activeProcesses.size === 0) return false
   for (const [key, active] of activeProcesses) {
-    active.abort.abort()
+    active.cancelled = true
     active.proc.kill('SIGTERM')
     activeProcesses.delete(key)
   }
@@ -117,19 +117,19 @@ export function runClaude(options: RunOptions): void {
   console.log('[claude-runner] spawning claude, cwd:', validatedPath)
   console.log('[claude-runner] prompt:', prompt.slice(0, 50))
 
-  const abort = new AbortController()
   const proc = spawn(claudeCli.cmd, [...claudeCli.prefix, ...args], {
     cwd: validatedPath,
     shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
-    signal: abort.signal,
   })
 
   console.log('[claude-runner] process spawned, pid:', proc.pid)
 
-  activeProcesses.set(validatedPath, { proc, abort, startedAt: Date.now() })
+  const active: ActiveProcess = { proc, startedAt: Date.now(), cancelled: false }
+  activeProcesses.set(validatedPath, active)
   let accumulated = ''
   let buffer = ''
+  let resultReceived = false
 
   proc.stdout?.on('data', (chunk: Buffer) => {
     console.log('[claude-runner] stdout chunk:', chunk.length, 'bytes')
@@ -154,6 +154,7 @@ export function runClaude(options: RunOptions): void {
           },
           onToolUse,
           onResult: (result) => {
+            resultReceived = true
             try {
               setSessionId(validatedPath, result.sessionId)
             } catch (err) {
@@ -174,8 +175,12 @@ export function runClaude(options: RunOptions): void {
   })
 
   proc.on('close', (code) => {
-    console.log('[claude-runner] process closed, code:', code, 'project:', validatedPath)
+    console.log('[claude-runner] process closed, code:', code, 'project:', validatedPath, 'cancelled:', active.cancelled)
     activeProcesses.delete(validatedPath)
+
+    // If cancelled or result already received, don't fire more callbacks
+    if (active.cancelled || resultReceived) return
+
     if (buffer.trim()) {
       try {
         const event = JSON.parse(buffer.trim()) as StreamEvent
@@ -189,6 +194,7 @@ export function runClaude(options: RunOptions): void {
           },
           onToolUse,
           onResult: (result) => {
+            resultReceived = true
             try {
               setSessionId(validatedPath, result.sessionId)
             } catch (err) {
@@ -202,13 +208,16 @@ export function runClaude(options: RunOptions): void {
         // ignore
       }
     }
-    if (code !== 0 && code !== null) {
+    if (!resultReceived && code !== 0 && code !== null) {
       onError(`Claude process exited with code ${code}`)
     }
   })
 
   proc.on('error', (error) => {
+    console.log('[claude-runner] process error:', error.message, 'cancelled:', active.cancelled)
     activeProcesses.delete(validatedPath)
+    // Don't report errors if cancelled (expected) or already got result
+    if (active.cancelled || resultReceived) return
     onError(`Failed to spawn Claude: ${error.message}`)
   })
 }
