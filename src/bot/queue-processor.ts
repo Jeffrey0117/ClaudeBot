@@ -4,7 +4,6 @@ import type { QueueItem } from '../types/index.js'
 import { setProcessor } from '../claude/queue.js'
 import { runClaude, cancelRunning } from '../claude/claude-runner.js'
 import { cleanupImage } from '../utils/image-downloader.js'
-import { updateStreamMessage, cancelPendingEdit } from '../telegram/message-sender.js'
 import { splitText } from '../utils/text-splitter.js'
 
 const TIMEOUT_MS = 30 * 60 * 1000
@@ -14,7 +13,8 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
     const { telegram } = bot
     const tag = item.project.name
 
-    const thinkingMsg = await telegram.sendMessage(
+    // Status message: only shows processing progress, never the response text
+    const statusMsg = await telegram.sendMessage(
       item.chatId,
       `\u{1F680} *[${tag}]* Processing...\n_Model: ${item.model}_`,
       { parse_mode: 'Markdown' }
@@ -49,23 +49,24 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       const timer = setTimeout(() => {
         if (resolved) return
         cancelRunning(item.project.path)
-        cancelPendingEdit(item.chatId, thinkingMsg.message_id)
         telegram.editMessageText(
-          item.chatId,
-          thinkingMsg.message_id,
-          undefined,
-          `\u{23F0} *[${tag}]* Timeout (30 min)\nUse /cancel if stuck.`,
+          item.chatId, statusMsg.message_id, undefined,
+          `\u{23F0} *[${tag}]* Timeout (30 min)`,
           { parse_mode: 'Markdown' }
         ).catch(() => {})
         done()
       }, TIMEOUT_MS)
 
-      const buildHeader = (): string => {
+      // Update status message with tool progress only
+      const updateStatus = (): void => {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(0)
-        const toolInfo = toolCount > 0
-          ? `\n\u{1F527} Tools: ${toolCount} (${[...new Set(toolNames)].slice(-3).join(', ')})`
-          : ''
-        return `\u{1F4AC} *[${tag}]* _${elapsed}s_${toolInfo}\n\n`
+        const uniqueTools = [...new Set(toolNames)]
+        const toolList = uniqueTools.slice(-4).join(', ')
+        const status = `\u{1F680} *[${tag}]* ${elapsed}s\n\u{1F527} Tools: ${toolCount} (${toolList})`
+        telegram.editMessageText(
+          item.chatId, statusMsg.message_id, undefined,
+          status, { parse_mode: 'Markdown' }
+        ).catch(() => {})
       }
 
       runClaude({
@@ -76,36 +77,38 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         imagePaths: item.imagePaths,
         onTextDelta: (_delta, acc) => {
           accumulated = acc
-          const display = buildHeader() + acc
-          updateStreamMessage(item.chatId, thinkingMsg.message_id, display, telegram)
+          // Don't edit status msg with text — text goes to new messages at the end
         },
         onToolUse: (toolName) => {
           toolCount++
           toolNames.push(toolName)
-          const display = buildHeader() + (accumulated || '_waiting for response..._')
-          updateStreamMessage(item.chatId, thinkingMsg.message_id, display, telegram)
+          updateStatus()
         },
         onResult: (result) => {
           if (resolved) return
           clearTimeout(timer)
-          cancelPendingEdit(item.chatId, thinkingMsg.message_id)
           try {
             const cost = (result.costUsd ?? 0).toFixed(4)
             const totalTime = ((Date.now() - startTime) / 1000).toFixed(1)
             const toolSummary = toolCount > 0
-              ? ` | Tools: ${toolCount}`
+              ? ` | \u{1F527} ${toolCount} tools`
               : ''
-            const footer = `\u{2500}\u{2500}\u{2500}\n\u{2705} *[${tag}]* $${cost} | ${totalTime}s${toolSummary}`
 
+            // Update status to "Done" summary
+            telegram.editMessageText(
+              item.chatId, statusMsg.message_id, undefined,
+              `\u{2705} *[${tag}]* Done | $${cost} | ${totalTime}s${toolSummary}`,
+              { parse_mode: 'Markdown' }
+            ).catch(() => {})
+
+            // Send response text as new message(s)
             const responseText = result.resultText || accumulated || ''
-            const fullText = responseText
-              ? responseText + '\n\n' + footer
-              : footer
+            if (!responseText) {
+              done()
+              return
+            }
 
-            // Delete the streaming/thinking message, send result as new message(s)
-            telegram.deleteMessage(item.chatId, thinkingMsg.message_id).catch(() => {})
-
-            const chunks = splitText(fullText, 4096)
+            const chunks = splitText(responseText, 4096)
             let chain = Promise.resolve()
             for (const chunk of chunks) {
               chain = chain.then(() =>
@@ -121,17 +124,17 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         onError: (error) => {
           if (resolved) return
           clearTimeout(timer)
-          cancelPendingEdit(item.chatId, thinkingMsg.message_id)
           telegram.editMessageText(
-            item.chatId,
-            thinkingMsg.message_id,
-            undefined,
+            item.chatId, statusMsg.message_id, undefined,
             `\u{274C} *[${tag}]* Error\n\n\`${error}\``,
             { parse_mode: 'Markdown' }
           )
             .then(() => done())
             .catch(() => {
-              telegram.editMessageText(item.chatId, thinkingMsg.message_id, undefined, `Error: ${error}`)
+              telegram.editMessageText(
+                item.chatId, statusMsg.message_id, undefined,
+                `Error: ${error}`
+              )
                 .then(() => done())
                 .catch(() => done())
             })
