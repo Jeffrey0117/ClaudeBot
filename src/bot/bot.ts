@@ -15,6 +15,9 @@ import { cancelCommand } from './commands/cancel.js'
 import { modelCommand } from './commands/model.js'
 import { helpCommand } from './commands/help.js'
 import { newSessionCommand } from './commands/new-session.js'
+import { favCommand } from './commands/fav.js'
+import { shortcutCommand } from './commands/shortcut.js'
+import { todoCommand, todosCommand } from './commands/todo.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
@@ -40,6 +43,14 @@ export function createBot(): Telegraf<BotContext> {
   bot.command('model', modelCommand)
   bot.command('help', helpCommand)
   bot.command('new', newSessionCommand)
+  bot.command('fav', favCommand)
+  bot.command('todo', todoCommand)
+  bot.command('todos', todosCommand)
+
+  // Bookmark shortcuts /1 through /9
+  for (let i = 1; i <= 9; i++) {
+    bot.command(String(i), shortcutCommand)
+  }
 
   // Callback queries (inline keyboard)
   bot.on('callback_query', callbackHandler)

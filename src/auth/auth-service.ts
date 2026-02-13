@@ -20,6 +20,12 @@ export async function login(chatId: number, password: string): Promise<boolean> 
   return false
 }
 
+export function autoAuth(chatId: number): boolean {
+  if (!env.ALLOWED_CHAT_IDS.includes(chatId)) return false
+  authenticatedChats.add(chatId)
+  return true
+}
+
 export function logout(chatId: number): void {
   authenticatedChats.delete(chatId)
 }

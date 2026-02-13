@@ -10,6 +10,10 @@ const HELP_TEXT = `
 /status \u{2014} Active projects & queue
 /cancel \u{2014} Stop current project's process
 /new \u{2014} Fresh session (clear history)
+/fav \u{2014} Manage project bookmarks
+/todo \`<text>\` \u{2014} Add a quick todo
+/todos \u{2014} List todos for current project
+/1\u{2013}/9 \u{2014} Switch to bookmarked project
 /help \u{2014} This message
 
 \u{2500}\u{2500}\u{2500} *Smart Features* \u{2500}\u{2500}\u{2500}

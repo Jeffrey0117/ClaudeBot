@@ -21,6 +21,10 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
   MAX_TURNS: z.coerce.number().int().positive().optional(),
+  AUTO_AUTH: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((val) => val === 'true'),
 })
 
 export type Env = z.infer<typeof envSchema>
@@ -39,8 +43,8 @@ function loadEnv(): Env {
     throw new Error(`Environment validation failed:\n${messages}`)
   }
   const data = result.data
-  if (!data.LOGIN_PASSWORD && !data.LOGIN_PASSWORD_HASH) {
-    throw new Error('Either LOGIN_PASSWORD or LOGIN_PASSWORD_HASH must be set')
+  if (!data.AUTO_AUTH && !data.LOGIN_PASSWORD && !data.LOGIN_PASSWORD_HASH) {
+    throw new Error('Either LOGIN_PASSWORD or LOGIN_PASSWORD_HASH must be set (or enable AUTO_AUTH)')
   }
   return data
 }

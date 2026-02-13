@@ -1,5 +1,6 @@
 import type { BotContext } from '../../types/context.js'
-import { isAuthenticated, isChatAllowed } from '../../auth/auth-service.js'
+import { autoAuth, isAuthenticated, isChatAllowed } from '../../auth/auth-service.js'
+import { env } from '../../config/env.js'
 
 const PUBLIC_COMMANDS = new Set(['/start', '/login', '/help'])
 
@@ -11,6 +12,11 @@ export function authMiddleware() {
     if (!isChatAllowed(chatId)) {
       await ctx.reply('⛔ Unauthorized chat.')
       return
+    }
+
+    // Auto-authenticate allowed chats when AUTO_AUTH is enabled
+    if (env.AUTO_AUTH && !isAuthenticated(chatId)) {
+      autoAuth(chatId)
     }
 
     const text = (ctx.message && 'text' in ctx.message) ? ctx.message.text : ''
