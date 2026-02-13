@@ -42,6 +42,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         if (resolved) return
         resolved = true
         clearInterval(typingInterval)
+        clearInterval(tickInterval)
         cleanupImages()
         resolve()
       }
@@ -57,17 +58,25 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         done()
       }, TIMEOUT_MS)
 
-      // Update status message with tool progress only
+      // Update status message with elapsed time + tool progress
+      let lastStatusText = ''
       const updateStatus = (): void => {
+        if (resolved) return
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(0)
-        const uniqueTools = [...new Set(toolNames)]
-        const toolList = uniqueTools.slice(-4).join(', ')
-        const status = `\u{1F680} *[${tag}]* ${elapsed}s\n\u{1F527} Tools: ${toolCount} (${toolList})`
+        const toolInfo = toolCount > 0
+          ? `\n\u{1F527} Tools: ${toolCount} (${[...new Set(toolNames)].slice(-4).join(', ')})`
+          : ''
+        const status = `\u{1F680} *[${tag}]* ${elapsed}s${toolInfo}`
+        if (status === lastStatusText) return
+        lastStatusText = status
         telegram.editMessageText(
           item.chatId, statusMsg.message_id, undefined,
           status, { parse_mode: 'Markdown' }
         ).catch(() => {})
       }
+
+      // Tick every second for live elapsed time
+      const tickInterval = setInterval(updateStatus, 1000)
 
       runClaude({
         prompt: item.prompt,
