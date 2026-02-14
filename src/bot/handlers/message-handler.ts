@@ -17,7 +17,7 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
   const threadId = ctx.message?.message_thread_id
   const state = getUserState(chatId, threadId)
   if (!state.selectedProject) {
-    await ctx.reply('No project selected. Use /projects to pick one first.')
+    await ctx.reply('\u{5C1A}\u{672A}\u{9078}\u{64C7}\u{5C08}\u{6848}\u{3002}\u{7528} /projects \u{9078}\u{64C7}\u{4E00}\u{500B}\u{3002}')
     return
   }
 
@@ -28,7 +28,7 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
   if (text.startsWith('!') && projectProcessing) {
     const steerText = text.slice(1).trim()
     if (!steerText) {
-      await ctx.reply('Usage: !<message> to cancel current and send new prompt')
+      await ctx.reply('\u{7528}\u{6CD5}: !<\u{8A0A}\u{606F}> \u{53D6}\u{6D88}\u{76EE}\u{524D}\u{4E26}\u{50B3}\u{9001}\u{65B0}\u{63D0}\u{793A}')
       return
     }
     cancelRunning(project.path)
@@ -41,7 +41,7 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
       sessionId,
       imagePaths: [],
     })
-    await ctx.reply(`🔄 [${project.name}] Steered — cancelled current, processing new prompt`)
+    await ctx.reply(`\u{1F504} [${project.name}] \u{5DF2}\u{8F49}\u{5411} \u{2014} \u{53D6}\u{6D88}\u{76EE}\u{524D}\u{FF0C}\u{8655}\u{7406}\u{65B0}\u{63D0}\u{793A}`)
     return
   }
 
@@ -62,7 +62,7 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
 
   if (projectProcessing) {
     const qLen = getQueueLength(project.path)
-    await ctx.reply(`📥 [${project.name}] Queued (${qLen + 1} ahead)\nTip: prefix with ! to steer`)
+    await ctx.reply(`\u{1F4E5} [${project.name}] \u{5DF2}\u{52A0}\u{5165}\u{4F47}\u{5217} (\u{524D}\u{65B9} ${qLen + 1} \u{500B})\n\u{63D0}\u{793A}: \u{524D}\u{7DB4} ! \u{53EF}\u{8F49}\u{5411}`)
   }
 }
 

@@ -12,7 +12,7 @@ export async function statusCommand(ctx: BotContext): Promise<void> {
   const threadId = ctx.message?.message_thread_id
   const state = getUserState(chatId, threadId)
   const project = state.selectedProject
-  const projectName = project ? project.name : '(none)'
+  const projectName = project ? project.name : '(\u{7121})'
   const sessionId = project ? getSessionId(project.path) : null
 
   const activePaths = getActiveProjectPaths()
@@ -21,24 +21,24 @@ export async function statusCommand(ctx: BotContext): Promise<void> {
         const name = path.basename(p)
         const elapsed = (getElapsedMs(p) / 1000).toFixed(0)
         const qLen = getQueueLength(p)
-        const qInfo = qLen > 0 ? ` | queue: ${qLen}` : ''
-        return `  \u{1F7E2} ${name} (${elapsed}s${qInfo})`
+        const qInfo = qLen > 0 ? ` | \u{4F47}\u{5217}: ${qLen}` : ''
+        return `  \u{1F7E2} ${name} (${elapsed}\u{79D2}${qInfo})`
       }).join('\n')
-    : '  \u{1F534} None'
+    : '  \u{1F534} \u{7121}'
 
   const totalQueue = getQueueLength()
 
   const lines = [
-    `\u{1F4CA} *Status*`,
+    `\u{1F4CA} *\u{72C0}\u{614B}*`,
     ``,
-    `\u{1F4C1} Selected: *${projectName}*`,
-    `\u{1F916} Model: \`${state.model}\``,
-    `\u{1F4BE} Session: ${sessionId ? '\u{2705} Active' : '\u{26AA} None'}`,
+    `\u{1F4C1} \u{5C08}\u{6848}: *${projectName}*`,
+    `\u{1F916} \u{6A21}\u{578B}: \`${state.model}\``,
+    `\u{1F4BE} \u{5C0D}\u{8A71}: ${sessionId ? '\u{2705} \u{9032}\u{884C}\u{4E2D}' : '\u{26AA} \u{7121}'}`,
     ``,
-    `*Running:*`,
+    `*\u{904B}\u{884C}\u{4E2D}:*`,
     activeList,
     ``,
-    `Queue: ${totalQueue} pending`,
+    `\u{4F47}\u{5217}: ${totalQueue} \u{500B}\u{7B49}\u{5F85}\u{4E2D}`,
   ]
 
   await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' })

@@ -11,11 +11,10 @@ export async function todoCommand(ctx: BotContext): Promise<void> {
   const content = text.replace(/^\/todo\s*/, '').trim()
 
   if (!content) {
-    await ctx.reply('Usage: `/todo <text>` or `/todo @project <text>`', { parse_mode: 'Markdown' })
+    await ctx.reply('\u{7528}\u{6CD5}: `/todo <\u{5167}\u{5BB9}>` \u{6216} `/todo @\u{5C08}\u{6848}\u{540D} <\u{5167}\u{5BB9}>`', { parse_mode: 'Markdown' })
     return
   }
 
-  // Check for @projectname prefix
   const atMatch = content.match(/^@(\S+)\s+(.+)/)
   let projectPath: string | null = null
   let todoText: string
@@ -25,7 +24,7 @@ export async function todoCommand(ctx: BotContext): Promise<void> {
     todoText = atMatch[2]
     const project = findProject(projectName)
     if (!project) {
-      await ctx.reply(`Project "${projectName}" not found.`)
+      await ctx.reply(`\u{627E}\u{4E0D}\u{5230}\u{5C08}\u{6848} "${projectName}"\u{3002}`)
       return
     }
     projectPath = project.path
@@ -35,7 +34,7 @@ export async function todoCommand(ctx: BotContext): Promise<void> {
     const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
     const state = getUserState(chatId, threadId)
     if (!state.selectedProject) {
-      await ctx.reply('No project selected. Use /projects first, or use `/todo @project <text>`', { parse_mode: 'Markdown' })
+      await ctx.reply('\u{5C1A}\u{672A}\u{9078}\u{64C7}\u{5C08}\u{6848}\u{3002}\u{8ACB}\u{5148}\u{7528} /projects\u{FF0C}\u{6216}\u{7528} `/todo @\u{5C08}\u{6848}\u{540D} <\u{5167}\u{5BB9}>`', { parse_mode: 'Markdown' })
       return
     }
     projectPath = state.selectedProject.path
@@ -43,7 +42,7 @@ export async function todoCommand(ctx: BotContext): Promise<void> {
 
   const item = addTodo(projectPath, todoText)
   const todos = getTodos(projectPath)
-  await ctx.reply(`Added todo #${todos.length}: ${item.text}`)
+  await ctx.reply(`\u{2705} \u{5DF2}\u{65B0}\u{589E}\u{5F85}\u{8FA6} #${todos.length}: ${item.text}`)
 }
 
 export async function todosCommand(ctx: BotContext): Promise<void> {
@@ -60,49 +59,47 @@ export async function todosCommand(ctx: BotContext): Promise<void> {
     const name = arg.slice(1)
     const project = findProject(name)
     if (!project) {
-      await ctx.reply(`Project "${name}" not found.`)
+      await ctx.reply(`\u{627E}\u{4E0D}\u{5230}\u{5C08}\u{6848} "${name}"\u{3002}`)
       return
     }
     projectPath = project.path
     projectName = project.name
   } else if (arg === 'done') {
-    // /todos done → clear completed todos
     const msg = ctx.message
     const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
     const state = getUserState(chatId, threadId)
     if (!state.selectedProject) {
-      await ctx.reply('No project selected.')
+      await ctx.reply('\u{5C1A}\u{672A}\u{9078}\u{64C7}\u{5C08}\u{6848}\u{3002}')
       return
     }
     const cleared = clearDone(state.selectedProject.path)
-    await ctx.reply(`Cleared ${cleared} completed todo${cleared !== 1 ? 's' : ''}.`)
+    await ctx.reply(`\u{2705} \u{5DF2}\u{6E05}\u{9664} ${cleared} \u{500B}\u{5DF2}\u{5B8C}\u{6210}\u{7684}\u{5F85}\u{8FA6}\u{3002}`)
     return
   } else if (arg.match(/^\d+$/)) {
-    // /todos <number> → toggle todo
     const msg = ctx.message
     const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
     const state = getUserState(chatId, threadId)
     if (!state.selectedProject) {
-      await ctx.reply('No project selected.')
+      await ctx.reply('\u{5C1A}\u{672A}\u{9078}\u{64C7}\u{5C08}\u{6848}\u{3002}')
       return
     }
     const index = parseInt(arg, 10) - 1
     const toggled = toggleTodo(state.selectedProject.path, index)
     if (!toggled) {
-      await ctx.reply(`Invalid todo number: ${arg}`)
+      await ctx.reply(`\u{7121}\u{6548}\u{7684}\u{5F85}\u{8FA6}\u{7DE8}\u{865F}: ${arg}`)
       return
     }
     const todos = getTodos(state.selectedProject.path)
     const item = todos[index]
-    const status = item.done ? 'done' : 'not done'
-    await ctx.reply(`Todo #${parseInt(arg, 10)} marked as ${status}: ${item.text}`)
+    const status = item.done ? '\u{5DF2}\u{5B8C}\u{6210}' : '\u{672A}\u{5B8C}\u{6210}'
+    await ctx.reply(`\u{5F85}\u{8FA6} #${parseInt(arg, 10)} \u{6A19}\u{8A18}\u{70BA}${status}: ${item.text}`)
     return
   } else {
     const msg = ctx.message
     const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
     const state = getUserState(chatId, threadId)
     if (!state.selectedProject) {
-      await ctx.reply('No project selected. Use /projects first, or use `/todos @project`', { parse_mode: 'Markdown' })
+      await ctx.reply('\u{5C1A}\u{672A}\u{9078}\u{64C7}\u{5C08}\u{6848}\u{3002}\u{8ACB}\u{5148}\u{7528} /projects\u{FF0C}\u{6216}\u{7528} `/todos @\u{5C08}\u{6848}\u{540D}`', { parse_mode: 'Markdown' })
       return
     }
     projectPath = state.selectedProject.path
@@ -112,16 +109,16 @@ export async function todosCommand(ctx: BotContext): Promise<void> {
   const todos = getTodos(projectPath)
 
   if (todos.length === 0) {
-    await ctx.reply(`No todos for *${projectName}*.\nUse \`/todo <text>\` to add one.`, { parse_mode: 'Markdown' })
+    await ctx.reply(`*${projectName}* \u{6C92}\u{6709}\u{5F85}\u{8FA6}\u{3002}\n\u{7528} \`/todo <\u{5167}\u{5BB9}>\` \u{65B0}\u{589E}\u{3002}`, { parse_mode: 'Markdown' })
     return
   }
 
   const lines = todos.map((t, i) => {
-    const check = t.done ? '\u2611' : '\u2610'
+    const check = t.done ? '\u{2611}' : '\u{2610}'
     return `${check} ${i + 1}. ${t.text}`
   })
 
   await ctx.reply(
-    `Todos \u2014 ${projectName}\n\n${lines.join('\n')}\n\n/todos <num> toggle | /todos done clear`
+    `\u{5F85}\u{8FA6} \u{2014} ${projectName}\n\n${lines.join('\n')}\n\n/todos <\u{7DE8}\u{865F}> \u{5207}\u{63DB} | /todos done \u{6E05}\u{9664}\u{5DF2}\u{5B8C}\u{6210}`
   )
 }

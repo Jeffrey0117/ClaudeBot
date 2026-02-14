@@ -105,6 +105,7 @@ export function runClaude(options: RunOptions): void {
     fullPrompt,
     '--output-format',
     'stream-json',
+    '--verbose',
     '--model',
     model,
     '--dangerously-skip-permissions',

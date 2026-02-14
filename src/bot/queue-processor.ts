@@ -16,7 +16,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
     // Status message: only shows processing progress, never the response text
     const statusMsg = await telegram.sendMessage(
       item.chatId,
-      `\u{1F680} *[${tag}]* Processing...\n_Model: ${item.model}_`,
+      `\u{1F680} *[${tag}]* \u{8655}\u{7406}\u{4E2D}...\n_\u{6A21}\u{578B}: ${item.model}_`,
       { parse_mode: 'Markdown' }
     )
 
@@ -52,7 +52,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         cancelRunning(item.project.path)
         telegram.editMessageText(
           item.chatId, statusMsg.message_id, undefined,
-          `\u{23F0} *[${tag}]* Timeout (30 min)`,
+          `\u{23F0} *[${tag}]* \u{903E}\u{6642} (30 \u{5206}\u{9418})`,
           { parse_mode: 'Markdown' }
         ).catch(() => {})
         done()
@@ -106,7 +106,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
             // Update status to "Done" summary
             telegram.editMessageText(
               item.chatId, statusMsg.message_id, undefined,
-              `\u{2705} *[${tag}]* Done | $${cost} | ${totalTime}s${toolSummary}`,
+              `\u{2705} *[${tag}]* \u{5B8C}\u{6210} | $${cost} | ${totalTime}\u{79D2}${toolSummary}`,
               { parse_mode: 'Markdown' }
             ).catch(() => {})
 
@@ -135,7 +135,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
           clearTimeout(timer)
           telegram.editMessageText(
             item.chatId, statusMsg.message_id, undefined,
-            `\u{274C} *[${tag}]* Error\n\n\`${error}\``,
+            `\u{274C} *[${tag}]* \u{932F}\u{8AA4}\n\n\`${error}\``,
             { parse_mode: 'Markdown' }
           )
             .then(() => done())

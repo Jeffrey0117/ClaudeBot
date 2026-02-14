@@ -8,7 +8,7 @@ export async function modelCommand(ctx: BotContext): Promise<void> {
 
   const state = getUserState(chatId)
   const keyboard = buildModelKeyboard(state.model)
-  await ctx.reply(`🤖 Current model: *${state.model}*\nSelect a model:`, {
+  await ctx.reply(`\u{1F916} \u{76EE}\u{524D}\u{6A21}\u{578B}: *${state.model}*\n\u{9078}\u{64C7}\u{6A21}\u{578B}:`, {
     ...keyboard,
     parse_mode: 'Markdown',
   })

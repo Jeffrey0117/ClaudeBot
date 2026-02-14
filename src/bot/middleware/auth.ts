@@ -10,11 +10,10 @@ export function authMiddleware() {
     if (!chatId) return
 
     if (!isChatAllowed(chatId)) {
-      await ctx.reply('⛔ Unauthorized chat.')
+      await ctx.reply('\u{26D4} \u{672A}\u{6388}\u{6B0A}\u{7684}\u{804A}\u{5929}\u{3002}')
       return
     }
 
-    // Auto-authenticate allowed chats when AUTO_AUTH is enabled
     if (env.AUTO_AUTH && !isAuthenticated(chatId)) {
       autoAuth(chatId)
     }
@@ -26,17 +25,16 @@ export function authMiddleware() {
       return next()
     }
 
-    // Allow callback queries from authenticated users
     if (ctx.callbackQuery) {
       if (isAuthenticated(chatId)) {
         return next()
       }
-      await ctx.answerCbQuery('Please /login first.')
+      await ctx.answerCbQuery('\u{8ACB}\u{5148} /login \u{767B}\u{5165}\u{3002}')
       return
     }
 
     if (!isAuthenticated(chatId)) {
-      await ctx.reply('🔒 Please /login first.')
+      await ctx.reply('\u{1F512} \u{8ACB}\u{5148} /login \u{767B}\u{5165}\u{3002}')
       return
     }
 
