@@ -4,6 +4,8 @@ import type { ClaudeModel, ClaudeResult } from '../types/index.js'
 import type { StreamEvent, StreamResult, StreamContentBlockDelta, StreamAssistantMessage } from '../types/claude-stream.js'
 import { setSessionId } from './session-store.js'
 import { validateProjectPath } from '../utils/path-validator.js'
+import { getTodos } from '../bot/todo-store.js'
+import { getSystemPrompt } from '../utils/system-prompt.js'
 import { env } from '../config/env.js'
 
 export type OnTextDelta = (text: string, accumulated: string) => void
@@ -96,9 +98,23 @@ export function runClaude(options: RunOptions): void {
     return
   }
 
-  const fullPrompt = imagePaths.length > 0
-    ? `${prompt}\n\n[Attached images - use your Read tool to view them]:\n${imagePaths.map((p) => `- ${p}`).join('\n')}`
-    : prompt
+  const parts: string[] = []
+
+  // Inject project todos as context
+  const todos = getTodos(validatedPath)
+  const pendingTodos = todos.filter((t) => !t.done)
+  if (pendingTodos.length > 0) {
+    const todoLines = pendingTodos.map((t, i) => `${i + 1}. ${t.text}`).join('\n')
+    parts.push(`[專案待辦清單]\n${todoLines}`)
+  }
+
+  parts.push(prompt)
+
+  if (imagePaths.length > 0) {
+    parts.push(`[Attached images - use your Read tool to view them]:\n${imagePaths.map((p) => `- ${p}`).join('\n')}`)
+  }
+
+  const fullPrompt = parts.join('\n\n')
 
   const args = [
     '-p',
@@ -110,6 +126,11 @@ export function runClaude(options: RunOptions): void {
     model,
     '--dangerously-skip-permissions',
   ]
+
+  const systemPrompt = getSystemPrompt()
+  if (systemPrompt) {
+    args.push('--append-system-prompt', systemPrompt)
+  }
 
   if (env.MAX_TURNS) {
     args.push('--max-turns', String(env.MAX_TURNS))

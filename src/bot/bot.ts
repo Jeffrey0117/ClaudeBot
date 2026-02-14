@@ -18,6 +18,8 @@ import { newSessionCommand } from './commands/new-session.js'
 import { favCommand } from './commands/fav.js'
 import { shortcutCommand } from './commands/shortcut.js'
 import { todoCommand, todosCommand } from './commands/todo.js'
+import { mkdirCommand } from './commands/mkdir.js'
+import { promptCommand } from './commands/prompt.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
@@ -46,6 +48,8 @@ export function createBot(): Telegraf<BotContext> {
   bot.command('fav', favCommand)
   bot.command('todo', todoCommand)
   bot.command('todos', todosCommand)
+  bot.command('mkdir', mkdirCommand)
+  bot.command('prompt', promptCommand)
 
   // Bookmark shortcuts /1 through /9
   for (let i = 1; i <= 9; i++) {
