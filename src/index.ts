@@ -7,7 +7,7 @@ async function main(): Promise<void> {
 
   // Validate projects directory
   const projects = scanProjects()
-  console.log(`Found ${projects.length} projects in ${env.PROJECTS_BASE_DIR}`)
+  console.log(`Found ${projects.length} projects in ${env.PROJECTS_BASE_DIR.join(', ')}`)
   projects.forEach((p) => console.log(`  - ${p.name}`))
 
   // Create and launch bot

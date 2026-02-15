@@ -3,29 +3,34 @@ import { join, resolve } from 'node:path'
 import type { ProjectInfo } from '../types/index.js'
 import { env } from './env.js'
 
-export function scanProjects(): readonly ProjectInfo[] {
-  const baseDir = resolve(env.PROJECTS_BASE_DIR)
+export function getBaseDirs(): readonly string[] {
+  return env.PROJECTS_BASE_DIR.map((d) => resolve(d))
+}
 
-  try {
-    const entries = readdirSync(baseDir)
-    return entries
-      .filter((entry) => {
+export function scanProjects(): readonly ProjectInfo[] {
+  const results: ProjectInfo[] = []
+
+  for (const baseDir of getBaseDirs()) {
+    try {
+      const entries = readdirSync(baseDir)
+      for (const entry of entries) {
         const fullPath = join(baseDir, entry)
         try {
-          return statSync(fullPath).isDirectory() && !entry.startsWith('.')
+          if (statSync(fullPath).isDirectory() && !entry.startsWith('.')) {
+            results.push({ name: entry, path: fullPath })
+          }
         } catch {
-          return false
+          // skip inaccessible entries
         }
-      })
-      .map((entry) => ({
-        name: entry,
-        path: join(baseDir, entry),
-      }))
-  } catch (error) {
-    throw new Error(
-      `Failed to scan projects directory "${baseDir}": ${error instanceof Error ? error.message : String(error)}`
-    )
+      }
+    } catch (error) {
+      console.warn(
+        `Warning: Failed to scan projects directory "${baseDir}": ${error instanceof Error ? error.message : String(error)}`
+      )
+    }
   }
+
+  return results
 }
 
 export function findProject(name: string): ProjectInfo | null {

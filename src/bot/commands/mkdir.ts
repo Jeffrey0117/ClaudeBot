@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { BotContext } from '../../types/context.js'
-import { env } from '../../config/env.js'
+import { getBaseDirs } from '../../config/projects.js'
 
 const VALID_NAME = /^[a-zA-Z0-9_\-\u4e00-\u9fff]+$/
 
@@ -27,7 +27,11 @@ export async function mkdirCommand(ctx: BotContext): Promise<void> {
     return
   }
 
-  const baseDir = resolve(env.PROJECTS_BASE_DIR)
+  const baseDir = getBaseDirs()[0]
+  if (!baseDir) {
+    await ctx.reply('❌ 未設定專案目錄。')
+    return
+  }
   const projectPath = join(baseDir, name)
 
   // Prevent path traversal
