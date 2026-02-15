@@ -3,8 +3,11 @@ import type { BotContext } from '../types/context.js'
 import type { QueueItem } from '../types/index.js'
 import { setProcessor } from '../claude/queue.js'
 import { runClaude, cancelRunning } from '../claude/claude-runner.js'
+import { existsSync } from 'node:fs'
+import { Input } from 'telegraf'
 import { cleanupImage } from '../utils/image-downloader.js'
 import { splitText } from '../utils/text-splitter.js'
+import { detectImagePaths } from '../utils/image-detector.js'
 
 const TIMEOUT_MS = 30 * 60 * 1000
 
@@ -110,21 +113,38 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
               { parse_mode: 'Markdown' }
             ).catch(() => {})
 
-            // Send response text as new message(s)
+            // Detect and send any image files mentioned in the response
             const responseText = result.resultText || accumulated || ''
-            if (!responseText) {
-              done()
-              return
+            const detectedImages = detectImagePaths(responseText)
+            const validImages = detectedImages.filter((p) => existsSync(p))
+
+            let imageChain = Promise.resolve()
+            for (const imgPath of validImages) {
+              imageChain = imageChain.then(() =>
+                telegram.sendPhoto(item.chatId, Input.fromLocalFile(imgPath), {
+                  caption: imgPath,
+                }).then(() => {})
+              ).catch((err) => {
+                console.error('[queue] sendPhoto error:', err)
+              })
             }
 
-            const chunks = splitText(responseText, 4096)
-            let chain = Promise.resolve()
-            for (const chunk of chunks) {
-              chain = chain.then(() =>
-                telegram.sendMessage(item.chatId, chunk).then(() => {})
-              )
-            }
-            chain.then(() => done()).catch(() => done())
+            // After images, send text response
+            imageChain.then(() => {
+              if (!responseText) {
+                done()
+                return
+              }
+
+              const chunks = splitText(responseText, 4096)
+              let chain = Promise.resolve()
+              for (const chunk of chunks) {
+                chain = chain.then(() =>
+                  telegram.sendMessage(item.chatId, chunk).then(() => {})
+                )
+              }
+              chain.then(() => done()).catch(() => done())
+            }).catch(() => done())
           } catch (err) {
             console.error('[queue] onResult error:', err)
             done()

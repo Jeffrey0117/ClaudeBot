@@ -20,6 +20,7 @@ import { shortcutCommand } from './commands/shortcut.js'
 import { todoCommand, todosCommand } from './commands/todo.js'
 import { mkdirCommand } from './commands/mkdir.js'
 import { cdCommand } from './commands/cd.js'
+import { screenshotCommand } from './commands/screenshot.js'
 import { promptCommand } from './commands/prompt.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
@@ -51,6 +52,7 @@ export function createBot(): Telegraf<BotContext> {
   bot.command('todos', todosCommand)
   bot.command('mkdir', mkdirCommand)
   bot.command('cd', cdCommand)
+  bot.command('screenshot', screenshotCommand)
   bot.command('prompt', promptCommand)
 
   // Bookmark shortcuts /1 through /9
