@@ -84,7 +84,7 @@ export function createBot(): Telegraf<BotContext> {
     { command: 'fav', description: '\u{7BA1}\u{7406}\u{66F8}\u{7C64}' },
     { command: 'todo', description: '\u{65B0}\u{589E}\u{5F85}\u{8FA6}' },
     { command: 'todos', description: '\u{67E5}\u{770B}\u{5F85}\u{8FA6}' },
-    { command: 'screenshot', description: '\u{622A}\u{53D6}\u{756B}\u{9762}' },
+    { command: 'screenshot', description: '\u{622A}\u{53D6}\u{756B}\u{9762} (1-9/list/URL)' },
     { command: 'help', description: '\u{986F}\u{793A}\u{8AAA}\u{660E}' },
   ]).catch(() => {})
 
