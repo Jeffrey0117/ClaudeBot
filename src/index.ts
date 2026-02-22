@@ -51,7 +51,7 @@ async function main(): Promise<void> {
     }
 
     // Handle failure
-    const is409 = launchError?.message.includes('409')
+    const is409 = (launchError as Error | null)?.message.includes('409')
     if (is409 && attempt < MAX_RETRIES) {
       const delay = attempt * 3
       console.log(`409 conflict (attempt ${attempt}/${MAX_RETRIES}), retrying in ${delay}s...`)

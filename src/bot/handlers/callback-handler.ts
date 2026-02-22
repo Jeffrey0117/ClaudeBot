@@ -3,6 +3,7 @@ import { findProject } from '../../config/projects.js'
 import { validateProjectPath } from '../../utils/path-validator.js'
 import { getUserState, setUserProject, setUserModel } from '../state.js'
 import { addBookmark, removeBookmark, getBookmarks } from '../bookmarks.js'
+import { updateBotBio, pinProjectStatus } from '../bio-updater.js'
 import { Markup } from 'telegraf'
 import type { ClaudeModel } from '../../types/index.js'
 
@@ -54,6 +55,9 @@ async function handleProjectSelect(ctx: BotContext, chatId: number, name: string
     { parse_mode: 'Markdown' }
   )
   await ctx.answerCbQuery()
+
+  await updateBotBio(project)
+  await pinProjectStatus(chatId, project, state.model)
 }
 
 async function handleModelSelect(ctx: BotContext, chatId: number, model: string): Promise<void> {

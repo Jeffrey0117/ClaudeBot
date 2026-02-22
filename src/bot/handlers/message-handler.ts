@@ -7,12 +7,40 @@ import { cancelRunning } from '../../claude/claude-runner.js'
 const COLLECT_MS = 1000
 const pendingMessages = new Map<number, { texts: string[]; timer: ReturnType<typeof setTimeout> }>()
 
+function extractMentionText(ctx: BotContext, rawText: string): string | null {
+  const isGroup = ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup'
+  if (!isGroup) return rawText
+
+  // In group: only respond if @mentioned
+  const botUsername = (ctx as unknown as { botInfo?: { username?: string } }).botInfo?.username
+  if (!botUsername) return null
+
+  const msg = ctx.message
+  if (!msg || !('entities' in msg) || !msg.entities) return null
+
+  const mentionEntity = msg.entities.find(
+    (e) => e.type === 'mention' &&
+      rawText.substring(e.offset, e.offset + e.length).toLowerCase() === `@${botUsername.toLowerCase()}`
+  )
+
+  if (!mentionEntity) return null
+
+  // Remove the @mention from the text
+  const before = rawText.substring(0, mentionEntity.offset)
+  const after = rawText.substring(mentionEntity.offset + mentionEntity.length)
+  return (before + after).trim()
+}
+
 export async function messageHandler(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
   if (!chatId) return
 
-  const text = (ctx.message && 'text' in ctx.message) ? ctx.message.text : ''
-  if (!text) return
+  const rawText = (ctx.message && 'text' in ctx.message) ? ctx.message.text : ''
+  if (!rawText) return
+
+  // In groups, only respond to @mentions; strip the mention from text
+  const text = extractMentionText(ctx, rawText)
+  if (text === null || !text) return
 
   // Unmatched commands: show hint instead of silently dropping
   if (text.startsWith('/')) {

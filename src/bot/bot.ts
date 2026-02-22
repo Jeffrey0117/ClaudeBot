@@ -26,6 +26,7 @@ import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
 import { setupQueueProcessor } from './queue-processor.js'
+import { setBotInstance } from './bio-updater.js'
 
 export function createBot(): Telegraf<BotContext> {
   const bot = new Telegraf<BotContext>(env.BOT_TOKEN)
@@ -72,6 +73,9 @@ export function createBot(): Telegraf<BotContext> {
 
   // Set up the queue processor
   setupQueueProcessor(bot)
+
+  // Store bot instance for bio updates
+  setBotInstance(bot)
 
   // Register commands with Telegram for autocomplete
   bot.telegram.setMyCommands([
