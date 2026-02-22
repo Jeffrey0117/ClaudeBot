@@ -10,7 +10,7 @@ const HELP_TEXT = `
 /status \u{2014} \u{67E5}\u{770B}\u{904B}\u{884C}\u{72C0}\u{614B}\u{8207}\u{4F47}\u{5217}
 /cancel \u{2014} \u{505C}\u{6B62}\u{76EE}\u{524D}\u{904B}\u{884C}\u{4E2D}\u{7684}\u{7A0B}\u{5E8F}
 /new \u{2014} \u{65B0}\u{5C0D}\u{8A71}\u{FF08}\u{6E05}\u{9664}\u{6B77}\u{53F2}\u{FF09}
-/fav \u{2014} \u{7BA1}\u{7406}\u{66F8}\u{7C64} | \`/fav add <\u{540D}\u{7A31}>\`
+/fav \u{2014} \u{66F8}\u{7C64}\u{5217}\u{8868} | \`add/rm/swap/list\`
 /mkdir \`<\u{540D}\u{7A31}>\` \u{2014} \u{5EFA}\u{7ACB}\u{65B0}\u{5C08}\u{6848}\u{8CC7}\u{6599}\u{593E}
 /cd \`<\u{8DEF}\u{5F91}>\` \u{2014} \u{5207}\u{63DB}\u{5DE5}\u{4F5C}\u{76EE}\u{9304}
 /screenshot \u{2014} \u{622A}\u{53D6}\u{684C}\u{9762}\u{756B}\u{9762}
