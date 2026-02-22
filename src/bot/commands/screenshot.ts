@@ -43,7 +43,7 @@ $bmp.Dispose()`
   try {
     await execFileAsync('powershell', [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
-    ], { timeout: 15_000 })
+    ], { timeout: 15_000, windowsHide: true })
   } finally {
     await unlink(scriptPath).catch(() => {})
   }

@@ -147,6 +147,7 @@ export function runClaude(options: RunOptions): void {
     cwd: validatedPath,
     shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   })
 
   console.log('[claude-runner] process spawned, pid:', proc.pid)
