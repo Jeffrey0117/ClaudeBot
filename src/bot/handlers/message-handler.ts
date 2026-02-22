@@ -12,7 +12,14 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
   if (!chatId) return
 
   const text = (ctx.message && 'text' in ctx.message) ? ctx.message.text : ''
-  if (!text || text.startsWith('/')) return
+  if (!text) return
+
+  // Unmatched commands: show hint instead of silently dropping
+  if (text.startsWith('/')) {
+    const cmd = text.split(/\s/)[0]
+    await ctx.reply(`\u{274C} \u{672A}\u{77E5}\u{6307}\u{4EE4} ${cmd}\u{3002}\u{7528} /help \u{67E5}\u{770B}\u{6240}\u{6709}\u{6307}\u{4EE4}\u{3002}`)
+    return
+  }
 
   const threadId = ctx.message?.message_thread_id
   const state = getUserState(chatId, threadId)
