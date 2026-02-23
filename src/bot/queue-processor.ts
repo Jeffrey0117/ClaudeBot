@@ -1,13 +1,15 @@
 import type { Telegraf } from 'telegraf'
 import type { BotContext } from '../types/context.js'
 import type { QueueItem } from '../types/index.js'
-import { setProcessor } from '../claude/queue.js'
+import { setProcessor, enqueue } from '../claude/queue.js'
 import { runClaude, cancelRunning } from '../claude/claude-runner.js'
 import { existsSync } from 'node:fs'
 import { Input } from 'telegraf'
 import { cleanupImage } from '../utils/image-downloader.js'
 import { splitText } from '../utils/text-splitter.js'
 import { detectImagePaths } from '../utils/image-detector.js'
+import { parseCrossProjectTasks } from '../utils/cross-project-parser.js'
+import { getSessionId } from '../claude/session-store.js'
 
 const TIMEOUT_MS = 30 * 60 * 1000
 
@@ -129,9 +131,10 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
               })
             }
 
-            // After images, send text response
+            // After images, send text response, then check for cross-project tasks
             imageChain.then(() => {
               if (!responseText) {
+                dispatchCrossProjectTasks(telegram, item, responseText)
                 done()
                 return
               }
@@ -143,7 +146,10 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
                   telegram.sendMessage(item.chatId, chunk).then(() => {})
                 )
               }
-              chain.then(() => done()).catch(() => done())
+              chain.then(() => {
+                dispatchCrossProjectTasks(telegram, item, responseText)
+                done()
+              }).catch(() => done())
             }).catch(() => done())
           } catch (err) {
             console.error('[queue] onResult error:', err)
@@ -171,4 +177,35 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       })
     })
   })
+}
+
+function dispatchCrossProjectTasks(
+  telegram: Telegraf<BotContext>['telegram'],
+  sourceItem: QueueItem,
+  responseText: string
+): void {
+  const tasks = parseCrossProjectTasks(responseText)
+  if (tasks.length === 0) return
+
+  for (const task of tasks) {
+    // Don't delegate to the same project
+    if (task.project.path === sourceItem.project.path) continue
+
+    const sessionId = getSessionId(task.project.path)
+
+    enqueue({
+      chatId: sourceItem.chatId,
+      prompt: task.prompt,
+      project: task.project,
+      model: sourceItem.model,
+      sessionId,
+      imagePaths: [],
+    })
+
+    telegram.sendMessage(
+      sourceItem.chatId,
+      `\u{1F916} *[${sourceItem.project.name}]* \u{81EA}\u{52D5}\u{59D4}\u{6D3E}\u{8DE8}\u{5C08}\u{6848}\u{4EFB}\u{52D9}\n\u{27A1}\u{FE0F} [${task.project.name}] ${task.prompt.slice(0, 100)}${task.prompt.length > 100 ? '...' : ''}`,
+      { parse_mode: 'Markdown' }
+    ).catch(() => {})
+  }
 }
