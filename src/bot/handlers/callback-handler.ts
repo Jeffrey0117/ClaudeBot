@@ -4,6 +4,9 @@ import { validateProjectPath } from '../../utils/path-validator.js'
 import { getUserState, setUserProject, setUserModel } from '../state.js'
 import { addBookmark, removeBookmark, getBookmarks } from '../bookmarks.js'
 import { updateBotBio, pinProjectStatus } from '../bio-updater.js'
+import { getSuggestion, clearSuggestions } from '../suggestion-store.js'
+import { enqueue } from '../../claude/queue.js'
+import { getSessionId } from '../../claude/session-store.js'
 import { Markup } from 'telegraf'
 import type { ClaudeModel } from '../../types/index.js'
 
@@ -16,7 +19,11 @@ export async function callbackHandler(ctx: BotContext): Promise<void> {
   const data = ctx.callbackQuery.data
   if (!data) return
 
-  if (data.startsWith('project:')) {
+  if (data.startsWith('confirm:')) {
+    await handleConfirm(ctx, chatId, data)
+  } else if (data.startsWith('suggest:')) {
+    await handleSuggestion(ctx, chatId, data)
+  } else if (data.startsWith('project:')) {
     await handleProjectSelect(ctx, chatId, data.slice('project:'.length))
   } else if (data.startsWith('model:')) {
     await handleModelSelect(ctx, chatId, data.slice('model:'.length))
@@ -103,6 +110,69 @@ async function handleBookmarkAdd(ctx: BotContext, chatId: number): Promise<void>
     { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) }
   )
   await ctx.answerCbQuery()
+}
+
+async function handleConfirm(ctx: BotContext, chatId: number, data: string): Promise<void> {
+  const answer = data === 'confirm:yes' ? '是，請繼續' : '不用了'
+
+  const msg = ctx.callbackQuery?.message
+  const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
+  const state = getUserState(chatId, threadId)
+
+  // Remove buttons
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {})
+  await ctx.answerCbQuery(`已回答: ${answer}`)
+
+  if (!state.selectedProject) {
+    await ctx.telegram.sendMessage(chatId, '⚠️ 尚未選擇專案')
+    return
+  }
+
+  const sessionId = getSessionId(state.selectedProject.path)
+
+  enqueue({
+    chatId,
+    prompt: answer,
+    project: state.selectedProject,
+    model: state.model,
+    sessionId,
+    imagePaths: [],
+  })
+}
+
+async function handleSuggestion(ctx: BotContext, chatId: number, data: string): Promise<void> {
+  const index = parseInt(data.slice('suggest:'.length), 10)
+
+  const msg = ctx.callbackQuery?.message
+  const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
+  const state = getUserState(chatId, threadId)
+
+  if (!state.selectedProject) {
+    await ctx.answerCbQuery('尚未選擇專案')
+    return
+  }
+
+  const suggestion = getSuggestion(chatId, state.selectedProject.path, index)
+  if (!suggestion) {
+    await ctx.answerCbQuery('建議已過期')
+    return
+  }
+
+  // Remove buttons
+  await ctx.editMessageText(`💡 → ${suggestion}`).catch(() => {})
+  await ctx.answerCbQuery()
+
+  const sessionId = getSessionId(state.selectedProject.path)
+  clearSuggestions(chatId, state.selectedProject.path)
+
+  enqueue({
+    chatId,
+    prompt: suggestion,
+    project: state.selectedProject,
+    model: state.model,
+    sessionId,
+    imagePaths: [],
+  })
 }
 
 async function handleBookmarkRemove(ctx: BotContext, chatId: number, slot: number): Promise<void> {

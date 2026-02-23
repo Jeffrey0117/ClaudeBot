@@ -124,8 +124,11 @@ export function runClaude(options: RunOptions): void {
     '--verbose',
     '--model',
     model,
-    '--dangerously-skip-permissions',
   ]
+
+  if (env.SKIP_PERMISSIONS) {
+    args.push('--dangerously-skip-permissions')
+  }
 
   const systemPrompt = getSystemPrompt()
   if (systemPrompt) {

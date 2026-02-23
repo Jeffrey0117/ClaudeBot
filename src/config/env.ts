@@ -28,6 +28,10 @@ const envSchema = z.object({
     .string()
     .default('')
     .transform((val) => val.split(',').map((s) => s.trim()).filter(Boolean)),
+  SKIP_PERMISSIONS: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((val) => val === 'true'),
   AUTO_AUTH: z
     .enum(['true', 'false'])
     .default('true')

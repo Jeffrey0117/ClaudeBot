@@ -4,13 +4,16 @@ import type { QueueItem } from '../types/index.js'
 import { setProcessor, setLockNotify, enqueue } from '../claude/queue.js'
 import { runClaude, cancelRunning } from '../claude/claude-runner.js'
 import { existsSync } from 'node:fs'
-import { Input } from 'telegraf'
+import { Input, Markup } from 'telegraf'
 import { cleanupImage } from '../utils/image-downloader.js'
 import { splitText } from '../utils/text-splitter.js'
 import { detectImagePaths } from '../utils/image-detector.js'
 import { parseCrossProjectTasks, stripRunDirectives } from '../utils/cross-project-parser.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
 import { getSessionId } from '../claude/session-store.js'
+import { detectQuestion } from '../utils/question-detector.js'
+import { generateSuggestions } from '../utils/suggestion-generator.js'
+import { setSuggestions } from './suggestion-store.js'
 
 const TIMEOUT_MS = 30 * 60 * 1000
 
@@ -169,7 +172,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
             }
 
             // After images, send text response, then check for cross-project tasks
-            imageChain.then(() => {
+            imageChain.then(async () => {
               // Dispatch cross-project tasks from raw text (before stripping)
               dispatchCrossProjectTasks(telegram, item, rawText)
 
@@ -178,14 +181,57 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
                 return
               }
 
+              // Layer 1: detect question → confirm buttons on last chunk
+              const isQuestion = detectQuestion(responseText)
+              const confirmButtons = isQuestion
+                ? Markup.inlineKeyboard([
+                    [
+                      Markup.button.callback('✅ 是 Yes', 'confirm:yes'),
+                      Markup.button.callback('❌ 否 No', 'confirm:no'),
+                    ],
+                  ])
+                : undefined
+
               const chunks = splitText(responseText, 4096)
               let chain = Promise.resolve()
-              for (const chunk of chunks) {
+              for (let i = 0; i < chunks.length; i++) {
+                const chunk = chunks[i]
+                const isLast = i === chunks.length - 1
                 chain = chain.then(() =>
-                  telegram.sendMessage(item.chatId, chunk).then(() => {})
+                  telegram.sendMessage(
+                    item.chatId,
+                    chunk,
+                    isLast && confirmButtons ? { ...confirmButtons } : undefined,
+                  ).then(() => {})
                 )
               }
-              chain.then(() => done()).catch(() => done())
+
+              await chain
+
+              // Layer 3: generate smart follow-up suggestions (async, non-blocking)
+              if (!isQuestion) {
+                generateSuggestions(responseText, item.project.name)
+                  .then(async (suggestions) => {
+                    if (suggestions.length === 0) return
+
+                    setSuggestions(item.chatId, item.project.path, suggestions)
+
+                    const buttons = Markup.inlineKeyboard(
+                      suggestions.map((s, i) => [
+                        Markup.button.callback(`${s}`, `suggest:${i}`),
+                      ])
+                    )
+
+                    await telegram.sendMessage(
+                      item.chatId,
+                      '💡 *建議下一步*',
+                      { parse_mode: 'Markdown', ...buttons },
+                    )
+                  })
+                  .catch(() => { /* silent fail */ })
+              }
+
+              done()
             }).catch(() => done())
           } catch (err) {
             console.error('[queue] onResult error:', err)
