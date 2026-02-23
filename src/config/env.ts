@@ -24,6 +24,10 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
   MAX_TURNS: z.coerce.number().int().positive().optional(),
+  PLUGINS: z
+    .string()
+    .default('')
+    .transform((val) => val.split(',').map((s) => s.trim()).filter(Boolean)),
   AUTO_AUTH: z
     .enum(['true', 'false'])
     .default('true')

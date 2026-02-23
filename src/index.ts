@@ -15,7 +15,7 @@ async function main(): Promise<void> {
   console.log(`Found ${projects.length} projects in ${env.PROJECTS_BASE_DIR.join(', ')}`)
   projects.forEach((p) => console.log(`  - ${p.name}`))
 
-  const bot = createBot()
+  const bot = await createBot()
 
   const shutdown = (signal: string) => {
     console.log(`\n${signal} received. Shutting down...`)

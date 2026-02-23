@@ -1,42 +1,50 @@
 import type { BotContext } from '../../types/context.js'
+import { getLoadedPlugins } from '../../plugins/loader.js'
 
-const HELP_TEXT = `
-*ClaudeBot* \u{2014} \u{624B}\u{6A5F}\u{9059}\u{63A7} Claude Code
+const CORE_HELP = `
+*ClaudeBot* \u{2014} 手機遙控 Claude Code
 
-\u{2500}\u{2500}\u{2500} *\u{6307}\u{4EE4}* \u{2500}\u{2500}\u{2500}
-/projects \u{2014} \u{700F}\u{89BD}\u{8207}\u{9078}\u{64C7}\u{5C08}\u{6848}
-/select \`<\u{540D}\u{7A31}>\` \u{2014} \u{5FEB}\u{901F}\u{5207}\u{63DB}\u{5C08}\u{6848}
-/model \u{2014} \u{5207}\u{63DB}\u{6A21}\u{578B} (haiku/sonnet/opus)
-/status \u{2014} \u{67E5}\u{770B}\u{904B}\u{884C}\u{72C0}\u{614B}\u{8207}\u{4F47}\u{5217}
-/cancel \u{2014} \u{505C}\u{6B62}\u{76EE}\u{524D}\u{904B}\u{884C}\u{4E2D}\u{7684}\u{7A0B}\u{5E8F}
-/new \u{2014} \u{65B0}\u{5C0D}\u{8A71}\u{FF08}\u{6E05}\u{9664}\u{6B77}\u{53F2}\u{FF09}
-/chat \u{2014} \u{901A}\u{7528}\u{5C0D}\u{8A71}\u{6A21}\u{5F0F}\u{FF08}\u{4E0D}\u{9700}\u{5C08}\u{6848}\u{FF09}
-/fav \u{2014} \u{66F8}\u{7C64}\u{5217}\u{8868} | \`add/rm/swap/list\`
-/mkdir \`<\u{540D}\u{7A31}>\` \u{2014} \u{5EFA}\u{7ACB}\u{65B0}\u{5C08}\u{6848}\u{8CC7}\u{6599}\u{593E}
-/cd \`<\u{8DEF}\u{5F91}>\` \u{2014} \u{5207}\u{63DB}\u{5DE5}\u{4F5C}\u{76EE}\u{9304}
-/screenshot \u{2014} \u{622A}\u{53D6}\u{5168}\u{90E8}\u{87A2}\u{5E55}
-/screenshot \`1\`\u{2013}\`9\` \u{2014} \u{622A}\u{53D6}\u{6307}\u{5B9A}\u{87A2}\u{5E55}
-/screenshot \`list\` \u{2014} \u{5217}\u{51FA}\u{53EF}\u{7528}\u{87A2}\u{5E55}
-/screenshot \`<URL>\` \u{2014} \u{622A}\u{53D6}\u{7DB2}\u{9801}\u{756B}\u{9762}
-/run \`<\u{5C08}\u{6848}>\` \`<\u{63D0}\u{793A}>\` \u{2014} \u{8DE8}\u{5C08}\u{6848}\u{57F7}\u{884C}
-/todo \`<\u{5167}\u{5BB9}>\` \u{2014} \u{65B0}\u{589E}\u{5F85}\u{8FA6}\u{4E8B}\u{9805}
-/todos \u{2014} \u{67E5}\u{770B}\u{76EE}\u{524D}\u{5C08}\u{6848}\u{7684}\u{5F85}\u{8FA6}
-/1\u{2013}/9 \u{2014} \u{5207}\u{63DB}\u{5230}\u{66F8}\u{7C64}\u{5C08}\u{6848}
-/help \u{2014} \u{986F}\u{793A}\u{6B64}\u{8AAA}\u{660E}
+\u{2500}\u{2500}\u{2500} *指令* \u{2500}\u{2500}\u{2500}
+/projects \u{2014} 瀏覽與選擇專案
+/select \`<名稱>\` \u{2014} 快速切換專案
+/model \u{2014} 切換模型 (haiku/sonnet/opus)
+/status \u{2014} 查看運行狀態與佇列
+/cancel \u{2014} 停止目前運行中的程序
+/new \u{2014} 新對話（清除歷史）
+/chat \u{2014} 通用對話模式（不需專案）
+/fav \u{2014} 書籤列表 | \`add/rm/swap/list\`
+/mkdir \`<名稱>\` \u{2014} 建立新專案資料夾
+/cd \`<路徑>\` \u{2014} 切換工作目錄
+/run \`<專案>\` \`<提示>\` \u{2014} 跨專案執行
+/todo \`<內容>\` \u{2014} 新增待辦事項
+/todos \u{2014} 查看目前專案的待辦
+/1\u{2013}/9 \u{2014} 切換到書籤專案
+/help \u{2014} 顯示此說明`.trim()
 
-\u{2500}\u{2500}\u{2500} *\u{529F}\u{80FD}\u{7279}\u{8272}* \u{2500}\u{2500}\u{2500}
-\u{1F4AC} *\u{5373}\u{6642}\u{4E32}\u{6D41}* \u{2014} \u{5373}\u{6642}\u{67E5}\u{770B}\u{56DE}\u{61C9}
-\u{1F527} *\u{5DE5}\u{5177}\u{8FFD}\u{8E64}* \u{2014} \u{5373}\u{6642}\u{986F}\u{793A}\u{5DE5}\u{5177}\u{4F7F}\u{7528}\u{6B21}\u{6578}
-\u{1F4DD} *\u{8A0A}\u{606F}\u{5408}\u{4F75}* \u{2014} \u{5FEB}\u{901F}\u{9023}\u{767C}\u{81EA}\u{52D5}\u{5408}\u{4F75} (2\u{79D2})
-\u{26A1} *\u{4E26}\u{884C}\u{8655}\u{7406}* \u{2014} \u{591A}\u{5C08}\u{6848}\u{540C}\u{6642}\u{904B}\u{884C}
-\u{1F504} *\u{8F49}\u{5411}\u{6A21}\u{5F0F}* \u{2014} \u{524D}\u{7DB4} \`!\` \u{53D6}\u{6D88}\u{76EE}\u{524D}\u{4E26}\u{91CD}\u{65B0}\u{63D0}\u{554F}
+const FEATURES_HELP = `
+\u{2500}\u{2500}\u{2500} *功能特色* \u{2500}\u{2500}\u{2500}
+💬 *即時串流* \u{2014} 即時查看回應
+🔧 *工具追蹤* \u{2014} 即時顯示工具使用次數
+📝 *訊息合併* \u{2014} 快速連發自動合併 (2秒)
+⚡ *並行處理* \u{2014} 多專案同時運行
+🔄 *轉向模式* \u{2014} 前綴 \`!\` 取消目前並重新提問
 
-\u{2500}\u{2500}\u{2500} *\u{5FEB}\u{901F}\u{958B}\u{59CB}* \u{2500}\u{2500}\u{2500}
-1. /projects \u{2192} \u{9078}\u{64C7}\u{5C08}\u{6848}
-2. \u{8F38}\u{5165}\u{4F60}\u{7684}\u{63D0}\u{793A}
-3. \u{5373}\u{6642}\u{770B} Claude \u{5DE5}\u{4F5C}
-`.trim()
+\u{2500}\u{2500}\u{2500} *快速開始* \u{2500}\u{2500}\u{2500}
+1. /projects → 選擇專案
+2. 輸入你的提示
+3. 即時看 Claude 工作`.trim()
 
 export async function helpCommand(ctx: BotContext): Promise<void> {
-  await ctx.reply(HELP_TEXT, { parse_mode: 'Markdown' })
+  const plugins = getLoadedPlugins()
+
+  let pluginSection = ''
+  if (plugins.length > 0) {
+    const lines = plugins.flatMap((p) =>
+      p.commands.map((cmd) => `/${cmd.name} \u{2014} ${cmd.description}`)
+    )
+    pluginSection = `\n\n\u{2500}\u{2500}\u{2500} *插件* \u{2500}\u{2500}\u{2500}\n${lines.join('\n')}`
+  }
+
+  const text = `${CORE_HELP}${pluginSection}\n\n${FEATURES_HELP}`
+  await ctx.reply(text, { parse_mode: 'Markdown' })
 }

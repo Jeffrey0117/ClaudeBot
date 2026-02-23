@@ -20,7 +20,6 @@ import { shortcutCommand } from './commands/shortcut.js'
 import { todoCommand, todosCommand } from './commands/todo.js'
 import { mkdirCommand } from './commands/mkdir.js'
 import { cdCommand } from './commands/cd.js'
-import { screenshotCommand } from './commands/screenshot.js'
 import { promptCommand } from './commands/prompt.js'
 import { runCommand } from './commands/run.js'
 import { chatCommand } from './commands/chat.js'
@@ -29,8 +28,9 @@ import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
 import { setupQueueProcessor } from './queue-processor.js'
 import { setBotInstance } from './bio-updater.js'
+import { loadPlugins, getLoadedPlugins } from '../plugins/loader.js'
 
-export function createBot(): Telegraf<BotContext> {
+export async function createBot(): Promise<Telegraf<BotContext>> {
   const bot = new Telegraf<BotContext>(env.BOT_TOKEN)
 
   // Middleware (order matters)
@@ -39,7 +39,7 @@ export function createBot(): Telegraf<BotContext> {
   bot.use(rateLimitMiddleware())
   bot.use(authMiddleware())
 
-  // Commands
+  // Core commands
   bot.command('start', startCommand)
   bot.command('login', loginCommand)
   bot.command('logout', logoutCommand)
@@ -55,7 +55,6 @@ export function createBot(): Telegraf<BotContext> {
   bot.command('todos', todosCommand)
   bot.command('mkdir', mkdirCommand)
   bot.command('cd', cdCommand)
-  bot.command('screenshot', screenshotCommand)
   bot.command('prompt', promptCommand)
   bot.command('run', runCommand)
   bot.command('chat', chatCommand)
@@ -63,6 +62,35 @@ export function createBot(): Telegraf<BotContext> {
   // Bookmark shortcuts /1 through /9
   for (let i = 1; i <= 9; i++) {
     bot.command(String(i), shortcutCommand)
+  }
+
+  // Load and register plugins
+  const plugins = await loadPlugins(env.PLUGINS)
+  for (const plugin of plugins) {
+    for (const cmd of plugin.commands) {
+      bot.command(cmd.name, cmd.handler)
+    }
+  }
+
+  // Wire plugin-specific integrations
+  const reminderPlugin = plugins.find((p) => p.name === 'reminder')
+  if (reminderPlugin) {
+    const { setReminderSendFn } = await import('../plugins/reminder/index.js')
+    setReminderSendFn(async (chatId, text) => {
+      await bot.telegram.sendMessage(chatId, text, { parse_mode: 'Markdown' })
+    })
+  }
+
+  // Plugin message interceptors (before default handler)
+  const pluginsWithMessage = plugins.filter((p) => p.onMessage)
+  if (pluginsWithMessage.length > 0) {
+    bot.on('text', async (ctx, next) => {
+      for (const plugin of pluginsWithMessage) {
+        const handled = await plugin.onMessage!(ctx)
+        if (handled) return
+      }
+      return next()
+    })
   }
 
   // Callback queries (inline keyboard)
@@ -81,22 +109,27 @@ export function createBot(): Telegraf<BotContext> {
   // Store bot instance for bio updates
   setBotInstance(bot)
 
-  // Register commands with Telegram for autocomplete
-  bot.telegram.setMyCommands([
-    { command: 'projects', description: '\u{700F}\u{89BD}\u{8207}\u{9078}\u{64C7}\u{5C08}\u{6848}' },
-    { command: 'select', description: '\u{5FEB}\u{901F}\u{5207}\u{63DB}\u{5C08}\u{6848}' },
-    { command: 'model', description: '\u{5207}\u{63DB}\u{6A21}\u{578B}' },
-    { command: 'status', description: '\u{67E5}\u{770B}\u{904B}\u{884C}\u{72C0}\u{614B}' },
-    { command: 'cancel', description: '\u{505C}\u{6B62}\u{76EE}\u{524D}\u{7A0B}\u{5E8F}' },
-    { command: 'new', description: '\u{65B0}\u{5C0D}\u{8A71}' },
-    { command: 'fav', description: '\u{7BA1}\u{7406}\u{66F8}\u{7C64}' },
-    { command: 'todo', description: '\u{65B0}\u{589E}\u{5F85}\u{8FA6}' },
-    { command: 'todos', description: '\u{67E5}\u{770B}\u{5F85}\u{8FA6}' },
-    { command: 'run', description: '\u{8DE8}\u{5C08}\u{6848}\u{57F7}\u{884C}' },
-    { command: 'chat', description: '\u{901A}\u{7528}\u{5C0D}\u{8A71}\u{6A21}\u{5F0F}' },
-    { command: 'screenshot', description: '\u{622A}\u{53D6}\u{756B}\u{9762} (1-9/list/URL)' },
-    { command: 'help', description: '\u{986F}\u{793A}\u{8AAA}\u{660E}' },
-  ]).catch(() => {})
+  // Register commands with Telegram for autocomplete (core + plugins)
+  const coreCommands = [
+    { command: 'projects', description: '瀏覽與選擇專案' },
+    { command: 'select', description: '快速切換專案' },
+    { command: 'model', description: '切換模型' },
+    { command: 'status', description: '查看運行狀態' },
+    { command: 'cancel', description: '停止目前程序' },
+    { command: 'new', description: '新對話' },
+    { command: 'fav', description: '管理書籤' },
+    { command: 'todo', description: '新增待辦' },
+    { command: 'todos', description: '查看待辦' },
+    { command: 'run', description: '跨專案執行' },
+    { command: 'chat', description: '通用對話模式' },
+    { command: 'help', description: '顯示說明' },
+  ]
+
+  const pluginCommands = plugins.flatMap((p) =>
+    p.commands.map((cmd) => ({ command: cmd.name, description: cmd.description }))
+  )
+
+  bot.telegram.setMyCommands([...coreCommands, ...pluginCommands]).catch(() => {})
 
   return bot
 }
