@@ -38,13 +38,11 @@ async function fetchReelScriptSnippet(): Promise<TidbitEntry | null> {
       const words = data.vocabulary.slice(0, 3)
         .map((v) => `  • *${v.word}* — ${v.translation}`)
         .join('\n')
-      lines.push(`\n📝 單字:\n${words}`)
+      lines.push(`\n${words}`)
     }
 
-    lines.push(`\n🎬 ${data.videoTitle}`)
-
     return {
-      category: '英語學習',
+      category: data.videoTitle,
       emoji: '🎧',
       text: lines.join('\n'),
     }
