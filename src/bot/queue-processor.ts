@@ -45,6 +45,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       }
 
       let tidbitTimer: ReturnType<typeof setTimeout> | null = null
+      const tidbitMsgIds: number[] = []
 
       const done = () => {
         if (resolved) return
@@ -52,6 +53,10 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         clearInterval(typingInterval)
         clearInterval(tickInterval)
         if (tidbitTimer) clearTimeout(tidbitTimer)
+        // Delete all tidbit messages
+        for (const msgId of tidbitMsgIds) {
+          telegram.deleteMessage(item.chatId, msgId).catch(() => {})
+        }
         cleanupImages()
         resolve()
       }
@@ -94,7 +99,9 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       tidbitTimer = setTimeout(function sendTidbit() {
         if (resolved) return
         const tidbit = getRandomTidbit()
-        telegram.sendMessage(item.chatId, tidbit).catch(() => {})
+        telegram.sendMessage(item.chatId, tidbit, { parse_mode: 'Markdown' })
+          .then((msg) => { tidbitMsgIds.push(msg.message_id) })
+          .catch(() => {})
         tidbitTimer = setTimeout(sendTidbit, TIDBIT_INTERVAL_MS)
       }, TIDBIT_DELAY_MS)
 
