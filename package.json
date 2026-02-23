@@ -13,6 +13,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "bcrypt": "^5.1.1",
     "dotenv": "^16.4.0",
     "playwright": "^1.58.2",
