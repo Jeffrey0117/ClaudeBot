@@ -22,24 +22,32 @@ async function searchDuckDuckGo(query: string): Promise<readonly SearchResult[]>
   const html = await response.text()
   const results: SearchResult[] = []
 
-  // Parse DuckDuckGo lite HTML results
-  const resultBlocks = html.split('class="result__body"')
+  // Parse DuckDuckGo HTML results — split on result__body (partial class match)
+  const resultBlocks = html.split('result__body')
   for (const block of resultBlocks.slice(1, 6)) {
     const titleMatch = block.match(/class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/)
-    const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\//)
+    const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/)
 
     if (titleMatch) {
       const rawUrl = titleMatch[1]
       // DuckDuckGo wraps URLs in redirect — extract actual URL
-      const actualUrl = decodeURIComponent(
-        rawUrl.replace(/.*uddg=([^&]*).*/, '$1') || rawUrl,
-      )
+      const uddgMatch = rawUrl.match(/uddg=([^&]+)/)
+      const actualUrl = uddgMatch
+        ? decodeURIComponent(uddgMatch[1])
+        : rawUrl.replace(/^\/\//, 'https://')
       const title = titleMatch[2].replace(/<[^>]*>/g, '').trim()
       const snippet = snippetMatch
-        ? snippetMatch[1].replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').trim()
+        ? snippetMatch[1]
+            .replace(/<[^>]*>/g, '')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#x27;/g, "'")
+            .trim()
         : ''
 
-      if (title && actualUrl) {
+      if (title && actualUrl.startsWith('http')) {
         results.push({ title, url: actualUrl, snippet })
       }
     }
@@ -65,17 +73,16 @@ async function searchCommand(ctx: BotContext): Promise<void> {
       return
     }
 
-    const lines = [`🔍 *${query}*`, '']
+    const lines: string[] = []
     for (const [i, r] of results.entries()) {
-      lines.push(`${i + 1}. [${r.title}](${r.url})`)
-      if (r.snippet) {
-        lines.push(`   _${r.snippet.slice(0, 120)}${r.snippet.length > 120 ? '...' : ''}_`)
-      }
+      const snippet = r.snippet.slice(0, 150)
+      lines.push(`${i + 1}. ${r.title}`)
+      if (snippet) lines.push(`   ${snippet}${r.snippet.length > 150 ? '...' : ''}`)
+      lines.push(`   ${r.url}`)
       lines.push('')
     }
 
-    await ctx.reply(lines.join('\n'), {
-      parse_mode: 'Markdown',
+    await ctx.reply(`🔍 ${query}\n\n${lines.join('\n')}`, {
       link_preview_options: { is_disabled: true },
     })
   } catch (error) {
