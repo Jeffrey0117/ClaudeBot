@@ -21,6 +21,7 @@ const envSchema = z.object({
     .min(1, 'PROJECTS_BASE_DIR is required')
     .transform((val) => val.split(',').map((d) => d.trim()).filter(Boolean)),
   DEFAULT_MODEL: z.enum(['haiku', 'sonnet', 'opus']).default('sonnet'),
+  GEMINI_API_KEY: z.string().default(''),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
   MAX_TURNS: z.coerce.number().int().positive().optional(),

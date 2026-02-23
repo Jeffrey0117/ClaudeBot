@@ -7,7 +7,7 @@ const CORE_HELP = `
 \u{2500}\u{2500}\u{2500} *指令* \u{2500}\u{2500}\u{2500}
 /projects \u{2014} 瀏覽與選擇專案
 /select \`<名稱>\` \u{2014} 快速切換專案
-/model \u{2014} 切換模型 (haiku/sonnet/opus)
+/model \u{2014} 切換 AI 後端與模型
 /status \u{2014} 查看運行狀態與佇列
 /cancel \u{2014} 停止目前運行中的程序
 /new \u{2014} 新對話（清除歷史）

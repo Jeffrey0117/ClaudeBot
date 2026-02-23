@@ -2,7 +2,7 @@ import type { Telegraf } from 'telegraf'
 import type { BotContext } from '../types/context.js'
 import type { QueueItem } from '../types/index.js'
 import { setProcessor, setLockNotify, enqueue } from '../claude/queue.js'
-import { runClaude, cancelRunning } from '../claude/claude-runner.js'
+import { getRunner, cancelAnyRunning } from '../ai/registry.js'
 import { existsSync } from 'node:fs'
 import { Input, Markup } from 'telegraf'
 import { cleanupImage } from '../utils/image-downloader.js'
@@ -10,10 +10,13 @@ import { splitText } from '../utils/text-splitter.js'
 import { detectImagePaths } from '../utils/image-detector.js'
 import { parseCrossProjectTasks, stripRunDirectives } from '../utils/cross-project-parser.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
-import { getSessionId } from '../claude/session-store.js'
+import { getAISessionId } from '../ai/session-store.js'
 import { detectQuestion } from '../utils/question-detector.js'
 import { generateSuggestions } from '../utils/suggestion-generator.js'
 import { setSuggestions } from './suggestion-store.js'
+import { formatAILabel } from '../ai/types.js'
+import type { AIModelSelection } from '../ai/types.js'
+import { autoRoute } from '../ai/router.js'
 
 const TIMEOUT_MS = 30 * 60 * 1000
 
@@ -32,11 +35,17 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
   setProcessor(async (item: QueueItem) => {
     const { telegram } = bot
     const tag = item.project.name
+    // Resolve 'auto' backend using the router
+    const resolvedAI: AIModelSelection = item.ai.backend === 'auto'
+      ? autoRoute(item.prompt, true)
+      : item.ai
+    const aiLabel = formatAILabel(resolvedAI)
+    const backend = resolvedAI.backend
 
     // Status message: only shows processing progress, never the response text
     const statusMsg = await telegram.sendMessage(
       item.chatId,
-      `\u{1F680} *[${tag}]* \u{8655}\u{7406}\u{4E2D}...\n_\u{6A21}\u{578B}: ${item.model}_`,
+      `\u{1F680} *[${tag}]* \u{8655}\u{7406}\u{4E2D}...\n_${aiLabel}_`,
       { parse_mode: 'Markdown' }
     )
 
@@ -78,7 +87,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
 
       const timer = setTimeout(() => {
         if (resolved) return
-        cancelRunning(item.project.path)
+        cancelAnyRunning(item.project.path)
         telegram.editMessageText(
           item.chatId, statusMsg.message_id, undefined,
           `\u{23F0} *[${tag}]* \u{903E}\u{6642} (30 \u{5206}\u{9418})`,
@@ -95,7 +104,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         const toolInfo = toolCount > 0
           ? `\n\u{1F527} Tools: ${toolCount} (${[...new Set(toolNames)].slice(-4).join(', ')})`
           : ''
-        const status = `\u{1F680} *[${tag}]* ${elapsed}s${toolInfo}`
+        const status = `\u{1F680} *[${tag}]* ${elapsed}s | ${aiLabel}${toolInfo}`
         if (status === lastStatusText) return
         lastStatusText = status
         telegram.editMessageText(
@@ -134,10 +143,11 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         }
       }, TIDBIT_DELAY_MS)
 
-      runClaude({
+      const runner = getRunner(backend)
+      runner.run({
         prompt: item.prompt,
         projectPath: item.project.path,
-        model: item.model,
+        model: resolvedAI.model,
         sessionId: item.sessionId,
         imagePaths: item.imagePaths,
         onTextDelta: (_delta, acc) => {
@@ -162,7 +172,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
             // Update status to "Done" summary
             telegram.editMessageText(
               item.chatId, statusMsg.message_id, undefined,
-              `\u{2705} *[${tag}]* \u{5B8C}\u{6210} | $${cost} | ${totalTime}\u{79D2}${toolSummary}`,
+              `\u{2705} *[${tag}]* \u{5B8C}\u{6210} | ${aiLabel} | $${cost} | ${totalTime}\u{79D2}${toolSummary}`,
               { parse_mode: 'Markdown' }
             ).catch(() => {})
 
@@ -285,13 +295,16 @@ function dispatchCrossProjectTasks(
     // Don't delegate to the same project
     if (task.project.path === sourceItem.project.path) continue
 
-    const sessionId = getSessionId(task.project.path)
+    const sessionId = getAISessionId(
+      sourceItem.ai.backend === 'auto' ? 'claude' : sourceItem.ai.backend,
+      task.project.path,
+    )
 
     enqueue({
       chatId: sourceItem.chatId,
       prompt: task.prompt,
       project: task.project,
-      model: sourceItem.model,
+      ai: sourceItem.ai,
       sessionId,
       imagePaths: [],
     })

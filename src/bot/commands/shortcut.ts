@@ -2,6 +2,7 @@ import type { BotContext } from '../../types/context.js'
 import { getBookmark } from '../bookmarks.js'
 import { validateProjectPath } from '../../utils/path-validator.js'
 import { setUserProject, getUserState } from '../state.js'
+import { formatAILabel } from '../../ai/types.js'
 
 export async function shortcutCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -32,7 +33,7 @@ export async function shortcutCommand(ctx: BotContext): Promise<void> {
   const state = getUserState(chatId, threadId)
 
   await ctx.reply(
-    `\u{2705} \u{5DF2}\u{5207}\u{63DB}\u{5230} *${project.name}*\n\u{6A21}\u{578B}: ${state.model}`,
+    `\u{2705} \u{5DF2}\u{5207}\u{63DB}\u{5230} *${project.name}*\n\u{6A21}\u{578B}: ${formatAILabel(state.ai)}`,
     { parse_mode: 'Markdown' }
   )
 }

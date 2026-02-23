@@ -1,6 +1,7 @@
 import type { BotContext } from '../../types/context.js'
+import type { AIBackend } from '../../types/index.js'
 import { getUserState } from '../state.js'
-import { getSessionId } from '../../claude/session-store.js'
+import { getAISessionId } from '../../ai/session-store.js'
 import { enqueue } from '../../claude/queue.js'
 import { downloadImage } from '../../utils/image-downloader.js'
 
@@ -13,6 +14,10 @@ const IMAGE_MIME_TYPES = new Set([
 ])
 
 const DEFAULT_PROMPT = '請分析這張圖片'
+
+function resolveBackend(backend: AIBackend): AIBackend {
+  return backend === 'auto' ? 'claude' : backend
+}
 
 export async function photoHandler(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -38,7 +43,7 @@ export async function photoHandler(ctx: BotContext): Promise<void> {
 
   const caption = message.caption || ''
   const prompt = caption || DEFAULT_PROMPT
-  const sessionId = getSessionId(project.path)
+  const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
 
   try {
     const fileLink = await ctx.telegram.getFileLink(fileId)
@@ -49,7 +54,7 @@ export async function photoHandler(ctx: BotContext): Promise<void> {
       chatId,
       prompt,
       project,
-      model: state.model,
+      ai: state.ai,
       sessionId,
       imagePaths: [imagePath],
     })
@@ -82,7 +87,7 @@ export async function documentHandler(ctx: BotContext): Promise<void> {
   const project = state.selectedProject
   const caption = ('caption' in message ? message.caption : '') || ''
   const prompt = caption || DEFAULT_PROMPT
-  const sessionId = getSessionId(project.path)
+  const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
 
   try {
     const fileLink = await ctx.telegram.getFileLink(fileId)
@@ -93,7 +98,7 @@ export async function documentHandler(ctx: BotContext): Promise<void> {
       chatId,
       prompt,
       project,
-      model: state.model,
+      ai: state.ai,
       sessionId,
       imagePaths: [imagePath],
     })

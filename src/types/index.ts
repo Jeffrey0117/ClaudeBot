@@ -1,4 +1,9 @@
+import type { AIModelSelection, AIResult } from '../ai/types.js'
+
 export type ClaudeModel = 'haiku' | 'sonnet' | 'opus'
+
+export type { AIModelSelection, AIResult }
+export type { AIBackend } from '../ai/types.js'
 
 export interface ProjectInfo {
   readonly name: string
@@ -9,14 +14,14 @@ export interface UserSession {
   readonly chatId: number
   readonly authenticated: boolean
   readonly selectedProject: ProjectInfo | null
-  readonly model: ClaudeModel
+  readonly ai: AIModelSelection
 }
 
 export interface QueueItem {
   readonly chatId: number
   readonly prompt: string
   readonly project: ProjectInfo
-  readonly model: ClaudeModel
+  readonly ai: AIModelSelection
   readonly sessionId: string | null
   readonly imagePaths: readonly string[]
 }

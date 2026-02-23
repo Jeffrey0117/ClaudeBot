@@ -1,8 +1,9 @@
 import type { BotContext } from '../../types/context.js'
+import type { AIBackend } from '../../types/index.js'
 import { getUserState } from '../state.js'
-import { getSessionId } from '../../claude/session-store.js'
+import { getAISessionId } from '../../ai/session-store.js'
 import { enqueue, isProcessing, getQueueLength } from '../../claude/queue.js'
-import { cancelRunning } from '../../claude/claude-runner.js'
+import { cancelAnyRunning } from '../../ai/registry.js'
 
 const COLLECT_MS = 1000
 const pendingMessages = new Map<number, { texts: string[]; timer: ReturnType<typeof setTimeout> }>()
@@ -29,6 +30,10 @@ function extractMentionText(ctx: BotContext, rawText: string): string | null {
   const before = rawText.substring(0, mentionEntity.offset)
   const after = rawText.substring(mentionEntity.offset + mentionEntity.length)
   return (before + after).trim()
+}
+
+function resolveBackend(backend: AIBackend): AIBackend {
+  return backend === 'auto' ? 'claude' : backend
 }
 
 export async function messageHandler(ctx: BotContext): Promise<void> {
@@ -58,12 +63,12 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
     const chatPrompt = chatMatch[1].replace(/^\(|\)$/g, '').trim()
     if (chatPrompt) {
       const generalProject = { name: 'general', path: process.cwd() }
-      const sessionId = getSessionId(generalProject.path)
+      const sessionId = getAISessionId(resolveBackend(state.ai.backend), generalProject.path)
       enqueue({
         chatId,
         prompt: chatPrompt,
         project: generalProject,
-        model: state.model,
+        ai: state.ai,
         sessionId,
         imagePaths: [],
       })
@@ -93,13 +98,13 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
       await ctx.reply('\u{7528}\u{6CD5}: !<\u{8A0A}\u{606F}> \u{53D6}\u{6D88}\u{76EE}\u{524D}\u{4E26}\u{50B3}\u{9001}\u{65B0}\u{63D0}\u{793A}')
       return
     }
-    cancelRunning(project.path)
-    const sessionId = getSessionId(project.path)
+    cancelAnyRunning(project.path)
+    const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
     enqueue({
       chatId,
       prompt: steerText,
       project,
-      model: state.model,
+      ai: state.ai,
       sessionId,
       imagePaths: [],
     })
@@ -128,6 +133,10 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
   }
 }
 
+function resolveBackendForFlush(backend: AIBackend): AIBackend {
+  return backend === 'auto' ? 'claude' : backend
+}
+
 function flushMessages(chatId: number, threadId?: number): void {
   const pending = pendingMessages.get(chatId)
   if (!pending) return
@@ -137,14 +146,14 @@ function flushMessages(chatId: number, threadId?: number): void {
   if (!state.selectedProject) return
 
   const project = state.selectedProject
-  const sessionId = getSessionId(project.path)
+  const sessionId = getAISessionId(resolveBackendForFlush(state.ai.backend), project.path)
   const combined = pending.texts.join('\n\n')
 
   enqueue({
     chatId,
     prompt: combined,
     project,
-    model: state.model,
+    ai: state.ai,
     sessionId,
     imagePaths: [],
   })

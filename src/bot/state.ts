@@ -1,9 +1,9 @@
-import type { ClaudeModel, ProjectInfo } from '../types/index.js'
+import type { ProjectInfo, AIModelSelection } from '../types/index.js'
 import { env } from '../config/env.js'
 
 interface UserState {
   selectedProject: ProjectInfo | null
-  model: ClaudeModel
+  ai: AIModelSelection
 }
 
 const userStates = new Map<string, UserState>()
@@ -19,7 +19,7 @@ export function getUserState(chatId: number, threadId?: number): Readonly<UserSt
   if (!state) {
     state = {
       selectedProject: null,
-      model: env.DEFAULT_MODEL,
+      ai: { backend: 'auto', model: env.DEFAULT_MODEL },
     }
     userStates.set(key, state)
   }
@@ -32,10 +32,10 @@ export function setUserProject(chatId: number, project: ProjectInfo, threadId?: 
   userStates.set(key, { ...state, selectedProject: project })
 }
 
-export function setUserModel(chatId: number, model: ClaudeModel, threadId?: number): void {
+export function setUserAI(chatId: number, ai: AIModelSelection, threadId?: number): void {
   const key = sessionKey(chatId, threadId)
   const state = getUserState(chatId, threadId)
-  userStates.set(key, { ...state, model })
+  userStates.set(key, { ...state, ai })
 }
 
 export function clearUserState(chatId: number, threadId?: number): void {

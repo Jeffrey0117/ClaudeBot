@@ -1,16 +1,15 @@
 import type { BotContext } from '../../types/context.js'
 import { findProject } from '../../config/projects.js'
 import { validateProjectPath } from '../../utils/path-validator.js'
-import { getUserState, setUserProject, setUserModel } from '../state.js'
+import { getUserState, setUserProject, setUserAI } from '../state.js'
 import { addBookmark, removeBookmark, getBookmarks } from '../bookmarks.js'
 import { updateBotBio, pinProjectStatus } from '../bio-updater.js'
 import { getSuggestion, clearSuggestions } from '../suggestion-store.js'
 import { enqueue } from '../../claude/queue.js'
-import { getSessionId } from '../../claude/session-store.js'
+import { getAISessionId } from '../../ai/session-store.js'
 import { Markup } from 'telegraf'
-import type { ClaudeModel } from '../../types/index.js'
-
-const VALID_MODELS = new Set<ClaudeModel>(['haiku', 'sonnet', 'opus'])
+import type { AIModelSelection } from '../../types/index.js'
+import { formatAILabel } from '../../ai/types.js'
 
 export async function callbackHandler(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -25,8 +24,11 @@ export async function callbackHandler(ctx: BotContext): Promise<void> {
     await handleSuggestion(ctx, chatId, data)
   } else if (data.startsWith('project:')) {
     await handleProjectSelect(ctx, chatId, data.slice('project:'.length))
+  } else if (data.startsWith('ai:')) {
+    await handleAISelect(ctx, chatId, data.slice('ai:'.length))
   } else if (data.startsWith('model:')) {
-    await handleModelSelect(ctx, chatId, data.slice('model:'.length))
+    // Backward compat: old model:xxx callbacks → translate to ai:claude:xxx
+    await handleAISelect(ctx, chatId, `claude:${data.slice('model:'.length)}`)
   } else if (data === 'bookmark:add') {
     await handleBookmarkAdd(ctx, chatId)
   } else if (data.startsWith('bookmark:remove:')) {
@@ -58,26 +60,30 @@ async function handleProjectSelect(ctx: BotContext, chatId: number, name: string
   const state = getUserState(chatId, threadId)
 
   await ctx.editMessageText(
-    `\u{2705} \u{5DF2}\u{9078}\u{64C7}: *${project.name}*\n\u{6A21}\u{578B}: ${state.model}\n\n\u{50B3}\u{9001}\u{8A0A}\u{606F}\u{958B}\u{59CB}\u{8207} Claude \u{5C0D}\u{8A71}\u{3002}`,
+    `\u{2705} \u{5DF2}\u{9078}\u{64C7}: *${project.name}*\n\u{6A21}\u{578B}: ${formatAILabel(state.ai)}\n\n\u{50B3}\u{9001}\u{8A0A}\u{606F}\u{958B}\u{59CB}\u{5C0D}\u{8A71}\u{3002}`,
     { parse_mode: 'Markdown' }
   )
   await ctx.answerCbQuery()
 
   await updateBotBio(project)
-  await pinProjectStatus(chatId, project, state.model)
+  await pinProjectStatus(chatId, project, formatAILabel(state.ai))
 }
 
-async function handleModelSelect(ctx: BotContext, chatId: number, model: string): Promise<void> {
-  if (!VALID_MODELS.has(model as ClaudeModel)) {
-    await ctx.answerCbQuery('\u{7121}\u{6548}\u{7684}\u{6A21}\u{578B}')
+async function handleAISelect(ctx: BotContext, chatId: number, payload: string): Promise<void> {
+  // payload format: "auto:auto" or "claude:sonnet" or "gemini:flash"
+  const parts = payload.split(':')
+  if (parts.length !== 2) {
+    await ctx.answerCbQuery('\u{7121}\u{6548}\u{7684}\u{9078}\u{64C7}')
     return
   }
+  const [backend, model] = parts
+  const ai: AIModelSelection = { backend: backend as AIModelSelection['backend'], model }
 
   const msg = ctx.callbackQuery?.message
   const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
-  setUserModel(chatId, model as ClaudeModel, threadId)
+  setUserAI(chatId, ai, threadId)
 
-  await ctx.editMessageText(`\u{2705} \u{6A21}\u{578B}\u{5DF2}\u{5207}\u{63DB}\u{70BA} *${model}*`, { parse_mode: 'Markdown' })
+  await ctx.editMessageText(`\u{2705} \u{5DF2}\u{5207}\u{63DB}\u{70BA} *${formatAILabel(ai)}*`, { parse_mode: 'Markdown' })
   await ctx.answerCbQuery()
 }
 
@@ -128,13 +134,14 @@ async function handleConfirm(ctx: BotContext, chatId: number, data: string): Pro
     return
   }
 
-  const sessionId = getSessionId(state.selectedProject.path)
+  const resolvedBackend = state.ai.backend === 'auto' ? 'claude' : state.ai.backend
+  const sessionId = getAISessionId(resolvedBackend, state.selectedProject.path)
 
   enqueue({
     chatId,
     prompt: answer,
     project: state.selectedProject,
-    model: state.model,
+    ai: state.ai,
     sessionId,
     imagePaths: [],
   })
@@ -162,14 +169,15 @@ async function handleSuggestion(ctx: BotContext, chatId: number, data: string): 
   await ctx.editMessageText(`💡 → ${suggestion}`).catch(() => {})
   await ctx.answerCbQuery()
 
-  const sessionId = getSessionId(state.selectedProject.path)
+  const resolvedBackend = state.ai.backend === 'auto' ? 'claude' : state.ai.backend
+  const sessionId = getAISessionId(resolvedBackend, state.selectedProject.path)
   clearSuggestions(chatId, state.selectedProject.path)
 
   enqueue({
     chatId,
     prompt: suggestion,
     project: state.selectedProject,
-    model: state.model,
+    ai: state.ai,
     sessionId,
     imagePaths: [],
   })

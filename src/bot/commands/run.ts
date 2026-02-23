@@ -1,6 +1,6 @@
 import type { BotContext } from '../../types/context.js'
 import { findProject } from '../../config/projects.js'
-import { getSessionId } from '../../claude/session-store.js'
+import { getAISessionId } from '../../ai/session-store.js'
 import { enqueue, isProcessing, getQueueLength } from '../../claude/queue.js'
 import { getUserState } from '../state.js'
 
@@ -58,14 +58,14 @@ export async function runCommand(ctx: BotContext): Promise<void> {
     ? ctx.message.message_thread_id
     : undefined
   const state = getUserState(chatId, threadId)
-  const model = state.model
-  const sessionId = getSessionId(project.path)
+  const resolvedBackend = state.ai.backend === 'auto' ? 'claude' : state.ai.backend
+  const sessionId = getAISessionId(resolvedBackend, project.path)
 
   enqueue({
     chatId,
     prompt,
     project,
-    model,
+    ai: state.ai,
     sessionId,
     imagePaths: [],
   })
