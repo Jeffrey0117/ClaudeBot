@@ -66,6 +66,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         resolved = true
         clearInterval(typingInterval)
         clearInterval(tickInterval)
+        clearTimeout(longRunTimer)
         if (tidbitTimer) clearTimeout(tidbitTimer)
         // Delete all tidbit messages
         for (const msgId of tidbitMsgIds) {
@@ -105,6 +106,17 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
 
       // Tick every second for live elapsed time
       const tickInterval = setInterval(updateStatus, 1000)
+
+      // Long-running task reminder (120s)
+      const LONG_RUN_MS = 120_000
+      const longRunTimer = setTimeout(() => {
+        if (resolved) return
+        telegram.sendMessage(
+          item.chatId,
+          `\u{26A0}\u{FE0F} *[${tag}]* \u{5DF2}\u{904B}\u{884C}\u{8D85}\u{904E} 2 \u{5206}\u{9418}\u{FF0C}\u{53EF}\u{7528} /cancel \u{53D6}\u{6D88}`,
+          { parse_mode: 'Markdown' },
+        ).catch(() => {})
+      }, LONG_RUN_MS)
 
       // Idle entertainment: send fun tidbits during long waits
       const TIDBIT_DELAY_MS = 15_000
