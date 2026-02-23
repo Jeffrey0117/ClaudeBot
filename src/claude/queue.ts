@@ -1,13 +1,20 @@
 import type { QueueItem } from '../types/index.js'
+import { acquireLock, releaseLock, waitForLock } from './file-lock.js'
 
 type ProcessFn = (item: QueueItem) => Promise<void>
+type LockNotifyFn = (chatId: number, projectName: string, holder: string) => void
 
 const queues = new Map<string, QueueItem[]>()
 const processing = new Set<string>()
 let processFn: ProcessFn = async () => {}
+let lockNotifyFn: LockNotifyFn = () => {}
 
 export function setProcessor(fn: ProcessFn): void {
   processFn = fn
+}
+
+export function setLockNotify(fn: LockNotifyFn): void {
+  lockNotifyFn = fn
 }
 
 export function enqueue(item: QueueItem): void {
@@ -55,6 +62,54 @@ export function getActiveProjectPaths(): readonly string[] {
   return [...processing]
 }
 
+/**
+ * Merge queued prompts that accumulated while waiting for lock.
+ * Same-chat items get combined into one compound prompt.
+ */
+function drainAndMerge(projectPath: string, first: QueueItem): QueueItem {
+  const queue = queues.get(projectPath)
+  if (!queue || queue.length === 0) return first
+
+  // Collect all items from the same chatId
+  const sameChatItems: QueueItem[] = []
+  const remaining: QueueItem[] = []
+
+  for (const item of queue) {
+    if (item.chatId === first.chatId) {
+      sameChatItems.push(item)
+    } else {
+      remaining.push(item)
+    }
+  }
+
+  if (sameChatItems.length === 0) return first
+
+  // Update queue with non-merged items
+  if (remaining.length > 0) {
+    queues.set(projectPath, remaining)
+  } else {
+    queues.delete(projectPath)
+  }
+
+  // Merge all images
+  const allImages = [
+    ...first.imagePaths,
+    ...sameChatItems.flatMap((i) => [...i.imagePaths]),
+  ]
+
+  // Merge prompts into compound instruction
+  const allPrompts = [first.prompt, ...sameChatItems.map((i) => i.prompt)]
+  const mergedPrompt = allPrompts.length === 1
+    ? allPrompts[0]
+    : `以下是多個任務，請依序處理：\n\n${allPrompts.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
+
+  return {
+    ...first,
+    prompt: mergedPrompt,
+    imagePaths: allImages,
+  }
+}
+
 async function processNext(projectPath: string): Promise<void> {
   if (processing.has(projectPath)) return
 
@@ -62,17 +117,35 @@ async function processNext(projectPath: string): Promise<void> {
   if (!queue || queue.length === 0) return
 
   processing.add(projectPath)
-  const item = queue.shift()!
+  const firstItem = queue.shift()!
 
   if (queue.length === 0) {
     queues.delete(projectPath)
   }
 
   try {
-    await processFn(item)
+    // Try to acquire cross-process file lock
+    const acquired = await acquireLock(projectPath)
+
+    if (!acquired) {
+      // Another bot is working on this project — notify and wait
+      let notified = false
+      await waitForLock(projectPath, (holder) => {
+        if (!notified) {
+          notified = true
+          lockNotifyFn(firstItem.chatId, firstItem.project.name, holder)
+        }
+      })
+    }
+
+    // Lock acquired — merge any prompts that accumulated during wait
+    const mergedItem = drainAndMerge(projectPath, firstItem)
+
+    await processFn(mergedItem)
   } catch (error) {
-    console.error(`Queue processing failed for chat ${item.chatId}, project ${projectPath}:`, error)
+    console.error(`Queue processing failed for chat ${firstItem.chatId}, project ${projectPath}:`, error)
   } finally {
+    await releaseLock(projectPath)
     processing.delete(projectPath)
     processNext(projectPath)
   }

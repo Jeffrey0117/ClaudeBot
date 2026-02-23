@@ -1,7 +1,7 @@
 import type { Telegraf } from 'telegraf'
 import type { BotContext } from '../types/context.js'
 import type { QueueItem } from '../types/index.js'
-import { setProcessor, enqueue } from '../claude/queue.js'
+import { setProcessor, setLockNotify, enqueue } from '../claude/queue.js'
 import { runClaude, cancelRunning } from '../claude/claude-runner.js'
 import { existsSync } from 'node:fs'
 import { Input } from 'telegraf'
@@ -15,6 +15,17 @@ import { getSessionId } from '../claude/session-store.js'
 const TIMEOUT_MS = 30 * 60 * 1000
 
 export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
+  const { telegram } = bot
+
+  // Notify user when waiting for cross-process lock
+  setLockNotify((chatId, projectName, holder) => {
+    telegram.sendMessage(
+      chatId,
+      `⏳ *[${projectName}]* 另一個 bot (${holder}) 正在操作此專案，排隊等待中...`,
+      { parse_mode: 'Markdown' },
+    ).catch(() => {})
+  })
+
   setProcessor(async (item: QueueItem) => {
     const { telegram } = bot
     const tag = item.project.name

@@ -7,3 +7,4 @@ Thumbs.db
 nul
 .sessions.json
 data/
+.claudebot.lock
