@@ -1,8 +1,8 @@
 # ClaudeBot
 
-Telegram bot to remotely control Claude Code CLI from your phone.
+**Not a pipe to Claude. A command center on your phone.**
 
-Send prompts, get streaming responses, manage multiple projects -- all from Telegram.
+Control Claude Code CLI, manage projects, run plugins -- all from Telegram. Claude is the engine, but the dashboard, buttons, and toolbox are yours.
 
 ## Features
 
