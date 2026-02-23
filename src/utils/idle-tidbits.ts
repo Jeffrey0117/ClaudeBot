@@ -7,9 +7,51 @@ interface TidbitEntry {
   readonly text: string
 }
 
+interface ReelScriptSnippet {
+  readonly en: string
+  readonly zh: string
+  readonly videoTitle: string
+  readonly channel: string
+  readonly vocabulary?: readonly { word: string; translation: string }[]
+}
+
 const TIDBITS_PATH = resolve('data/tidbits.json')
+const REELSCRIPT_API = 'http://localhost:4005/api/public'
+
 let pool: TidbitEntry[] = []
 let usedIndices = new Set<number>()
+
+async function fetchReelScriptSnippet(): Promise<TidbitEntry | null> {
+  try {
+    const res = await fetch(`${REELSCRIPT_API}/snippet/random`, {
+      signal: AbortSignal.timeout(3_000),
+    })
+    if (!res.ok) return null
+
+    const data = await res.json() as ReelScriptSnippet
+
+    const lines: string[] = []
+    lines.push(`🇬🇧 ${data.en}`)
+    lines.push(`🇹🇼 ${data.zh}`)
+
+    if (data.vocabulary && data.vocabulary.length > 0) {
+      const words = data.vocabulary.slice(0, 3)
+        .map((v) => `  • *${v.word}* — ${v.translation}`)
+        .join('\n')
+      lines.push(`\n📝 單字:\n${words}`)
+    }
+
+    lines.push(`\n🎬 ${data.videoTitle}`)
+
+    return {
+      category: '英語學習',
+      emoji: '🎧',
+      text: lines.join('\n'),
+    }
+  } catch {
+    return null
+  }
+}
 
 function loadTidbits(): TidbitEntry[] {
   try {
@@ -70,7 +112,15 @@ function getDefaultTidbits(): TidbitEntry[] {
   ]
 }
 
-export function getRandomTidbit(): string {
+export async function getRandomTidbit(): Promise<string> {
+  // 30% chance to try ReelScript English learning snippet
+  if (Math.random() < 0.3) {
+    const snippet = await fetchReelScriptSnippet()
+    if (snippet) {
+      return `${snippet.emoji} *${snippet.category}*\n${snippet.text}`
+    }
+  }
+
   if (pool.length === 0) {
     pool = loadTidbits()
     usedIndices = new Set()

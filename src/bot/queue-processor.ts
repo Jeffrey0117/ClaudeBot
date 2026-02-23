@@ -96,13 +96,16 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       const TIDBIT_DELAY_MS = 15_000
       const TIDBIT_INTERVAL_MS = 30_000 + Math.random() * 15_000
 
-      tidbitTimer = setTimeout(function sendTidbit() {
+      tidbitTimer = setTimeout(async function sendTidbit() {
         if (resolved) return
-        const tidbit = getRandomTidbit()
-        telegram.sendMessage(item.chatId, tidbit, { parse_mode: 'Markdown' })
-          .then((msg) => { tidbitMsgIds.push(msg.message_id) })
-          .catch(() => {})
-        tidbitTimer = setTimeout(sendTidbit, TIDBIT_INTERVAL_MS)
+        try {
+          const tidbit = await getRandomTidbit()
+          const msg = await telegram.sendMessage(item.chatId, tidbit, { parse_mode: 'Markdown' })
+          tidbitMsgIds.push(msg.message_id)
+        } catch { /* ignore */ }
+        if (!resolved) {
+          tidbitTimer = setTimeout(sendTidbit, TIDBIT_INTERVAL_MS)
+        }
       }, TIDBIT_DELAY_MS)
 
       runClaude({
