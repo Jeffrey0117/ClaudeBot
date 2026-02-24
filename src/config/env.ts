@@ -43,6 +43,8 @@ const envSchema = z.object({
     .transform((val) => val === 'true'),
   DASHBOARD_PORT: z.coerce.number().int().positive().default(3100),
   ANTHROPIC_ADMIN_KEY: z.string().default(''),
+  GITHUB_TOKEN: z.string().default(''),
+  SHERPA_SERVER_PATH: z.string().default(''),
 })
 
 export type Env = z.infer<typeof envSchema>

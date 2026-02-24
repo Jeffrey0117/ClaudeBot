@@ -95,12 +95,15 @@ export function detectChoices(text: string): ChoiceResult {
   return { type: 'none', choices: [] }
 }
 
+const MAX_GAP_LINES = 3
+
 function extractOptions(lines: readonly string[]): readonly DetectedChoice[] {
   const options: DetectedChoice[] = []
 
   // Scan from the end to find the option block
   // Options are usually at the tail, preceded by a question line
   let foundOptionBlock = false
+  let gapCount = 0
 
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]
@@ -121,13 +124,15 @@ function extractOptions(lines: readonly string[]): readonly DetectedChoice[] {
         options.unshift({ label: displayLabel, value: cleanText })
         matched = true
         foundOptionBlock = true
+        gapCount = 0
         break
       }
     }
 
-    // If we were in an option block and hit a non-option line, stop
+    // Tolerate up to MAX_GAP_LINES non-option lines (description text between options)
     if (!matched && foundOptionBlock) {
-      break
+      gapCount++
+      if (gapCount > MAX_GAP_LINES) break
     }
 
     // Don't scan too far back

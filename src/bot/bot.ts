@@ -28,6 +28,8 @@ import { newbotCommand } from './commands/newbot.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
+import { voiceHandler } from './handlers/voice-handler.js'
+import { warmupSherpa } from '../asr/sherpa-client.js'
 import { setupQueueProcessor } from './queue-processor.js'
 import { setBotInstance } from './bio-updater.js'
 import { loadPlugins, getLoadedPlugins } from '../plugins/loader.js'
@@ -117,9 +119,10 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     return callbackHandler(ctx)
   })
 
-  // Photo and document messages → Claude
+  // Photo, document, and voice messages → Claude
   bot.on('photo', photoHandler)
   bot.on('document', documentHandler)
+  bot.on('voice', voiceHandler)
 
   // Text messages → Claude
   bot.on('text', messageHandler)
@@ -133,6 +136,11 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   // Start dashboard heartbeat writer + command reader
   startHeartbeat()
   startCommandReader()
+
+  // Pre-spawn Sherpa ASR process (avoid cold start on first voice)
+  if (env.SHERPA_SERVER_PATH) {
+    warmupSherpa()
+  }
 
   // Register commands with Telegram for autocomplete (core + plugins)
   const coreCommands = [
