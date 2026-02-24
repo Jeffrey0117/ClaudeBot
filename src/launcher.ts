@@ -27,6 +27,19 @@ const children = new Map<string, ChildProcess>()
 let shuttingDown = false
 
 const RESPAWN_DELAY_MS = 2000
+const CRASH_WINDOW_MS = 60_000
+const MAX_CRASHES = 3
+
+// Track recent crash timestamps per bot to detect crash loops
+const crashHistory = new Map<string, number[]>()
+
+function isCrashLooping(envFile: string): boolean {
+  const now = Date.now()
+  const history = crashHistory.get(envFile) ?? []
+  const recent = [...history, now].filter((t) => now - t < CRASH_WINDOW_MS)
+  crashHistory.set(envFile, recent)
+  return recent.length >= MAX_CRASHES
+}
 
 function spawnBot(envFile: string): void {
   const label =
@@ -63,7 +76,12 @@ function spawnBot(envFile: string): void {
       return
     }
 
-    // Auto-respawn this bot only
+    // Auto-respawn this bot only (with crash loop protection)
+    if (isCrashLooping(envFile)) {
+      console.error(`[${label}] crash loop detected (${MAX_CRASHES}x in ${CRASH_WINDOW_MS / 1000}s) — not respawning`)
+      return
+    }
+
     console.log(`[${label}] respawning in ${RESPAWN_DELAY_MS}ms...`)
     setTimeout(() => {
       if (!shuttingDown) {
