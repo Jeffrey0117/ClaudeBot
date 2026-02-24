@@ -78,13 +78,20 @@ async function executeCommand(cmd: DashboardCommand): Promise<boolean> {
       if (!project) return false
 
       const state = getUserState(chatId)
+      const sessionId = chatId === 0
+        ? (await import('../ai/session-store.js')).getAISessionId(
+            state.ai.backend === 'auto' ? 'claude' : state.ai.backend,
+            project.path,
+          )
+        : null
       enqueue({
         chatId,
         prompt,
         project,
         ai: state.ai,
-        sessionId: null,
+        sessionId,
         imagePaths: [],
+        dashboardCommandId: chatId === 0 ? cmd.id : undefined,
       })
       return true
     }
@@ -153,6 +160,11 @@ async function pollCommands(botId: string): Promise<void> {
     const pendingCommands = commands.filter((c) => {
       if (c.status !== 'pending') return false
       if (c.targetBot !== null && c.targetBot !== botId) return false
+      // Dashboard commands (chatId === 0) must be processed by main bot
+      // so response-broker events fire in the same process as dashboard server
+      const isBrowserCmd = c.type === 'prompt'
+        && (typeof c.payload.chatId !== 'number' || c.payload.chatId === 0)
+      if (isBrowserCmd && botId !== 'main') return false
       return true
     })
 

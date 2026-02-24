@@ -20,14 +20,22 @@ import type { AIModelSelection } from '../ai/types.js'
 import { autoRoute } from '../ai/router.js'
 import { setActiveRunner, updateRunnerTool, removeActiveRunner } from '../dashboard/runner-tracker.js'
 import { recordCost } from '../plugins/cost/index.js'
+import { emitResponseChunk, emitResponseComplete, emitResponseError } from '../dashboard/response-broker.js'
 
 const TIMEOUT_MS = 30 * 60 * 1000
+
+function deriveBotId(): string {
+  const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
+  if (!envArg || envArg === '.env') return 'main'
+  return envArg.replace('.env.', '')
+}
 
 export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
   const { telegram } = bot
 
   // Notify user when waiting for cross-process lock
   setLockNotify((chatId, projectName, holder) => {
+    if (chatId === 0) return
     telegram.sendMessage(
       chatId,
       `⏳ *[${projectName}]* 另一個 bot (${holder}) 正在操作此專案，排隊等待中...`,
@@ -38,6 +46,8 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
   setProcessor(async (item: QueueItem) => {
     const { telegram } = bot
     const tag = item.project.name
+    const isDashboard = item.chatId === 0
+    const dashCmdId = item.dashboardCommandId ?? null
     // Resolve 'auto' backend using the router
     const resolvedAI: AIModelSelection = item.ai.backend === 'auto'
       ? autoRoute(item.prompt, true)
@@ -46,11 +56,14 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
     const backend = resolvedAI.backend
 
     // Status message: only shows processing progress, never the response text
-    const statusMsg = await telegram.sendMessage(
-      item.chatId,
-      `\u{1F680} *[${tag}]* \u{8655}\u{7406}\u{4E2D}...\n_${aiLabel}_`,
-      { parse_mode: 'Markdown' }
-    )
+    // Skip Telegram messages for dashboard-only commands
+    const statusMsg = isDashboard
+      ? null
+      : await telegram.sendMessage(
+          item.chatId,
+          `\u{1F680} *[${tag}]* \u{8655}\u{7406}\u{4E2D}...\n_${aiLabel}_`,
+          { parse_mode: 'Markdown' }
+        )
 
     return new Promise<void>((resolve) => {
       let resolved = false
@@ -59,10 +72,14 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       const toolNames: string[] = []
       const startTime = Date.now()
 
-      const typingInterval = setInterval(() => {
+      const typingInterval = isDashboard
+        ? null
+        : setInterval(() => {
+            telegram.sendChatAction(item.chatId, 'typing').catch(() => {})
+          }, 5000)
+      if (!isDashboard) {
         telegram.sendChatAction(item.chatId, 'typing').catch(() => {})
-      }, 5000)
-      telegram.sendChatAction(item.chatId, 'typing').catch(() => {})
+      }
 
       const cleanupImages = () => {
         for (const imagePath of item.imagePaths) {
@@ -77,13 +94,15 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         if (resolved) return
         resolved = true
         removeActiveRunner(item.project.path)
-        clearInterval(typingInterval)
+        if (typingInterval) clearInterval(typingInterval)
         clearInterval(tickInterval)
         clearTimeout(longRunTimer)
         if (tidbitTimer) clearTimeout(tidbitTimer)
         // Delete all tidbit messages
-        for (const msgId of tidbitMsgIds) {
-          telegram.deleteMessage(item.chatId, msgId).catch(() => {})
+        if (!isDashboard) {
+          for (const msgId of tidbitMsgIds) {
+            telegram.deleteMessage(item.chatId, msgId).catch(() => {})
+          }
         }
         cleanupImages()
         resolve()
@@ -92,18 +111,23 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       const timer = setTimeout(() => {
         if (resolved) return
         cancelAnyRunning(item.project.path)
-        telegram.editMessageText(
-          item.chatId, statusMsg.message_id, undefined,
-          `\u{23F0} *[${tag}]* \u{903E}\u{6642} (30 \u{5206}\u{9418})`,
-          { parse_mode: 'Markdown' }
-        ).catch(() => {})
+        if (dashCmdId) {
+          emitResponseError(dashCmdId, 'Timeout (30 min)')
+        }
+        if (statusMsg) {
+          telegram.editMessageText(
+            item.chatId, statusMsg.message_id, undefined,
+            `\u{23F0} *[${tag}]* \u{903E}\u{6642} (30 \u{5206}\u{9418})`,
+            { parse_mode: 'Markdown' }
+          ).catch(() => {})
+        }
         done()
       }, TIMEOUT_MS)
 
       // Update status message with elapsed time + tool progress
       let lastStatusText = ''
       const updateStatus = (): void => {
-        if (resolved) return
+        if (resolved || !statusMsg) return
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(0)
         const toolInfo = toolCount > 0
           ? `\n\u{1F527} Tools: ${toolCount} (${[...new Set(toolNames)].slice(-4).join(', ')})`
@@ -120,10 +144,10 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       // Tick every second for live elapsed time
       const tickInterval = setInterval(updateStatus, 1000)
 
-      // Long-running task reminder (120s)
+      // Long-running task reminder (120s) — skip for dashboard
       const LONG_RUN_MS = 120_000
       const longRunTimer = setTimeout(() => {
-        if (resolved) return
+        if (resolved || isDashboard) return
         telegram.sendMessage(
           item.chatId,
           `\u{26A0}\u{FE0F} *[${tag}]* \u{5DF2}\u{904B}\u{884C}\u{8D85}\u{904E} 2 \u{5206}\u{9418}\u{FF0C}\u{53EF}\u{7528} /cancel \u{53D6}\u{6D88}`,
@@ -131,21 +155,32 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         ).catch(() => {})
       }, LONG_RUN_MS)
 
-      // Idle entertainment: send fun tidbits during long waits
-      const TIDBIT_DELAY_MS = 15_000
-      const TIDBIT_INTERVAL_MS = 30_000 + Math.random() * 15_000
+      // Idle entertainment: send fun tidbits during long waits (skip for dashboard)
+      if (!isDashboard) {
+        const TIDBIT_DELAY_MS = 15_000
+        const TIDBIT_INTERVAL_MS = 30_000 + Math.random() * 15_000
 
-      tidbitTimer = setTimeout(async function sendTidbit() {
-        if (resolved) return
-        try {
-          const tidbit = await getRandomTidbit()
-          const msg = await telegram.sendMessage(item.chatId, tidbit, { parse_mode: 'Markdown' })
-          tidbitMsgIds.push(msg.message_id)
-        } catch { /* ignore */ }
-        if (!resolved) {
-          tidbitTimer = setTimeout(sendTidbit, TIDBIT_INTERVAL_MS)
-        }
-      }, TIDBIT_DELAY_MS)
+        tidbitTimer = setTimeout(async function sendTidbit() {
+          if (resolved) return
+          try {
+            const tidbit = await getRandomTidbit()
+            if (tidbit.type === 'audio') {
+              const msg = await telegram.sendAudio(
+                item.chatId,
+                tidbit.audioUrl,
+                { caption: tidbit.caption, title: tidbit.title },
+              )
+              tidbitMsgIds.push(msg.message_id)
+            } else {
+              const msg = await telegram.sendMessage(item.chatId, tidbit.content, { parse_mode: 'Markdown' })
+              tidbitMsgIds.push(msg.message_id)
+            }
+          } catch { /* ignore */ }
+          if (!resolved) {
+            tidbitTimer = setTimeout(sendTidbit, TIDBIT_INTERVAL_MS)
+          }
+        }, TIDBIT_DELAY_MS)
+      }
 
       // Track active runner for dashboard heartbeat
       const projectName = item.project.name
@@ -166,9 +201,11 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         model: resolvedAI.model,
         sessionId: item.sessionId,
         imagePaths: item.imagePaths,
-        onTextDelta: (_delta, acc) => {
+        onTextDelta: (delta, acc) => {
           accumulated = acc
-          // Don't edit status msg with text — text goes to new messages at the end
+          if (dashCmdId) {
+            emitResponseChunk(dashCmdId, delta, acc)
+          }
         },
         onToolUse: (toolName) => {
           toolCount++
@@ -190,22 +227,42 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
               toolCount,
             })
 
-            const cost = (result.costUsd ?? 0).toFixed(4)
+            const rawText = accumulated || result.resultText || ''
+            const responseText = stripRunDirectives(rawText)
             const totalTime = ((Date.now() - startTime) / 1000).toFixed(1)
+            const cost = (result.costUsd ?? 0).toFixed(4)
+
+            // Emit broker complete event for dashboard
+            if (dashCmdId) {
+              emitResponseComplete(
+                dashCmdId,
+                responseText,
+                deriveBotId(),
+                result.costUsd ?? 0,
+                Date.now() - startTime,
+              )
+            }
+
+            // Dashboard-only: skip all Telegram messaging
+            if (isDashboard) {
+              done()
+              return
+            }
+
             const toolSummary = toolCount > 0
               ? ` | \u{1F527} ${toolCount} tools`
               : ''
 
             // Update status to "Done" summary
-            telegram.editMessageText(
-              item.chatId, statusMsg.message_id, undefined,
-              `\u{2705} *[${tag}]* \u{5B8C}\u{6210} | ${aiLabel} | $${cost} | ${totalTime}\u{79D2}${toolSummary}`,
-              { parse_mode: 'Markdown' }
-            ).catch(() => {})
+            if (statusMsg) {
+              telegram.editMessageText(
+                item.chatId, statusMsg.message_id, undefined,
+                `\u{2705} *[${tag}]* \u{5B8C}\u{6210} | ${aiLabel} | $${cost} | ${totalTime}\u{79D2}${toolSummary}`,
+                { parse_mode: 'Markdown' }
+              ).catch(() => {})
+            }
 
             // Prefer full accumulated stream text; resultText is only the final fragment
-            const rawText = accumulated || result.resultText || ''
-            const responseText = stripRunDirectives(rawText)
             const detectedImages = detectImagePaths(responseText)
             const validImages = detectedImages.filter((p) => existsSync(p))
 
@@ -301,20 +358,31 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         onError: (error) => {
           if (resolved) return
           clearTimeout(timer)
-          telegram.editMessageText(
-            item.chatId, statusMsg.message_id, undefined,
-            `\u{274C} *[${tag}]* \u{932F}\u{8AA4}\n\n\`${error}\``,
-            { parse_mode: 'Markdown' }
-          )
-            .then(() => done())
-            .catch(() => {
-              telegram.editMessageText(
-                item.chatId, statusMsg.message_id, undefined,
-                `Error: ${error}`
-              )
-                .then(() => done())
-                .catch(() => done())
-            })
+          if (dashCmdId) {
+            emitResponseError(dashCmdId, String(error))
+          }
+          if (isDashboard) {
+            done()
+            return
+          }
+          if (statusMsg) {
+            telegram.editMessageText(
+              item.chatId, statusMsg.message_id, undefined,
+              `\u{274C} *[${tag}]* \u{932F}\u{8AA4}\n\n\`${error}\``,
+              { parse_mode: 'Markdown' }
+            )
+              .then(() => done())
+              .catch(() => {
+                telegram.editMessageText(
+                  item.chatId, statusMsg.message_id, undefined,
+                  `Error: ${error}`
+                )
+                  .then(() => done())
+                  .catch(() => done())
+              })
+          } else {
+            done()
+          }
         },
       })
     })

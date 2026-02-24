@@ -1,6 +1,7 @@
 import { createBot } from './bot/bot.js'
 import { env } from './config/env.js'
 import { scanProjects } from './config/projects.js'
+import { startDashboardServer } from './dashboard/server.js'
 
 const MAX_RETRIES = 5
 
@@ -16,6 +17,13 @@ async function main(): Promise<void> {
   projects.forEach((p) => console.log(`  - ${p.name}`))
 
   const bot = await createBot()
+
+  // Start dashboard server in-process (main bot only) for response broker events
+  const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
+  const isMainBot = !envArg || envArg === '.env'
+  if (env.DASHBOARD && isMainBot) {
+    startDashboardServer(env.DASHBOARD_PORT)
+  }
 
   const shutdown = (signal: string) => {
     console.log(`\n${signal} received. Shutting down...`)

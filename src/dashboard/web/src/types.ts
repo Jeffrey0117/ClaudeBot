@@ -40,3 +40,44 @@ export interface HeartbeatMessage {
   readonly bots: readonly BotHeartbeat[]
   readonly timestamp: number
 }
+
+export interface ChatMessage {
+  readonly id: string
+  readonly role: 'user' | 'assistant' | 'system'
+  readonly content: string
+  readonly botId: string | null
+  readonly projectName: string
+  readonly timestamp: number
+  readonly commandId: string | null
+}
+
+export interface ResponseChunkMessage {
+  readonly type: 'response_chunk'
+  readonly commandId: string
+  readonly delta: string
+  readonly accumulated: string
+  readonly projectName: string | null
+}
+
+export interface ResponseCompleteMessage {
+  readonly type: 'response_complete'
+  readonly commandId: string
+  readonly text: string
+  readonly botId: string
+  readonly cost: number
+  readonly duration: number
+  readonly projectName: string | null
+}
+
+export interface ResponseErrorMessage {
+  readonly type: 'response_error'
+  readonly commandId: string
+  readonly error: string
+  readonly projectName: string | null
+}
+
+export type WsMessage =
+  | HeartbeatMessage
+  | ResponseChunkMessage
+  | ResponseCompleteMessage
+  | ResponseErrorMessage

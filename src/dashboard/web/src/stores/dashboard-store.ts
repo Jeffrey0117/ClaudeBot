@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import type { BotHeartbeat, DashboardCommand, ProjectInfo } from '../types'
 
+export type ActiveView = 'dashboard' | 'chat'
+
 interface DashboardState {
   readonly bots: readonly BotHeartbeat[]
   readonly projects: readonly ProjectInfo[]
@@ -9,6 +11,7 @@ interface DashboardState {
   readonly selectedBotId: string | null
   readonly selectedProjectPath: string | null
   readonly draftPrompt: string
+  readonly activeView: ActiveView
 
   setBots: (bots: readonly BotHeartbeat[]) => void
   setProjects: (projects: readonly ProjectInfo[]) => void
@@ -18,6 +21,7 @@ interface DashboardState {
   setSelectedBotId: (botId: string | null) => void
   setSelectedProjectPath: (path: string | null) => void
   setDraftPrompt: (prompt: string) => void
+  setActiveView: (view: ActiveView) => void
 }
 
 export const useDashboardStore = create<DashboardState>((set) => ({
@@ -28,6 +32,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   selectedBotId: null,
   selectedProjectPath: null,
   draftPrompt: '',
+  activeView: 'chat',
 
   setBots: (bots) => set({ bots }),
   setProjects: (projects) => set({ projects }),
@@ -38,4 +43,5 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   setSelectedBotId: (selectedBotId) => set({ selectedBotId }),
   setSelectedProjectPath: (selectedProjectPath) => set({ selectedProjectPath }),
   setDraftPrompt: (draftPrompt) => set({ draftPrompt }),
+  setActiveView: (activeView) => set({ activeView }),
 }))

@@ -1,9 +1,16 @@
 import { useDashboardStore } from '../stores/dashboard-store'
+import { useChatStore } from '../stores/chat-store'
 import { useTranslation } from '../hooks/useTranslation'
 import { ModelSelector } from './ModelSelector'
 import { QuickActions } from './QuickActions'
 import { PromptTemplates } from './PromptTemplates'
+import type { ActiveView } from '../stores/dashboard-store'
 import type { BotHeartbeat, ProjectInfo } from '../types'
+
+const VIEW_TABS: readonly { readonly id: ActiveView; readonly zh: string; readonly en: string }[] = [
+  { id: 'chat', zh: 'Chat', en: 'Chat' },
+  { id: 'dashboard', zh: 'Monitor', en: 'Monitor' },
+]
 
 export function Sidebar() {
   const { t } = useTranslation()
@@ -11,6 +18,9 @@ export function Sidebar() {
   const projects = useDashboardStore((s) => s.projects)
   const selectedBotId = useDashboardStore((s) => s.selectedBotId)
   const setSelectedBotId = useDashboardStore((s) => s.setSelectedBotId)
+  const activeView = useDashboardStore((s) => s.activeView)
+  const setActiveView = useDashboardStore((s) => s.setActiveView)
+  const setChannel = useChatStore((s) => s.setChannel)
 
   return (
     <aside style={{
@@ -22,6 +32,36 @@ export function Sidebar() {
       flexShrink: 0,
       padding: '12px 0',
     }}>
+      {/* View switcher tabs */}
+      <div style={{
+        display: 'flex',
+        margin: '0 12px 12px',
+        background: 'var(--bg-primary)',
+        borderRadius: 'var(--radius)',
+        padding: '3px',
+      }}>
+        {VIEW_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveView(tab.id)}
+            style={{
+              flex: 1,
+              padding: '6px 0',
+              fontSize: '12px',
+              fontWeight: 600,
+              border: 'none',
+              borderRadius: '5px',
+              cursor: 'pointer',
+              background: activeView === tab.id ? 'var(--accent-blue)' : 'transparent',
+              color: activeView === tab.id ? '#fff' : 'var(--text-secondary)',
+              transition: 'background 0.15s, color 0.15s',
+            }}
+          >
+            {tab.en}
+          </button>
+        ))}
+      </div>
+
       <SidebarSection title={t('sidebar.bots')}>
         {bots.map((bot) => (
           <BotItem
@@ -40,9 +80,17 @@ export function Sidebar() {
         )}
       </SidebarSection>
 
-      <SidebarSection title={t('sidebar.projects')}>
+      <SidebarSection title={activeView === 'chat' ? t('sidebar.channels') : t('sidebar.projects')}>
         {projects.map((project) => (
-          <ProjectItem key={project.path} project={project} />
+          <ProjectItem
+            key={project.path}
+            project={project}
+            chatMode={activeView === 'chat'}
+            onSelectChannel={() => {
+              setChannel(project.name)
+              setActiveView('chat')
+            }}
+          />
         ))}
       </SidebarSection>
 
@@ -130,14 +178,34 @@ function BotItem({
   )
 }
 
-function ProjectItem({ project }: { project: ProjectInfo }) {
+function ProjectItem({
+  project,
+  chatMode,
+  onSelectChannel,
+}: {
+  project: ProjectInfo
+  chatMode: boolean
+  onSelectChannel: () => void
+}) {
   const setSelectedProjectPath = useDashboardStore((s) => s.setSelectedProjectPath)
   const selectedProjectPath = useDashboardStore((s) => s.selectedProjectPath)
-  const selected = selectedProjectPath === project.path
+  const selectedChannel = useChatStore((s) => s.selectedChannel)
+
+  const selected = chatMode
+    ? selectedChannel === project.name
+    : selectedProjectPath === project.path
+
+  const handleClick = () => {
+    if (chatMode) {
+      onSelectChannel()
+    } else {
+      setSelectedProjectPath(selected ? null : project.path)
+    }
+  }
 
   return (
     <button
-      onClick={() => setSelectedProjectPath(selected ? null : project.path)}
+      onClick={handleClick}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -152,7 +220,7 @@ function ProjectItem({ project }: { project: ProjectInfo }) {
         textAlign: 'left',
       }}
     >
-      <span>{project.name}</span>
+      <span>{chatMode ? '#' : ''}{project.name}</span>
       {project.lockHolder && (
         <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--accent-yellow)' }}>
           {'\u{1F512}'}

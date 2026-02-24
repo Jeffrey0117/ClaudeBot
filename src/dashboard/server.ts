@@ -7,6 +7,8 @@ import { scanProjects } from '../config/projects.js'
 import { getLockHolder } from '../claude/file-lock.js'
 import { acquireCommandLock, releaseCommandLock } from './command-lock.js'
 import type { BotHeartbeat, DashboardCommand } from './types.js'
+import { onResponseEvent, type ResponseEvent } from './response-broker.js'
+import { readChatHistory, appendChatMessage, type ChatMessage } from './chat-store.js'
 
 const HEARTBEAT_DIR = join(process.cwd(), 'data', 'heartbeat')
 const COMMANDS_FILE = join(process.cwd(), 'data', 'commands.json')
@@ -172,9 +174,14 @@ async function handleApi(req: IncomingMessage, res: ServerResponse): Promise<voi
     try {
       const raw = JSON.parse(await readBody(req))
       const validated = CreateCommandSchema.parse(raw)
+      // Dashboard prompt commands always route through main bot
+      // to keep response-broker events in the same process
+      const effectiveTarget = validated.type === 'prompt'
+        ? 'main'
+        : (validated.targetBot ?? null)
       const cmd: DashboardCommand = {
         id: `cmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        targetBot: validated.targetBot ?? null,
+        targetBot: effectiveTarget,
         type: validated.type,
         payload: validated.payload,
         createdAt: Date.now(),
@@ -182,6 +189,27 @@ async function handleApi(req: IncomingMessage, res: ServerResponse): Promise<voi
         claimedBy: null,
       }
       await addCommand(cmd)
+
+      // Track project for response persistence + persist user message
+      if (cmd.type === 'prompt') {
+        const project = typeof cmd.payload.project === 'string'
+          ? cmd.payload.project
+          : null
+        if (project) {
+          trackCommand(cmd.id, project)
+          const userMsg: ChatMessage = {
+            id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            role: 'user',
+            content: String(cmd.payload.prompt ?? ''),
+            botId: null,
+            projectName: project,
+            timestamp: Date.now(),
+            commandId: cmd.id,
+          }
+          appendChatMessage(project, userMsg).catch(() => {})
+        }
+      }
+
       sendJson(res, { command: cmd }, 201)
     } catch (err) {
       const message = err instanceof z.ZodError
@@ -210,6 +238,20 @@ async function handleApi(req: IncomingMessage, res: ServerResponse): Promise<voi
     const commands = await readCommands()
     const recent = commands.slice(-50)
     sendJson(res, { commands: recent })
+    return
+  }
+
+  // GET /api/chat/:project — get chat history for a project
+  const chatMatch = path.match(/^\/api\/chat\/(.+)$/)
+  if (chatMatch && req.method === 'GET') {
+    try {
+      const project = decodeURIComponent(chatMatch[1])
+      const messages = await readChatHistory(project)
+      const recent = messages.slice(-50)
+      sendJson(res, { messages: recent })
+    } catch {
+      sendJson(res, { error: 'Invalid project name' }, 400)
+    }
     return
   }
 
@@ -258,12 +300,21 @@ function startWsRelay(wss: WebSocketServer): void {
     })
   })
 
+  function broadcast(data: unknown): void {
+    const payload = JSON.stringify(data)
+    for (const client of clients) {
+      if (client.readyState === 1) {
+        client.send(payload)
+      }
+    }
+  }
+
   // Broadcast heartbeats every 2s
   setInterval(async () => {
     if (clients.size === 0) return
     try {
       const heartbeats = await readAllHeartbeats()
-      const payload = JSON.stringify({
+      broadcast({
         type: 'heartbeat',
         bots: heartbeats.map((hb) => ({
           ...hb,
@@ -271,16 +322,61 @@ function startWsRelay(wss: WebSocketServer): void {
         })),
         timestamp: Date.now(),
       })
-
-      for (const client of clients) {
-        if (client.readyState === 1) {
-          client.send(payload)
-        }
-      }
     } catch (err) {
       console.error('[dashboard] Heartbeat broadcast error:', err)
     }
   }, 2_000)
+
+  // Subscribe to response broker events → broadcast + persist
+  onResponseEvent((event: ResponseEvent) => {
+    // Enrich events with projectName for frontend routing
+    const projectName = commandProjectMap.get(event.commandId) ?? null
+    broadcast({ ...event, projectName })
+
+    if (event.type === 'response_complete') {
+      const msg: ChatMessage = {
+        id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        role: 'assistant',
+        content: event.text,
+        botId: event.botId,
+        projectName: commandProjectMap.get(event.commandId) ?? 'unknown',
+        timestamp: Date.now(),
+        commandId: event.commandId,
+      }
+      const project = commandProjectMap.get(event.commandId)
+      if (project) {
+        appendChatMessage(project, msg).catch(() => {})
+        commandProjectMap.delete(event.commandId)
+      }
+    }
+
+    if (event.type === 'response_error') {
+      const project = commandProjectMap.get(event.commandId)
+      if (project) {
+        const msg: ChatMessage = {
+          id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          role: 'system',
+          content: `Error: ${event.error}`,
+          botId: null,
+          projectName: project,
+          timestamp: Date.now(),
+          commandId: event.commandId,
+        }
+        appendChatMessage(project, msg).catch(() => {})
+        commandProjectMap.delete(event.commandId)
+      }
+    }
+  })
+}
+
+// Track which commandId belongs to which project for chat persistence
+// Entries auto-expire after 35 minutes to prevent unbounded growth
+const commandProjectMap = new Map<string, string>()
+const COMMAND_MAP_TTL_MS = 35 * 60 * 1000
+
+function trackCommand(commandId: string, project: string): void {
+  commandProjectMap.set(commandId, project)
+  setTimeout(() => commandProjectMap.delete(commandId), COMMAND_MAP_TTL_MS)
 }
 
 // --- Main entry ---

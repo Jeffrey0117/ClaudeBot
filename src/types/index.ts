@@ -24,6 +24,7 @@ export interface QueueItem {
   readonly ai: AIModelSelection
   readonly sessionId: string | null
   readonly imagePaths: readonly string[]
+  readonly dashboardCommandId?: string
 }
 
 export interface ClaudeResult {

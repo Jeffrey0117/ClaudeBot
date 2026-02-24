@@ -23,12 +23,14 @@ Claude 是引擎。儀表板、佇列、插件、互動介面是我們的。
 | 功能 | 說明 |
 |------|------|
 | **即時串流** | 每秒更新狀態 — 執行時間、工具數量、工具名稱 |
+| **多 AI 後端** | Claude、Gemini、Codex — 用 `/model` 切換，或交給自動路由 |
 | **多專案工作區** | 每個專案獨立 session，自動 `--resume`，瞬間切換 |
 | **佇列系統** | 連續送出多個請求，依序執行，跨 bot 檔案鎖定互斥 |
 | **互動式回應** | 問題自動出現確認按鈕，回答自動生成智慧後續建議 |
 | **跨專案委派** | `@run(project) prompt` 讓 Claude 自主跨 repo 串聯任務 |
-| **多 Bot 支援** | 同一份程式碼跑 4+ 個 bot，一鍵啟動，群組 @mention 路由 |
-| **插件系統** | 截圖、骰子、提醒、系統資訊 — 即時執行，零 AI 成本，可自行擴充 |
+| **多 Bot 支援** | 同一份程式碼跑 4+ 個 bot，用 `/newbot` 從 Telegram 新增 |
+| **插件系統** | 截圖、骰子、計時器、系統資訊、費用追蹤 — 零 AI 成本，可擴充 |
+| **Dashboard** | Web 控制面板，即時顯示 runner 狀態與心跳監控 |
 | **安全性** | Chat ID 白名單、bcrypt 密碼驗證、速率限制、`shell: false` 防注入 |
 
 ## 與其他方案的比較
@@ -45,13 +47,13 @@ Claude 是引擎。儀表板、佇列、插件、互動介面是我們的。
 ## 架構
 
 ```
-Telegram ──> ClaudeBot ──> Claude CLI
+Telegram ──> ClaudeBot ──> Claude / Gemini / Codex
   (你)          │              │
               插件           專案
           (零成本)       (via @run)
 ```
 
-- **插件**擴充 bot — 不經過 Claude 的即時指令（`/screenshot`、`/sysinfo`、`/dice`、`/remind`）
+- **插件**擴充 bot — 不經過 AI 的即時指令（`/screenshot`、`/sysinfo`、`/cost`、`/remind`）
 - **專案**擴充 Claude — 每個 repo 是一個完整的工作空間，帶有上下文和 session 記錄
 
 ## 快速開始
@@ -62,8 +64,15 @@ Telegram ──> ClaudeBot ──> Claude CLI
 - **Claude CLI** 已安裝並登入：
   ```bash
   npm install -g @anthropic-ai/claude-code
-  claude
+  claude    # 照著登入提示完成認證
   ```
+- **Gemini CLI**（選裝 — 啟用 Gemini 後端）：
+  ```bash
+  npm install -g @anthropic-ai/claude-code
+  gemini    # 登入你的 Google 帳號
+  ```
+
+> ClaudeBot 是透過呼叫你電腦上的 CLI 工具運作 — 不需要 API key。裝好 CLI 登入就行。
 
 ### 安裝
 
@@ -71,9 +80,25 @@ Telegram ──> ClaudeBot ──> Claude CLI
 git clone https://github.com/Jeffrey0117/ClaudeBot.git
 cd ClaudeBot
 npm install
-cp .env.example .env    # 填入你的設定值
+npm run setup    # 互動式引導 — 自動建立 .env
 npm run dev
 ```
+
+就這樣！Setup wizard 會引導你完成：
+1. 在 [@BotFather](https://t.me/BotFather) 建立 Telegram bot
+2. 從 [@userinfobot](https://t.me/userinfobot) 取得你的 chat ID
+3. 設定專案目錄、密碼、模型、插件
+
+<details>
+<summary><strong>手動設定（不用 wizard）</strong></summary>
+
+```bash
+cp .env.example .env
+# 編輯 .env 填入你的值
+npm run dev
+```
+
+</details>
 
 ### 設定項目
 
@@ -87,26 +112,12 @@ npm run dev
 | `LOGIN_PASSWORD_HASH` | 否\* | — | Bcrypt 雜湊（建議用於正式環境） |
 | `AUTO_AUTH` | 否 | `true` | 自動驗證白名單聊天室 |
 | `DEFAULT_MODEL` | 否 | `sonnet` | 預設模型（`haiku` / `sonnet` / `opus`） |
+| `GEMINI_API_KEY` | 否 | — | Gemini API key（僅 API 模式使用） |
+| `DASHBOARD` | 否 | `false` | 啟用 Web Dashboard |
 | `RATE_LIMIT_MAX` | 否 | `10` | 每個時間窗口的最大訊息數 |
-| `RATE_LIMIT_WINDOW_MS` | 否 | `60000` | 速率限制時間窗口（毫秒） |
-| `MAX_TURNS` | 否 | — | Claude 最大對話輪數 |
+| `ANTHROPIC_ADMIN_KEY` | 否 | — | Admin API key（`/usage` 組織帳單查詢） |
 
 \* 當 `AUTO_AUTH=true` 時密碼為選填。當 `AUTO_AUTH=false` 時，需設定 `LOGIN_PASSWORD` 或 `LOGIN_PASSWORD_HASH` 其中之一。
-
-<details>
-<summary><strong>如何取得設定值</strong></summary>
-
-**BOT_TOKEN** — 在 Telegram 搜尋 [@BotFather](https://t.me/BotFather)，傳送 `/newbot`，複製 token。
-
-**ALLOWED_CHAT_IDS** — 搜尋 [@userinfobot](https://t.me/userinfobot)，傳送任何訊息即可取得你的 ID。
-
-**PROJECTS_BASE_DIR** — 你的程式碼資料夾路徑：
-```
-PROJECTS_BASE_DIR=C:\Users\you\code
-PROJECTS_BASE_DIR=C:\Users\you\code,D:\projects
-```
-
-</details>
 
 ## 指令
 
@@ -116,11 +127,12 @@ PROJECTS_BASE_DIR=C:\Users\you\code,D:\projects
 |------|------|
 | `/projects` | 瀏覽並選擇專案 |
 | `/select <名稱>` | 快速切換專案 |
-| `/model` | 切換模型（haiku/sonnet/opus） |
+| `/model` | 切換模型（haiku/sonnet/opus）或後端（claude/gemini） |
 | `/status` | 顯示佇列與活動專案 |
 | `/cancel` | 停止當前處理程序 |
 | `/new` | 新對話（清除歷史） |
 | `/chat` | 一般對話（不需選專案） |
+| `/newbot <token>` | 從 Telegram 新增 bot 實例 |
 | `/restart` | 遠端重啟 bot |
 
 ### 書籤
@@ -160,10 +172,10 @@ Claude 也能自主委派 — 當回應中包含 `@run(projectName) description`
 
 ## 插件系統
 
-插件不經過 Claude — 即時執行，零成本。
+插件不經過 AI — 即時執行，零成本。
 
 ```env
-PLUGINS=screenshot,sysinfo,dice,reminder
+PLUGINS=screenshot,sysinfo,dice,reminder,browse,cost
 ```
 
 | 插件 | 指令 | 說明 |
@@ -171,7 +183,9 @@ PLUGINS=screenshot,sysinfo,dice,reminder
 | `screenshot` | `/screenshot` | 桌面截圖與網頁截圖 |
 | `sysinfo` | `/sysinfo` | CPU、GPU、記憶體、磁碟資訊 |
 | `dice` | `/dice`、`/coin` | 擲骰子、拋硬幣 |
-| `reminder` | `/remind` | 設定計時提醒 |
+| `reminder` | `/remind` | 健身計時器（預設按鈕） |
+| `browse` | `/browse` | 網頁瀏覽 |
+| `cost` | `/cost`、`/usage` | Session 花費追蹤 & Anthropic 帳單 |
 
 <details>
 <summary><strong>建立自己的插件</strong></summary>
@@ -204,11 +218,25 @@ export default myPlugin
 
 ## 多 Bot 與群組
 
-同一份程式碼跑多個 bot 實例：
+### 從 Telegram 新增 bot
 
-1. 透過 [@BotFather](https://t.me/BotFather) 建立新 bot
-2. 建立 `.env.bot2`、`.env.bot3` 等設定檔
-3. `npm run dev` 一次啟動所有 bot
+最簡單的方式：
+
+1. 到 [@BotFather](https://t.me/BotFather) 建立新 bot
+2. 複製 token
+3. 在現有 bot 裡傳送：`/newbot <token> [password]`
+4. 傳送 `/restart` 讓新 bot 上線
+
+`/newbot` 指令會自動建立 `.env.botN` 檔案，複製你現有的設定。
+
+### 手動設定
+
+```bash
+# 手動建立 .env.bot2
+cp .env .env.bot2
+# 修改 BOT_TOKEN 等值
+npm run dev    # 一次啟動所有 bot
+```
 
 將 bot 加入 Telegram 群組即可團隊協作 — **@mention 路由**將任務分配到指定 bot，每個 bot 的簡介會顯示當前操作的專案。
 

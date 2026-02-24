@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { Layout } from './components/Layout'
 import { OverviewPanel } from './components/OverviewPanel'
-import { CommandPanel } from './components/CommandPanel'
+import { ChatPanel } from './components/ChatPanel'
 import { ProjectPanel } from './components/ProjectPanel'
 import { KanbanBoard } from './components/KanbanBoard'
 import { useWebSocket } from './hooks/useWebSocket'
@@ -14,6 +14,7 @@ export function App() {
 
   const setProjects = useDashboardStore((s) => s.setProjects)
   const setCommands = useDashboardStore((s) => s.setCommands)
+  const activeView = useDashboardStore((s) => s.activeView)
 
   useEffect(() => {
     apiFetch<{ projects: readonly ProjectInfo[] }>('/api/projects')
@@ -38,10 +39,15 @@ export function App() {
 
   return (
     <Layout>
-      <OverviewPanel />
-      <KanbanBoard />
-      <ProjectPanel />
-      <CommandPanel />
+      {activeView === 'chat' ? (
+        <ChatPanel />
+      ) : (
+        <>
+          <OverviewPanel />
+          <KanbanBoard />
+          <ProjectPanel />
+        </>
+      )}
     </Layout>
   )
 }

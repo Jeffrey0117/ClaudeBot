@@ -90,3 +90,14 @@ body {
   background: var(--bg-hover);
   border-color: var(--text-muted);
 }
+
+/* Blinking cursor for streaming messages */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.blink-cursor {
+  animation: blink 1s step-end infinite;
+  color: var(--accent-blue);
+}

@@ -15,11 +15,117 @@ interface ReelScriptSnippet {
   readonly vocabulary?: readonly { word: string; translation: string }[]
 }
 
+interface ReelScriptVideo {
+  readonly id: string
+  readonly title: string
+  readonly channel: string
+  readonly duration: number
+}
+
+interface ReelScriptVideoList {
+  readonly total: number
+  readonly videos: readonly ReelScriptVideo[]
+}
+
+interface ReelScriptSegment {
+  readonly start: number
+  readonly end: number
+  readonly text: string
+  readonly translation?: string
+}
+
+interface ReelScriptAudioResponse {
+  readonly audioUrl: string
+  readonly segments: readonly ReelScriptSegment[]
+}
+
+export interface AudioTidbit {
+  readonly type: 'audio'
+  readonly audioUrl: string
+  readonly caption: string
+  readonly title: string
+}
+
+export type TidbitResult =
+  | { readonly type: 'text'; readonly content: string }
+  | AudioTidbit
+
 const TIDBITS_PATH = resolve('data/tidbits.json')
-const REELSCRIPT_API = 'http://localhost:4005/api/public'
+const REELSCRIPT_API = 'https://reelscript.isnowfriend.com/api/public'
+const REELSCRIPT_BASE = 'https://reelscript.isnowfriend.com'
 
 let pool: TidbitEntry[] = []
 let usedIndices = new Set<number>()
+
+// Cache video list to avoid repeated fetches
+let cachedVideos: readonly ReelScriptVideo[] = []
+let videoCacheTime = 0
+const VIDEO_CACHE_TTL = 10 * 60 * 1000 // 10 minutes
+
+async function fetchVideoList(): Promise<readonly ReelScriptVideo[]> {
+  const now = Date.now()
+  if (cachedVideos.length > 0 && now - videoCacheTime < VIDEO_CACHE_TTL) {
+    return cachedVideos
+  }
+
+  const res = await fetch(`${REELSCRIPT_API}/videos?limit=50`, {
+    signal: AbortSignal.timeout(5_000),
+  })
+  if (!res.ok) return []
+
+  const data = await res.json() as ReelScriptVideoList
+  cachedVideos = data.videos
+  videoCacheTime = now
+  return cachedVideos
+}
+
+async function fetchReelScriptAudio(): Promise<AudioTidbit | null> {
+  try {
+    const videos = await fetchVideoList()
+    if (videos.length === 0) return null
+
+    // Pick a random video
+    const video = videos[Math.floor(Math.random() * videos.length)]
+
+    // Fetch audio (may trigger ffmpeg extraction, so longer timeout)
+    const res = await fetch(`${REELSCRIPT_API}/videos/${video.id}/audio`, {
+      signal: AbortSignal.timeout(30_000),
+    })
+    if (!res.ok) return null
+
+    const data = await res.json() as ReelScriptAudioResponse
+    if (!data.audioUrl) return null
+
+    // Build caption from first few segments
+    const preview = data.segments.slice(0, 3)
+    const captionLines: string[] = [
+      `🎧 ${video.title}`,
+      `📺 ${video.channel}`,
+      '',
+    ]
+
+    for (const seg of preview) {
+      captionLines.push(`🇬🇧 ${seg.text}`)
+      if (seg.translation) {
+        captionLines.push(`🇹🇼 ${seg.translation}`)
+      }
+      captionLines.push('')
+    }
+
+    const fullUrl = data.audioUrl.startsWith('http')
+      ? data.audioUrl
+      : `${REELSCRIPT_BASE}${data.audioUrl}`
+
+    return {
+      type: 'audio',
+      audioUrl: fullUrl,
+      caption: captionLines.join('\n').trim(),
+      title: video.title,
+    }
+  } catch {
+    return null
+  }
+}
 
 async function fetchReelScriptSnippet(): Promise<TidbitEntry | null> {
   try {
@@ -110,15 +216,24 @@ function getDefaultTidbits(): TidbitEntry[] {
   ]
 }
 
-export async function getRandomTidbit(): Promise<string> {
-  // 30% chance to try ReelScript English learning snippet
-  if (Math.random() < 0.3) {
+export async function getRandomTidbit(): Promise<TidbitResult> {
+  const roll = Math.random()
+
+  // 15% chance: ReelScript audio clip
+  if (roll < 0.15) {
+    const audio = await fetchReelScriptAudio()
+    if (audio) return audio
+  }
+
+  // 15% chance: ReelScript text snippet
+  if (roll < 0.3) {
     const snippet = await fetchReelScriptSnippet()
     if (snippet) {
-      return `${snippet.emoji} *${snippet.category}*\n${snippet.text}`
+      return { type: 'text', content: `${snippet.emoji} *${snippet.category}*\n${snippet.text}` }
     }
   }
 
+  // Fallback: regular tidbits
   if (pool.length === 0) {
     pool = loadTidbits()
     usedIndices = new Set()
@@ -136,5 +251,5 @@ export async function getRandomTidbit(): Promise<string> {
 
   usedIndices.add(idx)
   const item = pool[idx]
-  return `${item.emoji} *${item.category}*\n${item.text}`
+  return { type: 'text', content: `${item.emoji} *${item.category}*\n${item.text}` }
 }

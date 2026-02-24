@@ -31,15 +31,18 @@ const translations = {
   'kanban.allIdle': { zh: '所有 bot 閒置中', en: 'All bots idle' },
   'kanban.noDone': { zh: '尚無已完成任務', en: 'No completed tasks yet' },
 
-  // Command
+  // Command / Chat
   'command.title': { zh: '命令', en: 'Command' },
   'command.placeholder': { zh: '輸入 prompt 發送到任意 bot...', en: 'Send a prompt to any available bot...' },
   'command.send': { zh: '發送', en: 'Send' },
   'command.sending': { zh: '發送中...', en: 'Sending...' },
+  'chat.noMessages': { zh: '尚無訊息，發送 prompt 開始聊天', en: 'No messages yet. Send a prompt to get started.' },
+  'chat.selectProject': { zh: '選擇專案開始聊天', en: 'Select a project to start chatting' },
 
   // Sidebar
   'sidebar.bots': { zh: 'BOTS', en: 'BOTS' },
   'sidebar.projects': { zh: '專案', en: 'PROJECTS' },
+  'sidebar.channels': { zh: '頻道', en: 'CHANNELS' },
   'sidebar.noBots': { zh: '未偵測到 bot', en: 'No bots detected' },
 
   // Templates
