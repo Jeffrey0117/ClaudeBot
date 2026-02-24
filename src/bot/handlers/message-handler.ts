@@ -6,7 +6,7 @@ import { enqueue, isProcessing, getQueueLength } from '../../claude/queue.js'
 import { cancelAnyRunning } from '../../ai/registry.js'
 
 const COLLECT_MS = 1000
-const pendingMessages = new Map<number, { texts: string[]; timer: ReturnType<typeof setTimeout> }>()
+const pendingMessages = new Map<number, { texts: string[]; replyQuote: string; timer: ReturnType<typeof setTimeout> }>()
 
 function extractMentionText(ctx: BotContext, rawText: string): string | null {
   const isGroup = ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup'
@@ -32,6 +32,20 @@ function extractMentionText(ctx: BotContext, rawText: string): string | null {
   return (before + after).trim()
 }
 
+function extractReplyQuote(ctx: BotContext): string {
+  const reply = ctx.message && 'reply_to_message' in ctx.message
+    ? ctx.message.reply_to_message
+    : undefined
+  if (!reply) return ''
+
+  const replyText = reply && 'text' in reply ? reply.text : ''
+  const caption = reply && 'caption' in reply ? reply.caption : ''
+  const content = replyText || caption || ''
+  if (!content) return ''
+
+  return `> [引用訊息]\n> ${content.split('\n').join('\n> ')}\n\n`
+}
+
 export async function messageHandler(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
   if (!chatId) return
@@ -42,6 +56,9 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
   // In groups, only respond to @mentions; strip the mention from text
   const text = extractMentionText(ctx, rawText)
   if (text === null || !text) return
+
+  // Prepend quoted reply content if user replied to a message
+  const replyQuote = extractReplyQuote(ctx)
 
   // Unmatched commands: show hint instead of silently dropping
   if (text.startsWith('/')) {
@@ -62,7 +79,7 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
       const sessionId = getAISessionId(resolveBackend(state.ai.backend), generalProject.path)
       enqueue({
         chatId,
-        prompt: chatPrompt,
+        prompt: replyQuote + chatPrompt,
         project: generalProject,
         ai: state.ai,
         sessionId,
@@ -98,7 +115,7 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
     const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
     enqueue({
       chatId,
-      prompt: steerText,
+      prompt: replyQuote + steerText,
       project,
       ai: state.ai,
       sessionId,
@@ -119,6 +136,7 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
 
   pending = {
     texts: [text],
+    replyQuote,
     timer: setTimeout(() => flushMessages(chatId, threadId), COLLECT_MS),
   }
   pendingMessages.set(chatId, pending)
@@ -139,7 +157,7 @@ function flushMessages(chatId: number, threadId?: number): void {
 
   const project = state.selectedProject
   const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
-  const combined = pending.texts.join('\n\n')
+  const combined = pending.replyQuote + pending.texts.join('\n\n')
 
   enqueue({
     chatId,
