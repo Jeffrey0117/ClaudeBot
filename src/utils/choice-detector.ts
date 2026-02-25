@@ -27,6 +27,8 @@ const OPTION_PATTERNS = [
   /^\s*(\d+)\s*[.):\uFF0E]\s+(.+)/,
   /^\s*([A-Za-z])\s*[.):\uFF0E]\s+(.+)/,
   /^\s*[-*]\s+\*{0,2}(.+?)\*{0,2}\s*[:：]\s+(.+)/,
+  /^\s*方案\s*([A-Za-z])\s*[：:.]?\s*(.+)/,
+  /^\s*[（(]\s*(\d+)\s*[)）]\s*[.:：]?\s*(.+)/,
 ]
 
 /** Yes/No question patterns (checked against last meaningful line) */
@@ -64,6 +66,13 @@ const SELECTION_PROMPT_PATTERNS = [
   /先做哪/,
   /優先/,
 
+  /你覺得呢/,
+  /怎麼樣/,
+  /如何/,
+  /你看呢/,
+  /建議.*哪/,
+  /推薦.*哪/,
+
   // English
   /[Ww]hich (one|option|approach|method|way)/,
   /[Ww]hat would you (prefer|like|choose)/,
@@ -100,6 +109,12 @@ export function detectChoices(text: string): ChoiceResult {
     if (hasSelectionPrompt(lines)) {
       return { type: 'options', choices: options }
     }
+
+    // Fallback: if a question mark appears in the 5 lines above the options block,
+    // treat as implicit choice (Claude often asks a question then lists options)
+    if (hasQuestionAboveOptions(lines, options.length)) {
+      return { type: 'options', choices: options }
+    }
     // Numbered list without selection prompt = just an explanation, no buttons
   }
 
@@ -127,14 +142,29 @@ export function detectChoices(text: string): ChoiceResult {
  * Check if the tail text contains a selection prompt — a line that asks
  * the user to pick/choose from the listed options.
  *
- * Scans the last 10 lines for selection-related phrases.
+ * Scans the last 15 lines for selection-related phrases.
  */
 function hasSelectionPrompt(lines: readonly string[]): boolean {
-  const scanLines = lines.slice(-10)
+  const scanLines = lines.slice(-15)
   for (const line of scanLines) {
     if (SELECTION_PROMPT_PATTERNS.some((p) => p.test(line))) {
       return true
     }
+  }
+  return false
+}
+
+/**
+ * Fallback: check if there's a question mark (？or ?) in the lines
+ * just above the options block. This catches the common pattern where
+ * Claude asks a question then immediately lists choices.
+ */
+function hasQuestionAboveOptions(lines: readonly string[], optionCount: number): boolean {
+  // Options are at the end of lines; scan the 5 lines above them
+  const aboveStart = Math.max(0, lines.length - optionCount - 5)
+  const aboveEnd = lines.length - optionCount
+  for (let i = aboveStart; i < aboveEnd; i++) {
+    if (/[？?]/.test(lines[i])) return true
   }
   return false
 }

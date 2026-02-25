@@ -5,6 +5,7 @@ import type { StreamEvent, StreamResult, StreamContentBlockDelta, StreamAssistan
 import { setSessionId } from './session-store.js'
 import { validateProjectPath } from '../utils/path-validator.js'
 import { getTodos } from '../bot/todo-store.js'
+import { formatPinsForPrompt } from '../bot/context-pin-store.js'
 import { getSystemPrompt } from '../utils/system-prompt.js'
 import { env } from '../config/env.js'
 
@@ -106,6 +107,12 @@ export function runClaude(options: RunOptions): void {
   if (pendingTodos.length > 0) {
     const todoLines = pendingTodos.map((t, i) => `${i + 1}. ${t.text}`).join('\n')
     parts.push(`[專案待辦清單]\n${todoLines}`)
+  }
+
+  // Inject pinned context
+  const pinnedContext = formatPinsForPrompt(validatedPath)
+  if (pinnedContext) {
+    parts.push(pinnedContext)
   }
 
   parts.push(prompt)

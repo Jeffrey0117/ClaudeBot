@@ -30,9 +30,22 @@ dotenv.config()
 let sleepGuard: ChildProcess | null = null
 
 if (process.env.PREVENT_SLEEP === 'true' && process.platform === 'win32') {
+  // Disable AC standby & hibernate via powercfg (best-effort, non-fatal)
+  try {
+    execSync('powercfg /change standby-timeout-ac 0', { stdio: 'ignore' })
+    execSync('powercfg /change hibernate-timeout-ac 0', { stdio: 'ignore' })
+    console.log('[sleep-guard] powercfg: disabled AC standby + hibernate timeouts')
+  } catch {
+    console.warn('[sleep-guard] powercfg failed (non-fatal) — continuing with API guard only')
+  }
+
+  console.log(
+    '[sleep-guard] TIP: 若蓋螢幕仍會休眠，請到「電源選項 → 蓋上螢幕時」設為「不做任何事」'
+  )
+
   // PowerShell script that calls SetThreadExecutionState in a loop.
-  // ES_CONTINUOUS (0x80000000) | ES_SYSTEM_REQUIRED (0x00000001) = 0x80000001
-  // This tells Windows "don't sleep", and auto-reverts when the process dies.
+  // ES_CONTINUOUS (0x80000000) | ES_SYSTEM_REQUIRED (0x00000001) | ES_DISPLAY_REQUIRED (0x00000002)
+  // = 0x80000003 — prevents idle sleep AND display off
   const psScript = `
 Add-Type -TypeDefinition @"
 using System;
@@ -42,25 +55,34 @@ public class SleepGuard {
     public static extern uint SetThreadExecutionState(uint esFlags);
 }
 "@
-Write-Host "[sleep-guard] Active — preventing system sleep"
+Write-Host "[sleep-guard] Active — preventing system sleep + display off"
 while ($true) {
-    [SleepGuard]::SetThreadExecutionState(0x80000001) | Out-Null
+    [SleepGuard]::SetThreadExecutionState(0x80000003) | Out-Null
     Start-Sleep -Seconds 30
 }
 `
-  sleepGuard = spawn('powershell', ['-NoProfile', '-Command', psScript], {
-    stdio: ['ignore', 'pipe', 'ignore'],
-  })
 
-  sleepGuard.stdout?.on('data', (chunk: Buffer) => {
-    for (const line of chunk.toString().split('\n')) {
-      if (line.trim()) console.log(line.trim())
-    }
-  })
+  function spawnSleepGuard(): void {
+    sleepGuard = spawn('powershell', ['-NoProfile', '-Command', psScript], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
 
-  sleepGuard.on('close', () => {
-    sleepGuard = null
-  })
+    sleepGuard.stdout?.on('data', (chunk: Buffer) => {
+      for (const line of chunk.toString().split('\n')) {
+        if (line.trim()) console.log(line.trim())
+      }
+    })
+
+    sleepGuard.on('close', (code) => {
+      sleepGuard = null
+      if (!shuttingDown) {
+        console.warn(`[sleep-guard] process exited unexpectedly (code ${code}), restarting...`)
+        setTimeout(spawnSleepGuard, 2000)
+      }
+    })
+  }
+
+  spawnSleepGuard()
 }
 
 // Find all .env files: .env, .env.bot2, .env.bot3, ...
