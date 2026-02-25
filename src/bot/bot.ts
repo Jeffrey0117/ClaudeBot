@@ -28,6 +28,7 @@ import { restartCommand, handleRestartCallback } from './commands/restart.js'
 import { newbotCommand } from './commands/newbot.js'
 import { reloadCommand } from './commands/reload.js'
 import { contextCommand } from './commands/context.js'
+import { asrCommand } from './commands/asr.js'
 import { storeCommand } from './commands/store.js'
 import { installCommand } from './commands/install.js'
 import { uninstallCommand } from './commands/uninstall.js'
@@ -77,6 +78,7 @@ export const CORE_COMMANDS = [
   { command: 'install', description: '安裝插件' },
   { command: 'uninstall', description: '卸載插件' },
   { command: 'reload', description: '熱重載插件' },
+  { command: 'asr', description: '純語音轉文字' },
   { command: 'context', description: '上下文管理與釘選' },
   { command: 'help', description: '顯示說明' },
 ] as const
@@ -136,6 +138,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   bot.command('store', storeCommand)
   bot.command('install', installCommand)
   bot.command('uninstall', uninstallCommand)
+  bot.command('asr', asrCommand)
   bot.command('context', contextCommand)
   bot.command('reload', reloadCommand)
 

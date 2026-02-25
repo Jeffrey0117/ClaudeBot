@@ -7,6 +7,7 @@ import { cancelAnyRunning } from '../../ai/registry.js'
 import { transcribeVoiceFile } from './voice-handler.js'
 import { scanProjects } from '../../config/projects.js'
 import { updateBotBio, pinProjectStatus } from '../bio-updater.js'
+import { recordActivity } from '../../plugins/stats/activity-logger.js'
 import type { ProjectInfo } from '../../types/index.js'
 
 const COLLECT_MS = 1000
@@ -204,6 +205,13 @@ function flushMessages(chatId: number, threadId?: number): void {
       updateBotBio(detected).catch(() => {})
       pinProjectStatus(chatId, detected, formatAILabel(state.ai)).catch(() => {})
 
+      recordActivity({
+        timestamp: Date.now(),
+        type: 'message_sent',
+        project: detected.name,
+        promptLength: combined.length,
+      })
+
       const sessionId = getAISessionId(resolveBackend(state.ai.backend), detected.path)
       enqueue({
         chatId,
@@ -219,6 +227,13 @@ function flushMessages(chatId: number, threadId?: number): void {
 
   const project = state.selectedProject
   const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
+
+  recordActivity({
+    timestamp: Date.now(),
+    type: 'message_sent',
+    project: project.name,
+    promptLength: combined.length,
+  })
 
   enqueue({
     chatId,

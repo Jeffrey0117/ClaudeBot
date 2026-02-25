@@ -16,15 +16,17 @@ import { resolveBackend } from '../../ai/types.js'
 import { getAISessionId } from '../../ai/session-store.js'
 import { enqueue } from '../../claude/queue.js'
 import { transcribeAudio } from '../../asr/sherpa-client.js'
+import { recordActivity } from '../../plugins/stats/activity-logger.js'
 import { env } from '../../config/env.js'
+import { getAsrMode, consumeAsrMode } from '../asr-store.js'
 
 const execFileAsync = promisify(execFile)
 
 const REFINE_PROMPT = [
   '你是語音辨識後處理器。以下是 ASR 辨識的原始文字，可能有錯字、漏字、中英混雜錯誤。',
-  '請修正成通順的繁體中文（保留英文專有名詞）。',
+  '請修正成通順的繁體中文（保留英文專有名詞），並加上適當的標點符號（逗號、句號、問號等）。',
   '規則：只輸出修正後的文字，不要解釋、不要加引號、不要改變語意。',
-  '如果原文已經正確，原樣輸出即可。',
+  '如果原文已經正確，只需加上標點即可。',
 ].join('')
 
 /**
@@ -111,10 +113,27 @@ export async function voiceHandler(ctx: BotContext): Promise<void> {
   if (!message || !('voice' in message) || !message.voice) return
 
   const threadId = message.message_thread_id
+  const asrMode = getAsrMode(chatId)
+
+  // ASR-only mode: transcribe and return text, don't send to AI
+  if (asrMode !== 'off') {
+    const text = await transcribeVoiceFile(message.voice.file_id, ctx.telegram)
+    consumeAsrMode(chatId)
+
+    if (!text) {
+      await ctx.reply('❌ 語音辨識失敗，請重試。')
+      return
+    }
+
+    await ctx.reply(`📝 ${text}`)
+    return
+  }
+
+  // Normal mode: transcribe and send to AI
   const state = getUserState(chatId, threadId)
 
   if (!state.selectedProject) {
-    await ctx.reply('\u7528 /projects \u9078\u64C7\u5C08\u6848\uFF0C\u6216 /chat \u9032\u5165\u901A\u7528\u5C0D\u8A71\u6A21\u5F0F\u3002')
+    await ctx.reply('用 /projects 選擇專案，或 /chat 進入通用對話模式。')
     return
   }
 
@@ -122,9 +141,16 @@ export async function voiceHandler(ctx: BotContext): Promise<void> {
   const text = await transcribeVoiceFile(message.voice.file_id, ctx.telegram)
 
   if (!text) {
-    await ctx.reply('\u274C \u8A9E\u97F3\u8FA8\u8B58\u5931\u6557\uFF0C\u8ACB\u91CD\u8A66\u3002')
+    await ctx.reply('❌ 語音辨識失敗，請重試。')
     return
   }
+
+  recordActivity({
+    timestamp: Date.now(),
+    type: 'voice_sent',
+    project: project.name,
+    promptLength: text.length,
+  })
 
   const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
   enqueue({
@@ -136,5 +162,5 @@ export async function voiceHandler(ctx: BotContext): Promise<void> {
     imagePaths: [],
   })
 
-  ctx.reply(`\uD83C\uDFA4 ${text}`).catch(() => {})
+  ctx.reply(`🎤 ${text}`).catch(() => {})
 }

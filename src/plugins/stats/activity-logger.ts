@@ -1,16 +1,19 @@
 import { appendFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 
+export type ActivityType = 'prompt_complete' | 'message_sent' | 'voice_sent' | 'plugin_command'
+
 export interface ActivityEvent {
   readonly timestamp: number
-  readonly type: 'prompt_complete'
+  readonly type: ActivityType
   readonly project: string
-  readonly backend: string
-  readonly model: string
-  readonly durationMs: number
-  readonly costUsd: number
-  readonly toolCount: number
-  readonly promptLength: number
+  readonly backend?: string
+  readonly model?: string
+  readonly durationMs?: number
+  readonly costUsd?: number
+  readonly toolCount?: number
+  readonly promptLength?: number
+  readonly command?: string
 }
 
 const ACTIVITY_DIR = resolve('data/activity')

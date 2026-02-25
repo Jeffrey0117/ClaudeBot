@@ -10,9 +10,15 @@ const PID_FILE = path.join(root, '.launcher.pid')
 try {
   const oldPid = parseInt(readFileSync(PID_FILE, 'utf-8').trim(), 10)
   if (oldPid && oldPid !== process.pid) {
-    process.kill(oldPid, 'SIGTERM')
-    console.log(`Killed previous launcher (PID ${oldPid})`)
-    // Give it a moment to clean up
+    if (process.platform === 'win32') {
+      // taskkill /T kills the entire process tree (launcher + all child bots)
+      try {
+        execSync(`taskkill /F /T /PID ${oldPid}`, { stdio: 'ignore' })
+      } catch { /* already dead */ }
+    } else {
+      process.kill(oldPid, 'SIGTERM')
+    }
+    console.log(`Killed previous launcher + children (PID ${oldPid})`)
     const wait = (ms: number) => { const end = Date.now() + ms; while (Date.now() < end) {} }
     wait(1000)
   }

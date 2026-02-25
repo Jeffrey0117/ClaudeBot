@@ -278,13 +278,16 @@ async function handleApi(req: IncomingMessage, res: ServerResponse): Promise<voi
     const activities = readActivities(since, Date.now())
     const git = scanGitActivity(sinceISO)
 
+    const promptEvents = activities.filter((a) => a.type === 'prompt_complete')
     sendJson(res, {
       range,
       activities: {
-        prompts: activities.length,
-        totalCost: activities.reduce((s, a) => s + a.costUsd, 0),
-        totalDuration: activities.reduce((s, a) => s + a.durationMs, 0),
-        totalTools: activities.reduce((s, a) => s + a.toolCount, 0),
+        prompts: promptEvents.length,
+        messages: activities.filter((a) => a.type === 'message_sent').length,
+        voices: activities.filter((a) => a.type === 'voice_sent').length,
+        totalCost: promptEvents.reduce((s, a) => s + (a.costUsd ?? 0), 0),
+        totalDuration: promptEvents.reduce((s, a) => s + (a.durationMs ?? 0), 0),
+        totalTools: promptEvents.reduce((s, a) => s + (a.toolCount ?? 0), 0),
       },
       git: {
         totalCommits: git.totalCommits,

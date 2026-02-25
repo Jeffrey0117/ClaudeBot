@@ -36,10 +36,12 @@ function formatToday(): string {
   // Git stats for today
   const git = scanGitActivity(todayISO)
 
-  const prompts = activities.length
-  const totalCost = activities.reduce((s, a) => s + a.costUsd, 0)
-  const totalDuration = activities.reduce((s, a) => s + a.durationMs, 0)
-  const totalTools = activities.reduce((s, a) => s + a.toolCount, 0)
+  const prompts = activities.filter((a) => a.type === 'prompt_complete')
+  const messages = activities.filter((a) => a.type === 'message_sent').length
+  const voices = activities.filter((a) => a.type === 'voice_sent').length
+  const totalCost = prompts.reduce((s, a) => s + (a.costUsd ?? 0), 0)
+  const totalDuration = prompts.reduce((s, a) => s + (a.durationMs ?? 0), 0)
+  const totalTools = prompts.reduce((s, a) => s + (a.toolCount ?? 0), 0)
 
   // Project breakdown from activities
   const projectMap = new Map<string, number>()
@@ -49,7 +51,7 @@ function formatToday(): string {
   const topProjects = [...projectMap.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
-    .map(([name, count]) => `  ${name}: ${count} prompts`)
+    .map(([name, count]) => `  ${name}: ${count} 次互動`)
     .join('\n')
 
   return [
@@ -57,7 +59,8 @@ function formatToday(): string {
     '',
     `🔨 Commits: *${git.totalCommits}*`,
     `📝 Lines: *+${git.totalInsertions}* / *-${git.totalDeletions}*`,
-    `🤖 Prompts: *${prompts}*`,
+    `💬 訊息: *${messages}* | 🎤 語音: *${voices}*`,
+    `🤖 Prompts: *${prompts.length}*`,
     `🔧 Tools used: *${totalTools}*`,
     `⏱️ AI 時間: *${formatDuration(totalDuration)}*`,
     `💰 花費: *$${totalCost.toFixed(2)}*`,
@@ -73,8 +76,10 @@ function formatWeek(): string {
   const weekAgoISO = new Date(weekAgo).toISOString().slice(0, 10)
   const git = scanGitActivity(weekAgoISO)
 
-  const prompts = activities.length
-  const totalCost = activities.reduce((s, a) => s + a.costUsd, 0)
+  const prompts = activities.filter((a) => a.type === 'prompt_complete')
+  const messages = activities.filter((a) => a.type === 'message_sent').length
+  const voices = activities.filter((a) => a.type === 'voice_sent').length
+  const totalCost = prompts.reduce((s, a) => s + (a.costUsd ?? 0), 0)
 
   // Daily bar chart
   const days = ['日', '一', '二', '三', '四', '五', '六']
@@ -95,7 +100,8 @@ function formatWeek(): string {
     '',
     `🔨 Commits: *${git.totalCommits}*`,
     `📝 Lines: *+${git.totalInsertions}* / *-${git.totalDeletions}*`,
-    `🤖 Prompts: *${prompts}*`,
+    `💬 訊息: *${messages}* | 🎤 語音: *${voices}*`,
+    `🤖 Prompts: *${prompts.length}*`,
     `💰 花費: *$${totalCost.toFixed(2)}*`,
     '',
     '*每日 commits:*',
@@ -118,8 +124,10 @@ function formatMonth(): string {
   const activities = readActivities(monthStart.getTime(), Date.now())
   const git = scanGitActivity(monthISO)
 
-  const prompts = activities.length
-  const totalCost = activities.reduce((s, a) => s + a.costUsd, 0)
+  const prompts = activities.filter((a) => a.type === 'prompt_complete')
+  const messages = activities.filter((a) => a.type === 'message_sent').length
+  const voices = activities.filter((a) => a.type === 'voice_sent').length
+  const totalCost = prompts.reduce((s, a) => s + (a.costUsd ?? 0), 0)
 
   // Build heatmap grid
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
@@ -149,7 +157,8 @@ function formatMonth(): string {
     '',
     `🔨 Commits: *${git.totalCommits}*`,
     `📝 Lines: *+${git.totalInsertions}* / *-${git.totalDeletions}*`,
-    `🤖 Prompts: *${prompts}*`,
+    `💬 訊息: *${messages}* | 🎤 語音: *${voices}*`,
+    `🤖 Prompts: *${prompts.length}*`,
     `💰 花費: *$${totalCost.toFixed(2)}*`,
     '',
     '*日 一 二 三 四 五 六*',

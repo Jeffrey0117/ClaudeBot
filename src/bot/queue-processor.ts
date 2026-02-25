@@ -25,6 +25,7 @@ import { setActiveRunner, updateRunnerTool, removeActiveRunner } from '../dashbo
 import { recordCost } from '../plugins/cost/index.js'
 import { recordActivity } from '../plugins/stats/activity-logger.js'
 import { emitResponseChunk, emitResponseComplete, emitResponseError } from '../dashboard/response-broker.js'
+import { setLastResponse } from './last-response-store.js'
 
 const TIMEOUT_MS = 30 * 60 * 1000
 
@@ -244,6 +245,12 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
             })
 
             const rawText = accumulated || result.resultText || ''
+
+            // Save last response tail for short-reply context injection
+            if (rawText) {
+              setLastResponse(item.project.path, rawText)
+            }
+
             const afterRun = stripRunDirectives(rawText)
 
             // Execute @cmd() directives Claude included in its response

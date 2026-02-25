@@ -66,10 +66,6 @@ const SELECTION_PROMPT_PATTERNS = [
   /先做哪/,
   /優先/,
 
-  /你覺得呢/,
-  /怎麼樣/,
-  /如何/,
-  /你看呢/,
   /建議.*哪/,
   /推薦.*哪/,
 
@@ -104,15 +100,15 @@ export function detectChoices(text: string): ChoiceResult {
 
   // Step 1: Try to detect numbered/lettered options
   const options = extractOptions(lines)
-  if (options.length >= 2 && options.length <= 6) {
+  if (options.length >= 2 && options.length <= 6 && !looksLikeExplanation(options)) {
     // CRITICAL: Only treat as selectable options if there's a selection prompt nearby
     if (hasSelectionPrompt(lines)) {
       return { type: 'options', choices: options }
     }
 
-    // Fallback: if a question mark appears in the 5 lines above the options block,
+    // Fallback: if a selection-like question appears in the 5 lines above the options,
     // treat as implicit choice (Claude often asks a question then lists options)
-    if (hasQuestionAboveOptions(lines, options.length)) {
+    if (hasSelectionQuestionAboveOptions(lines, options.length)) {
       return { type: 'options', choices: options }
     }
     // Numbered list without selection prompt = just an explanation, no buttons
@@ -155,16 +151,42 @@ function hasSelectionPrompt(lines: readonly string[]): boolean {
 }
 
 /**
- * Fallback: check if there's a question mark (？or ?) in the lines
- * just above the options block. This catches the common pattern where
- * Claude asks a question then immediately lists choices.
+ * Detect explanatory lists (past-tense actions) vs. actual choices.
+ * "我做了：1. 修改了 X  2. 新增了 Y" → explanation, no buttons.
  */
-function hasQuestionAboveOptions(lines: readonly string[], optionCount: number): boolean {
-  // Options are at the end of lines; scan the 5 lines above them
+/**
+ * Markers that indicate "describing what happened/will happen", not "pick one".
+ * Past tense: 修改了, 新增了, 完成了...
+ * Future/state: 會自動, 會被, 應該能, 將會...
+ * Structure: **bold** — explanation (common Claude documentation pattern)
+ */
+const EXPLANATION_MARKERS = /修改了|新增了|更新了|刪除了|移除了|完成了|設定了|做了|加了|改了|已經|已完成|會自動|會被|應該能|將會|將被/
+const EXPLANATION_STRUCTURE = /\*{2}.+?\*{2}\s*[—\-：:]\s*.+/
+/** Technical descriptions: "name (`cmd`) — explanation" or "name (technical_term) — desc" */
+const TECHNICAL_DESC = /[`（(].+?[`）)]\s*[—\-：:]/
+
+function looksLikeExplanation(options: readonly DetectedChoice[]): boolean {
+  const matchCount = options.filter(
+    (o) => EXPLANATION_MARKERS.test(o.value) || EXPLANATION_STRUCTURE.test(o.value) || TECHNICAL_DESC.test(o.value)
+  ).length
+  // >= half means "probably explanation" (1/2 = block, 1/3 = pass)
+  return matchCount >= options.length / 2
+}
+
+/**
+ * Tightened fallback: only trigger if the question above options
+ * contains selection-related keywords (哪, 選, 要, 想, prefer, which, pick).
+ * A bare "?" is not enough — it could be "你覺得怎樣？" (feedback, not choice).
+ */
+const SELECTION_QUESTION_KEYWORDS = /哪|選|要.*做|想.*做|偏好|prefer|which|pick|choose/i
+
+function hasSelectionQuestionAboveOptions(lines: readonly string[], optionCount: number): boolean {
   const aboveStart = Math.max(0, lines.length - optionCount - 5)
   const aboveEnd = lines.length - optionCount
   for (let i = aboveStart; i < aboveEnd; i++) {
-    if (/[？?]/.test(lines[i])) return true
+    if (/[？?]/.test(lines[i]) && SELECTION_QUESTION_KEYWORDS.test(lines[i])) {
+      return true
+    }
   }
   return false
 }
