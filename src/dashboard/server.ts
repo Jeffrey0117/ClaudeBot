@@ -9,6 +9,8 @@ import { acquireCommandLock, releaseCommandLock } from './command-lock.js'
 import type { BotHeartbeat, DashboardCommand } from './types.js'
 import { onResponseEvent, type ResponseEvent } from './response-broker.js'
 import { readChatHistory, appendChatMessage, type ChatMessage } from './chat-store.js'
+import { readActivities, daysAgo, todayStart } from '../plugins/stats/activity-logger.js'
+import { scanGitActivity } from '../plugins/stats/git-scanner.js'
 
 const HEARTBEAT_DIR = join(process.cwd(), 'data', 'heartbeat')
 const COMMANDS_FILE = join(process.cwd(), 'data', 'commands.json')
@@ -252,6 +254,47 @@ async function handleApi(req: IncomingMessage, res: ServerResponse): Promise<voi
     } catch {
       sendJson(res, { error: 'Invalid project name' }, 400)
     }
+    return
+  }
+
+  // GET /api/stats?range=today|week|month
+  if (path === '/api/stats' && req.method === 'GET') {
+    const range = url.searchParams.get('range') ?? 'today'
+    let since: number
+    let sinceISO: string
+
+    if (range === 'week') {
+      since = daysAgo(7)
+      sinceISO = new Date(since).toISOString().slice(0, 10)
+    } else if (range === 'month') {
+      const now = new Date()
+      since = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
+      sinceISO = new Date(since).toISOString().slice(0, 10)
+    } else {
+      since = todayStart()
+      sinceISO = new Date(since).toISOString().slice(0, 10)
+    }
+
+    const activities = readActivities(since, Date.now())
+    const git = scanGitActivity(sinceISO)
+
+    sendJson(res, {
+      range,
+      activities: {
+        prompts: activities.length,
+        totalCost: activities.reduce((s, a) => s + a.costUsd, 0),
+        totalDuration: activities.reduce((s, a) => s + a.durationMs, 0),
+        totalTools: activities.reduce((s, a) => s + a.toolCount, 0),
+      },
+      git: {
+        totalCommits: git.totalCommits,
+        totalInsertions: git.totalInsertions,
+        totalDeletions: git.totalDeletions,
+        projects: git.projects.slice(0, 20),
+        hourDistribution: git.hourDistribution,
+        dailyCommits: git.dailyCommits,
+      },
+    })
     return
   }
 

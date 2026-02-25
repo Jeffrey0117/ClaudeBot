@@ -23,6 +23,7 @@ import type { AIModelSelection } from '../ai/types.js'
 import { autoRoute } from '../ai/router.js'
 import { setActiveRunner, updateRunnerTool, removeActiveRunner } from '../dashboard/runner-tracker.js'
 import { recordCost } from '../plugins/cost/index.js'
+import { recordActivity } from '../plugins/stats/activity-logger.js'
 import { emitResponseChunk, emitResponseComplete, emitResponseError } from '../dashboard/response-broker.js'
 
 const TIMEOUT_MS = 30 * 60 * 1000
@@ -228,6 +229,18 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
               project: item.project.name,
               durationMs: result.durationMs,
               toolCount,
+            })
+
+            recordActivity({
+              timestamp: Date.now(),
+              type: 'prompt_complete',
+              project: item.project.name,
+              backend: result.backend,
+              model: result.model,
+              durationMs: result.durationMs,
+              costUsd: result.costUsd ?? 0,
+              toolCount,
+              promptLength: item.prompt.length,
             })
 
             const rawText = accumulated || result.resultText || ''
