@@ -2,12 +2,21 @@ import { spawn, execSync, type ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import type { ClaudeModel, ClaudeResult } from '../types/index.js'
 import type { StreamEvent, StreamResult, StreamContentBlockDelta, StreamAssistantMessage } from '../types/claude-stream.js'
-import { setSessionId } from './session-store.js'
+import { setAISessionId } from '../ai/session-store.js'
 import { validateProjectPath } from '../utils/path-validator.js'
 import { getTodos } from '../bot/todo-store.js'
 import { formatPinsForPrompt } from '../bot/context-pin-store.js'
+import { getLastResponse } from '../bot/last-response-store.js'
 import { getSystemPrompt } from '../utils/system-prompt.js'
 import { env } from '../config/env.js'
+
+/** Detect affirmative/agreement replies that reference the previous message. */
+const AFFIRMATIVE_RE = /^(好|可以|沒問題|沒差|OK|ok|Yes|yes|對|嗯|行|做吧|來吧|就這樣|同意|贊成|go|就醬|開始|動手|沒錯|是的|確定|sure|yep|yeah|做啊|加吧|弄吧|改吧|要|proceed|continue|繼續)/i
+
+function looksAffirmative(text: string): boolean {
+  const stripped = text.replace(/^[\[（(【]語音輸入[\]）)】]\s*/i, '').trim()
+  return AFFIRMATIVE_RE.test(stripped)
+}
 
 export type OnTextDelta = (text: string, accumulated: string) => void
 export type OnToolUse = (toolName: string) => void
@@ -115,6 +124,16 @@ export function runClaude(options: RunOptions): void {
     parts.push(pinnedContext)
   }
 
+  // For short or affirmative replies, inject last response tail so Claude
+  // knows what the user is referring to after context compression.
+  // Triggers on: very short messages (≤15 chars) OR affirmative phrases (≤80 chars).
+  if (prompt.length <= 15 || (prompt.length <= 80 && looksAffirmative(prompt))) {
+    const lastResponse = getLastResponse(validatedPath)
+    if (lastResponse) {
+      parts.push(`[前次回覆參考]\n${lastResponse}\n[/前次回覆參考]`)
+    }
+  }
+
   parts.push(prompt)
 
   if (imagePaths.length > 0) {
@@ -198,7 +217,7 @@ export function runClaude(options: RunOptions): void {
           onResult: (result) => {
             resultReceived = true
             try {
-              setSessionId(validatedPath, result.sessionId)
+              setAISessionId('claude', validatedPath, result.sessionId)
             } catch (err) {
               console.error('Failed to save session ID:', err)
             }
@@ -238,7 +257,7 @@ export function runClaude(options: RunOptions): void {
           onResult: (result) => {
             resultReceived = true
             try {
-              setSessionId(validatedPath, result.sessionId)
+              setAISessionId('claude', validatedPath, result.sessionId)
             } catch (err) {
               console.error('Failed to save session ID:', err)
             }
