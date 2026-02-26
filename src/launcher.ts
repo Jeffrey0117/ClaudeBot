@@ -3,6 +3,41 @@ import { readdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import dotenv from 'dotenv'
 
+// --- P2: Admin notification via raw Telegram Bot API ---
+
+function getNotifyConfig(): { botToken: string; chatId: string } | null {
+  const chatId = process.env.ADMIN_CHAT_ID
+  // Use main bot's token — launcher loads .env first via dotenv.config()
+  const botToken = process.env.BOT_TOKEN
+  if (!chatId || !botToken) return null
+  return { botToken, chatId }
+}
+
+async function notifyAdmin(message: string): Promise<void> {
+  const config = getNotifyConfig()
+  if (!config) return
+  try {
+    await fetch(
+      `https://api.telegram.org/bot${config.botToken}/sendMessage`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: config.chatId,
+          text: message,
+          parse_mode: 'HTML',
+        }),
+      },
+    )
+  } catch {
+    // Best-effort — don't crash launcher for notification failures
+  }
+}
+
+function envFileToBotId(envFile: string): string {
+  return envFile === '.env' ? 'main' : envFile.replace('.env.', '')
+}
+
 const root = process.cwd()
 const PID_FILE = path.join(root, '.launcher.pid')
 
@@ -36,13 +71,26 @@ dotenv.config()
 let sleepGuard: ChildProcess | null = null
 
 if (process.env.PREVENT_SLEEP === 'true' && process.platform === 'win32') {
-  // Disable AC standby & hibernate via powercfg (best-effort, non-fatal)
+  // Disable standby & hibernate via powercfg for BOTH AC and DC (best-effort, non-fatal)
   try {
     execSync('powercfg /change standby-timeout-ac 0', { stdio: 'ignore' })
+    execSync('powercfg /change standby-timeout-dc 0', { stdio: 'ignore' })
     execSync('powercfg /change hibernate-timeout-ac 0', { stdio: 'ignore' })
-    console.log('[sleep-guard] powercfg: disabled AC standby + hibernate timeouts')
+    execSync('powercfg /change hibernate-timeout-dc 0', { stdio: 'ignore' })
+    console.log('[sleep-guard] powercfg: disabled AC+DC standby + hibernate timeouts')
   } catch {
     console.warn('[sleep-guard] powercfg failed (non-fatal) — continuing with API guard only')
+  }
+
+  // Disable Wi-Fi adapter power management so Windows won't turn off the NIC to save power
+  try {
+    execSync(
+      'powershell -NoProfile -Command "Get-NetAdapter -Physical | Where-Object Status -eq \'Up\' | ForEach-Object { Set-NetAdapterPowerManagement -Name $_.Name -WakeOnMagicPacket Disabled -WakeOnPattern Disabled -DeviceSleepOnDisconnect Disabled -ErrorAction SilentlyContinue; powercfg /setdcvalueindex SCHEME_CURRENT 19cbb8fa-5279-450e-9fac-8a3d5fedd0c1 12bbebe6-58d6-4636-95bb-3217ef867c1a 0; powercfg /setacvalueindex SCHEME_CURRENT 19cbb8fa-5279-450e-9fac-8a3d5fedd0c1 12bbebe6-58d6-4636-95bb-3217ef867c1a 0; powercfg /setactive SCHEME_CURRENT }"',
+      { stdio: 'ignore' },
+    )
+    console.log('[sleep-guard] Wi-Fi adapter power management: disabled')
+  } catch {
+    console.warn('[sleep-guard] Wi-Fi power management tweak failed (non-fatal)')
   }
 
   console.log(
@@ -50,8 +98,8 @@ if (process.env.PREVENT_SLEEP === 'true' && process.platform === 'win32') {
   )
 
   // PowerShell script that calls SetThreadExecutionState in a loop.
-  // ES_CONTINUOUS (0x80000000) | ES_SYSTEM_REQUIRED (0x00000001) | ES_DISPLAY_REQUIRED (0x00000002)
-  // = 0x80000003 — prevents idle sleep AND display off
+  // ES_CONTINUOUS (0x80000000) | ES_SYSTEM_REQUIRED (0x00000001)
+  // = 0x80000001 — prevents idle sleep (display can still turn off to save power)
   const psScript = `
 Add-Type -TypeDefinition @"
 using System;
@@ -61,9 +109,9 @@ public class SleepGuard {
     public static extern uint SetThreadExecutionState(uint esFlags);
 }
 "@
-Write-Host "[sleep-guard] Active — preventing system sleep + display off"
+Write-Host "[sleep-guard] Active — preventing system sleep (display may dim)"
 while ($true) {
-    [SleepGuard]::SetThreadExecutionState(0x80000003) | Out-Null
+    [SleepGuard]::SetThreadExecutionState(0x80000001) | Out-Null
     Start-Sleep -Seconds 30
 }
 `
@@ -107,7 +155,11 @@ const filesToLaunch = singleEnv ? [singleEnv] : envFiles
 
 console.log(`Launcher PID ${process.pid} — ${filesToLaunch.length} bot(s): ${filesToLaunch.join(', ')}`)
 
-const tsxBin = path.join(root, 'node_modules', '.bin', 'tsx')
+// Invoke node + tsx CLI directly (no .cmd wrapper) so process tree kill works on Windows.
+// With shell:true, the tree is: launcher → cmd.exe → node.exe
+// taskkill /T kills cmd.exe but orphans node.exe, creating zombie pollers.
+// With shell:false + direct node invocation: launcher → node.exe (clean kill)
+const tsxCli = path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs')
 const indexPath = path.join(root, 'src', 'index.ts')
 
 const children = new Map<string, ChildProcess>()
@@ -119,6 +171,9 @@ const MAX_CRASHES = 3
 
 // Track recent crash timestamps per bot to detect crash loops
 const crashHistory = new Map<string, number[]>()
+
+// Track which bots have successfully launched at least once (for respawn notifications)
+const hasLaunchedOnce = new Set<string>()
 
 function isCrashLooping(envFile: string): boolean {
   const now = Date.now()
@@ -132,9 +187,9 @@ function spawnBot(envFile: string): void {
   const label =
     envFile === '.env' ? 'main' : envFile.replace('.env.', '')
 
-  const child = spawn(tsxBin, [indexPath, '--env', envFile], {
+  const child = spawn(process.execPath, [tsxCli, indexPath, '--env', envFile], {
     cwd: root,
-    shell: true,
+    shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
 
@@ -166,8 +221,11 @@ function spawnBot(envFile: string): void {
     // Auto-respawn this bot only (with crash loop protection)
     if (isCrashLooping(envFile)) {
       console.error(`[${label}] crash loop detected (${MAX_CRASHES}x in ${CRASH_WINDOW_MS / 1000}s) — not respawning`)
+      notifyAdmin(`🚨 <b>[${label}]</b> crash loop detected (${MAX_CRASHES}x in ${CRASH_WINDOW_MS / 1000}s) — <b>not respawning</b>. Manual intervention required.`)
       return
     }
+
+    notifyAdmin(`⚠️ <b>[${label}]</b> crashed (code ${code}) — respawning in ${RESPAWN_DELAY_MS / 1000}s...`)
 
     console.log(`[${label}] respawning in ${RESPAWN_DELAY_MS}ms...`)
     setTimeout(() => {
@@ -177,12 +235,56 @@ function spawnBot(envFile: string): void {
     }, RESPAWN_DELAY_MS)
   })
 
+  // If this is a respawn (not first launch), notify success after a short delay
+  if (hasLaunchedOnce.has(envFile)) {
+    setTimeout(() => {
+      // Verify child is still alive after 5s
+      if (children.get(envFile) === child && !child.killed) {
+        notifyAdmin(`✅ <b>[${label}]</b> respawned successfully (PID ${child.pid})`)
+      }
+    }, 5000)
+  }
+  hasLaunchedOnce.add(envFile)
+
   children.set(envFile, child)
 }
 
 for (const envFile of filesToLaunch) {
   spawnBot(envFile)
 }
+
+// --- P1: Watchdog — kill stale bots whose heartbeat stopped updating ---
+
+const WATCHDOG_INTERVAL_MS = 10_000
+const HEARTBEAT_STALE_MS = 30_000
+const heartbeatDir = path.join(root, 'data', 'heartbeat')
+
+function startHealthCheck(): void {
+  setInterval(() => {
+    if (shuttingDown) return
+
+    for (const [envFile, child] of children) {
+      const botId = envFileToBotId(envFile)
+      const hbPath = path.join(heartbeatDir, `${botId}.json`)
+
+      try {
+        const raw = readFileSync(hbPath, 'utf-8')
+        const hb = JSON.parse(raw) as { updatedAt: number }
+        const staleMs = Date.now() - hb.updatedAt
+
+        if (staleMs > HEARTBEAT_STALE_MS) {
+          console.warn(`[watchdog] ${botId} heartbeat stale (${Math.round(staleMs / 1000)}s) — killing`)
+          notifyAdmin(`🔍 <b>[${botId}]</b> heartbeat stale (${Math.round(staleMs / 1000)}s) — killing for respawn`)
+          child.kill('SIGTERM')
+        }
+      } catch {
+        // Heartbeat file doesn't exist yet (bot still starting) or read error — skip
+      }
+    }
+  }, WATCHDOG_INTERVAL_MS)
+}
+
+startHealthCheck()
 
 // Graceful shutdown: forward signal to all children, clean up PID file
 const shutdown = (signal: string) => {

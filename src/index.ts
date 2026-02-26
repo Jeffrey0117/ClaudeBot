@@ -3,6 +3,19 @@ import { env } from './config/env.js'
 import { scanProjects } from './config/projects.js'
 import { startDashboardServer } from './dashboard/server.js'
 
+// P0: Catch unhandled errors — heartbeat keeps writing so watchdog can decide
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] Unhandled rejection:', reason)
+  // Don't exit — may be recoverable. If bot is truly dead, heartbeat stalls
+  // and launcher watchdog will kill + respawn.
+})
+
+process.on('uncaughtException', (error) => {
+  console.error('[fatal] Uncaught exception:', error)
+  // Stack may be corrupted — exit immediately, let launcher respawn
+  process.exit(1)
+})
+
 const MAX_RETRIES = 5
 
 function sleep(ms: number): Promise<void> {
@@ -45,7 +58,17 @@ async function main(): Promise<void> {
     let launchError: Error | null = null
 
     // Fire-and-forget: bot.launch() never resolves (infinite polling loop)
+    let launched = false
     bot.launch({ dropPendingUpdates: true }).catch((error: Error) => {
+      if (launched) {
+        // Error AFTER the 3s check window — wait for Telegram to release
+        // the polling session before exiting (prevents cascading 409 on respawn)
+        const is409 = error.message.includes('409')
+        const delay = is409 ? 10_000 : 0
+        console.error(`Polling crashed after startup: ${error.message}${is409 ? ' (waiting 10s for session release)' : ''}`)
+        setTimeout(() => process.exit(1), delay)
+        return
+      }
       launchFailed = true
       launchError = error
     })
@@ -54,6 +77,7 @@ async function main(): Promise<void> {
     await sleep(3000)
 
     if (!launchFailed) {
+      launched = true
       console.log('ClaudeBot is running! Press Ctrl+C to stop.')
       return
     }

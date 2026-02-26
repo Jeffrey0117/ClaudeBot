@@ -5,7 +5,11 @@ import { resolve } from 'node:path'
 const envFileArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
 const envPath = envFileArg ? resolve(envFileArg) : undefined
 
-dotenv.config(envPath ? { path: envPath } : undefined)
+// override: true — launcher's dotenv.config() sets BOT_TOKEN from .env in
+// process.env, and child processes inherit it.  Without override, dotenv
+// skips vars that already exist, so bot2/3/4 all end up with the main
+// bot's token → 409 conflict on Telegram polling.
+dotenv.config({ ...(envPath ? { path: envPath } : {}), override: true })
 
 const envSchema = z.object({
   BOT_TOKEN: z.string().min(1, 'BOT_TOKEN is required'),
@@ -56,6 +60,7 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((val) => val === 'true'),
+  ADMIN_CHAT_ID: z.coerce.number().int().positive().optional(),
 })
 
 export type Env = z.infer<typeof envSchema>
