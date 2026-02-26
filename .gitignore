@@ -1,7 +1,16 @@
 node_modules/
 dist/
 .env
+.env.*
 *.log
+.user-states.json
+.claude/settings.local.json
+SESSION_SUMMARY.txt
+hotwords.txt
+plan.md
+start.bat
+*.png
+gemini-*.txt
 .DS_Store
 Thumbs.db
 nul

@@ -25,6 +25,13 @@ let pending: {
   readonly timer: ReturnType<typeof setTimeout>
 } | null = null
 
+/** Queue of commands waiting to be sent (FIFO). */
+const commandQueue: Array<{
+  readonly cmd: Record<string, unknown>
+  readonly resolve: (value: SherpaResponse) => void
+  readonly reject: (reason: Error) => void
+}> = []
+
 function ensureProcess(): void {
   if (proc) return
 
@@ -57,6 +64,7 @@ function ensureProcess(): void {
     } catch {
       resolve({ success: false, error: 'Invalid JSON from Sherpa' })
     }
+    drainQueue()
   })
 
   proc.on('exit', () => {
@@ -68,26 +76,49 @@ function ensureProcess(): void {
       clearTimeout(timer)
       reject(new Error('Sherpa process exited unexpectedly'))
     }
+    // Reject all queued commands — process is gone
+    for (const queued of commandQueue.splice(0)) {
+      queued.reject(new Error('Sherpa process exited unexpectedly'))
+    }
   })
+}
+
+/** Flush the next queued command if the channel is free. */
+function drainQueue(): void {
+  if (pending || commandQueue.length === 0) return
+  const next = commandQueue.shift()!
+  executeCommand(next.cmd, next.resolve, next.reject)
+}
+
+function executeCommand(
+  cmd: Record<string, unknown>,
+  resolve: (value: SherpaResponse) => void,
+  reject: (reason: Error) => void,
+): void {
+  const timer = setTimeout(() => {
+    if (pending) {
+      pending = null
+      reject(new Error('Sherpa: request timed out'))
+      drainQueue()
+    }
+  }, TIMEOUT_MS)
+
+  pending = { resolve, reject, timer }
+  proc!.stdin!.write(JSON.stringify(cmd) + '\n')
 }
 
 function sendCommand(cmd: Record<string, unknown>): Promise<SherpaResponse> {
   ensureProcess()
 
   if (pending) {
-    return Promise.reject(new Error('Sherpa: previous request still pending'))
+    // Queue instead of rejecting — will run when current request finishes
+    return new Promise<SherpaResponse>((resolve, reject) => {
+      commandQueue.push({ cmd, resolve, reject })
+    })
   }
 
   return new Promise<SherpaResponse>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      if (pending) {
-        pending = null
-        reject(new Error('Sherpa: request timed out'))
-      }
-    }, TIMEOUT_MS)
-
-    pending = { resolve, reject, timer }
-    proc!.stdin!.write(JSON.stringify(cmd) + '\n')
+    executeCommand(cmd, resolve, reject)
   })
 }
 

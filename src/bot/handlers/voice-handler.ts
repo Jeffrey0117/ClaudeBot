@@ -1,13 +1,11 @@
 /**
  * Voice message handler.
- * Downloads OGG → ffmpeg converts to 16 kHz WAV → Sherpa ASR →
+ * Downloads OGG → ffmpeg converts to 16 kHz WAV (2x speed) → Sherpa ASR →
  * LLM refinement (fix typos/grammar) → enqueue as prompt.
- *
- * Long audio (>25s) is split into ~20s chunks for faster processing.
  */
 
 import { execFile } from 'node:child_process'
-import { writeFile, unlink, mkdir, stat } from 'node:fs/promises'
+import { writeFile, unlink, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -23,11 +21,6 @@ import { env } from '../../config/env.js'
 import { getAsrMode, consumeAsrMode } from '../asr-store.js'
 
 const execFileAsync = promisify(execFile)
-
-/** Chunk threshold: audio longer than this gets split */
-const CHUNK_THRESHOLD_S = 25
-/** Each chunk duration in seconds */
-const CHUNK_SIZE_S = 20
 
 const REFINE_PROMPT = [
   '你是語音辨識後處理器。以下是 ASR 辨識的原始文字，可能有錯字、漏字、中英混雜錯誤。',
@@ -88,36 +81,9 @@ async function cleanupFiles(...paths: string[]): Promise<void> {
   }
 }
 
-/** Get WAV duration from file size (16kHz mono 16-bit → 32000 bytes/sec) */
-async function getWavDuration(wavPath: string): Promise<number> {
-  const info = await stat(wavPath)
-  const dataBytes = info.size - 44 // WAV header is 44 bytes
-  return Math.max(0, dataBytes / (16000 * 2))
-}
-
-/** Split a WAV file into ~CHUNK_SIZE_S second chunks using ffmpeg */
-async function splitIntoChunks(
-  wavPath: string,
-  duration: number,
-  id: string,
-): Promise<string[]> {
-  const chunkPaths: string[] = []
-  for (let start = 0; start < duration; start += CHUNK_SIZE_S) {
-    const chunkPath = join(TEMP_DIR, `${id}_c${chunkPaths.length}.wav`)
-    await execFileAsync('ffmpeg', [
-      '-i', wavPath,
-      '-ss', String(start),
-      '-t', String(CHUNK_SIZE_S),
-      '-ar', '16000', '-ac', '1', '-f', 'wav', '-y',
-      chunkPath,
-    ])
-    chunkPaths.push(chunkPath)
-  }
-  return chunkPaths
-}
-
 /**
  * Download a Telegram voice/audio file and transcribe it via Sherpa ASR + LLM refinement.
+ * Audio is played at 2x speed before ASR — keeps accuracy while halving processing time.
  * Returns the transcribed text, or null on failure.
  * Reusable by both voiceHandler and reply-quote extraction.
  */
@@ -130,7 +96,6 @@ export async function transcribeVoiceFile(
   const id = randomUUID()
   const oggPath = join(TEMP_DIR, `${id}.ogg`)
   const wavPath = join(TEMP_DIR, `${id}.wav`)
-  const extraFiles: string[] = []
 
   try {
     const [fileLink] = await Promise.all([
@@ -149,38 +114,16 @@ export async function transcribeVoiceFile(
       '-ar', '16000', '-ac', '1', '-f', 'wav', '-y', wavPath,
     ])
 
-    const duration = await getWavDuration(wavPath)
-
-    let rawText: string
-
-    if (duration > CHUNK_THRESHOLD_S) {
-      // Long audio: split into chunks and transcribe each
-      const chunkPaths = await splitIntoChunks(wavPath, duration, id)
-      extraFiles.push(...chunkPaths)
-
-      const texts: string[] = []
-      for (const chunkPath of chunkPaths) {
-        const result = await transcribeAudio(chunkPath)
-        if (result.success && result.text) {
-          texts.push(result.text.trim())
-        }
-      }
-
-      if (texts.length === 0) return null
-      rawText = texts.join('')
-    } else {
-      // Short audio: transcribe directly
-      const result = await transcribeAudio(wavPath)
-      if (!result.success || !result.text) return null
-      rawText = result.text.trim()
-    }
+    const result = await transcribeAudio(wavPath)
+    if (!result.success || !result.text) return null
+    const rawText = result.text.trim()
 
     const refined = await refineWithLLM(rawText)
     return refined ?? rawText
   } catch {
     return null
   } finally {
-    await cleanupFiles(oggPath, wavPath, ...extraFiles)
+    await cleanupFiles(oggPath, wavPath)
   }
 }
 
@@ -193,14 +136,8 @@ export async function voiceHandler(ctx: BotContext): Promise<void> {
   const message = ctx.message
   if (!message || !('voice' in message) || !message.voice) return
 
-  const duration = message.voice.duration ?? 0
   const threadId = message.message_thread_id
   const asrMode = getAsrMode(chatId)
-
-  // Warn for long audio
-  if (duration > CHUNK_THRESHOLD_S) {
-    ctx.reply(`\u{23F3} \u{8F03}\u{9577}\u{8A9E}\u{97F3} (${duration}s)\uFF0C\u{5206}\u{6BB5}\u{8655}\u{7406}\u{4E2D}...`).catch(() => {})
-  }
 
   // ASR-only mode: transcribe → biaodian punctuation → LLM refine → return text
   // Higher quality pipeline since user specifically wants the text output.

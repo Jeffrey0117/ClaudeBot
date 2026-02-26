@@ -63,7 +63,9 @@ export function autoCommitAndPush(
 
   const commitMessage = buildCommitMessage(userPrompt)
 
-  execFileSync('git', ['add', '-A'], {
+  // Use 'git add -u' (tracked files only) + 'git add .' (respects .gitignore)
+  // instead of 'git add -A' to avoid staging secrets or junk files
+  execFileSync('git', ['add', '.'], {
     cwd: projectPath,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
