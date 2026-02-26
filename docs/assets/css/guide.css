@@ -86,10 +86,14 @@
   justify-content: space-between;
 }
 
-/* Three-column body: main + right TOC */
+/* Three-column body: main + right TOC — centered */
 .guide-body {
   display: flex;
+  justify-content: center;
   min-height: calc(100vh - 3.5rem);
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: 0 2rem;
 }
 
 .guide-main {
@@ -142,15 +146,15 @@
   border-left-color: var(--accent);
 }
 
-/* ===== Chapter Sections ===== */
+/* ===== Chapter Sections — single-chapter display ===== */
 .guide-chapter {
-  padding-top: 2rem;
+  display: none;
+  padding-top: 0.5rem;
   padding-bottom: 1rem;
-  margin-bottom: 1rem;
 }
 
-.guide-chapter:last-child {
-  margin-bottom: 0;
+.guide-chapter.active {
+  display: block;
 }
 
 /* ===== Prev / Next Navigation ===== */
@@ -530,10 +534,20 @@
   }
 }
 
-/* ===== Smooth Scroll ===== */
+/* ===== Smooth Scroll (for TOC anchors within a chapter) ===== */
 html {
   scroll-behavior: smooth;
   scroll-padding-top: 4.5rem;
+}
+
+/* Chapter switch transition */
+.guide-chapter.active {
+  animation: fadeInChapter 0.2s ease;
+}
+
+@keyframes fadeInChapter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ===== Back to Top ===== */

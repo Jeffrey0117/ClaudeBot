@@ -989,7 +989,7 @@ DASHBOARD_TOKEN=your_secret_token</code></pre>
   <script src="assets/js/i18n-guide.js"></script>
 
   <script>
-    // Sidebar toggle (mobile)
+    // ── Sidebar toggle (mobile) ──
     function toggleSidebar() {
       document.getElementById('guide-sidebar').classList.toggle('open')
       document.getElementById('guide-overlay').classList.toggle('show')
@@ -999,22 +999,43 @@ DASHBOARD_TOKEN=your_secret_token</code></pre>
       document.getElementById('guide-overlay').classList.remove('show')
     }
 
-    // Close sidebar on nav click (mobile)
-    document.querySelectorAll('#sidebar-nav a[href^="#"]').forEach(function(a) {
-      a.addEventListener('click', function() {
-        if (window.innerWidth <= 768) closeSidebar()
-      })
-    })
-
-    // Scroll spy — highlight current chapter in sidebar + update TOC
+    // ── Chapter navigation — show one chapter at a time ──
     var chapters = document.querySelectorAll('.guide-chapter')
     var navLinks = document.querySelectorAll('#sidebar-nav a[data-nav]')
     var tocContainer = document.getElementById('toc-links')
-    var lastChapter = ''
+    var currentChapter = ''
+
+    function navigateTo(chapterId) {
+      var target = document.getElementById(chapterId)
+      if (!target) return
+
+      // Hide all chapters, show target
+      chapters.forEach(function(ch) { ch.classList.remove('active') })
+      target.classList.add('active')
+
+      // Highlight sidebar link
+      navLinks.forEach(function(link) {
+        link.classList.toggle('active', link.getAttribute('data-nav') === chapterId)
+      })
+
+      // Update right TOC
+      updateTOC(chapterId)
+
+      // Update hash (without triggering hashchange)
+      if (window.location.hash !== '#' + chapterId) {
+        history.replaceState(null, '', '#' + chapterId)
+      }
+
+      // Scroll content to top
+      window.scrollTo({ top: 0 })
+
+      // Close sidebar on mobile
+      if (window.innerWidth <= 768) closeSidebar()
+
+      currentChapter = chapterId
+    }
 
     function updateTOC(chapterId) {
-      if (chapterId === lastChapter) return
-      lastChapter = chapterId
       var section = document.getElementById(chapterId)
       if (!section || !tocContainer) return
 
@@ -1032,6 +1053,10 @@ DASHBOARD_TOKEN=your_secret_token</code></pre>
       })
     }
 
+    // Back to top button
+    var backBtn = document.getElementById('back-to-top')
+
+    // TOC scroll spy (within the active chapter)
     function updateTocHighlight() {
       if (!tocContainer) return
       var links = tocContainer.querySelectorAll('a')
@@ -1051,47 +1076,56 @@ DASHBOARD_TOKEN=your_secret_token</code></pre>
       })
     }
 
-    function updateScrollSpy() {
-      var scrollY = window.scrollY + 100
-      var current = ''
-      chapters.forEach(function(section) {
-        if (section.offsetTop <= scrollY) {
-          current = section.getAttribute('id')
-        }
-      })
-      navLinks.forEach(function(link) {
-        link.classList.toggle('active', link.getAttribute('data-nav') === current)
-      })
-
-      if (current) updateTOC(current)
-      updateTocHighlight()
-    }
-
-    var scrollSpyTimer = null
+    var scrollTimer = null
     window.addEventListener('scroll', function() {
-      if (scrollSpyTimer) return
-      scrollSpyTimer = setTimeout(function() {
-        updateScrollSpy()
-        scrollSpyTimer = null
+      if (scrollTimer) return
+      scrollTimer = setTimeout(function() {
+        updateTocHighlight()
+        // Back to top button
+        backBtn.classList.toggle('show', window.scrollY > 400)
+        scrollTimer = null
       }, 50)
     })
-    updateScrollSpy()
 
-    // Re-render TOC on language switch (headings text changes)
+    // ── Wire sidebar links ──
+    navLinks.forEach(function(link) {
+      link.addEventListener('click', function(e) {
+        e.preventDefault()
+        navigateTo(link.getAttribute('data-nav'))
+      })
+    })
+
+    // ── Wire prev/next links ──
+    document.querySelectorAll('.chapter-nav-link').forEach(function(link) {
+      link.addEventListener('click', function(e) {
+        e.preventDefault()
+        var href = link.getAttribute('href')
+        if (href && href.startsWith('#')) {
+          navigateTo(href.slice(1))
+        }
+      })
+    })
+
+    // ── Hash change handler ──
+    window.addEventListener('hashchange', function() {
+      var hash = window.location.hash.slice(1)
+      if (hash && document.getElementById(hash)) {
+        navigateTo(hash)
+      }
+    })
+
+    // ── Language switch → re-render TOC ──
     var origSwitchLang = window.switchLang
     window.switchLang = function(lang) {
       origSwitchLang(lang)
-      lastChapter = ''
       requestAnimationFrame(function() {
-        updateScrollSpy()
+        if (currentChapter) updateTOC(currentChapter)
       })
     }
 
-    // Back to top button
-    var backBtn = document.getElementById('back-to-top')
-    window.addEventListener('scroll', function() {
-      backBtn.classList.toggle('show', window.scrollY > 400)
-    })
+    // ── Init: show chapter from hash or default to ch1 ──
+    var initHash = window.location.hash.slice(1)
+    navigateTo((initHash && document.getElementById(initHash)) ? initHash : 'ch1')
   </script>
 </body>
 </html>
