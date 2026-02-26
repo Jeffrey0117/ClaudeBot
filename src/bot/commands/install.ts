@@ -7,7 +7,7 @@ import {
   getEnabledPlugins,
 } from '../../plugins/plugin-manager.js'
 import { reloadPlugins } from '../../plugins/loader.js'
-import { getBotInstance, CORE_COMMANDS, wireReminderSendFn, wireSchedulerSendFn } from '../bot.js'
+import { getBotInstance, CORE_COMMANDS, wireReminderSendFn, wireSchedulerSendFn, wireTaskSendFn } from '../bot.js'
 import { setAvailableCommands } from '../../utils/system-prompt.js'
 
 export async function installCommand(ctx: BotContext): Promise<void> {
@@ -61,6 +61,7 @@ async function reloadAndNotify(ctx: BotContext, name: string, action: string): P
   if (bot) {
     wireReminderSendFn(bot)
     wireSchedulerSendFn(bot)
+    wireTaskSendFn(bot)
 
     const pluginCommands = plugins.flatMap((p) =>
       p.commands.map((cmd) => ({ command: cmd.name, description: cmd.description }))

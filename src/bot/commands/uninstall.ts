@@ -6,7 +6,7 @@ import {
   getEnabledPlugins,
 } from '../../plugins/plugin-manager.js'
 import { reloadPlugins } from '../../plugins/loader.js'
-import { getBotInstance, CORE_COMMANDS, wireReminderSendFn, wireSchedulerSendFn } from '../bot.js'
+import { getBotInstance, CORE_COMMANDS, wireReminderSendFn, wireSchedulerSendFn, wireTaskSendFn } from '../bot.js'
 import { setAvailableCommands } from '../../utils/system-prompt.js'
 
 export async function uninstallCommand(ctx: BotContext): Promise<void> {
@@ -34,6 +34,7 @@ export async function uninstallCommand(ctx: BotContext): Promise<void> {
     if (bot) {
       wireReminderSendFn(bot)
       wireSchedulerSendFn(bot)
+      wireTaskSendFn(bot)
 
       const pluginCommands = plugins.flatMap((p) =>
         p.commands.map((cmd) => ({ command: cmd.name, description: cmd.description }))

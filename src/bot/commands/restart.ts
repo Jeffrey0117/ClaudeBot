@@ -1,9 +1,13 @@
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { BotContext } from '../../types/context.js'
 import { isProcessing } from '../../claude/queue.js'
 import { getBotInstance } from '../bot.js'
 
 // Exit code 42 = intentional restart (distinguished from crashes in launcher)
 const RESTART_EXIT_CODE = 42
+// Signal file that tells the launcher to restart ALL bots
+const RESTART_ALL_SIGNAL = join(process.cwd(), 'data', '.restart-all')
 
 async function gracefulRestart(): Promise<void> {
   const bot = getBotInstance()
@@ -20,9 +24,28 @@ async function gracefulRestart(): Promise<void> {
   setTimeout(() => process.exit(RESTART_EXIT_CODE), 500)
 }
 
+function signalRestartAll(): void {
+  try {
+    writeFileSync(RESTART_ALL_SIGNAL, String(Date.now()), 'utf-8')
+  } catch {
+    // Best-effort
+  }
+}
+
 export async function restartCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
   if (!chatId) return
+
+  const raw = (ctx.message && 'text' in ctx.message) ? ctx.message.text : ''
+  const arg = raw.replace(/^\/restart(@\S+)?\s*/, '').trim().toLowerCase()
+
+  // /restart all → restart all bot instances
+  if (arg === 'all') {
+    await ctx.reply('🔄 重啟所有 Bot 實例中...')
+    signalRestartAll()
+    await gracefulRestart()
+    return
+  }
 
   if (isProcessing()) {
     await ctx.reply('⚠️ 有任務正在執行中，確定要重啟嗎？', {
@@ -36,7 +59,7 @@ export async function restartCommand(ctx: BotContext): Promise<void> {
     return
   }
 
-  await ctx.reply('🔄 重啟中...')
+  await ctx.reply('🔄 重啟中...\n💡 _用 `/restart all` 可重啟所有 Bot_', { parse_mode: 'Markdown' })
   await gracefulRestart()
 }
 

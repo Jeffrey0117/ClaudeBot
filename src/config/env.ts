@@ -61,6 +61,10 @@ const envSchema = z.object({
     .default('false')
     .transform((val) => val === 'true'),
   ADMIN_CHAT_ID: z.coerce.number().int().positive().optional(),
+  AUTO_COMMIT: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((val) => val === 'true'),
 })
 
 export type Env = z.infer<typeof envSchema>

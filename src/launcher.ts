@@ -298,6 +298,32 @@ function startHealthCheck(): void {
 
 startHealthCheck()
 
+// --- Restart-all signal file watcher ---
+// When a bot writes data/.restart-all, kill all bots so they respawn.
+
+const RESTART_ALL_SIGNAL = path.join(root, 'data', '.restart-all')
+
+function startRestartAllWatcher(): void {
+  setInterval(() => {
+    if (shuttingDown) return
+    try {
+      const content = readFileSync(RESTART_ALL_SIGNAL, 'utf-8').trim()
+      if (!content) return
+      // Delete signal file immediately to prevent re-triggering
+      unlinkSync(RESTART_ALL_SIGNAL)
+      console.log('[launcher] restart-all signal received — restarting all bots')
+      notifyAdmin('🔄 <b>Restart ALL</b> — restarting all bot instances...')
+      for (const [, child] of children) {
+        child.kill('SIGTERM')
+      }
+    } catch {
+      // File doesn't exist or read error — normal, no signal pending
+    }
+  }, 2000)
+}
+
+startRestartAllWatcher()
+
 // Graceful shutdown: forward signal to all children, clean up PID file
 const shutdown = (signal: string) => {
   if (shuttingDown) return

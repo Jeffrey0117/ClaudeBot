@@ -15,6 +15,7 @@ import { dispatchPluginCommand, dispatchOutputHooks } from '../plugins/loader.js
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
 import { getAISessionId } from '../ai/session-store.js'
 import { detectChoices } from '../utils/choice-detector.js'
+import { cleanMarkdown } from '../utils/markdown-cleaner.js'
 import { generateSuggestions } from '../utils/suggestion-generator.js'
 import { setSuggestions } from './suggestion-store.js'
 import { setChoices } from './choice-store.js'
@@ -26,6 +27,8 @@ import { recordCost } from '../plugins/cost/index.js'
 import { recordActivity } from '../plugins/stats/activity-logger.js'
 import { emitResponseChunk, emitResponseComplete, emitResponseError } from '../dashboard/response-broker.js'
 import { setLastResponse } from './last-response-store.js'
+import { autoCommitAndPush } from '../utils/auto-commit.js'
+import { env } from '../config/env.js'
 
 const TIMEOUT_MS = 30 * 60 * 1000
 
@@ -300,6 +303,27 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
               )
             }
 
+            // Auto-commit: commit + push any file changes made by AI
+            if (env.AUTO_COMMIT) {
+              try {
+                const commitResult = autoCommitAndPush(item.project.path, item.prompt)
+                if (commitResult && !isDashboard) {
+                  const pushStatus = commitResult.pushed
+                    ? 'pushed \u2713'
+                    : commitResult.pushError
+                      ? 'push failed'
+                      : 'local only'
+                  telegram.sendMessage(
+                    item.chatId,
+                    `\u{1F4E6} *[${tag}]* Auto-commit: ${commitResult.filesChanged} files | ${pushStatus}\n\`${commitResult.commitMessage}\``,
+                    { parse_mode: 'Markdown' },
+                  ).catch(() => {})
+                }
+              } catch (err) {
+                console.error('[queue] auto-commit error:', err)
+              }
+            }
+
             // Dashboard-only: skip all Telegram messaging
             if (isDashboard) {
               done()
@@ -366,7 +390,8 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
               }
               // type === 'open' or 'none' → no buttons
 
-              const chunks = splitText(responseText, 4096)
+              const cleaned = cleanMarkdown(responseText)
+              const chunks = splitText(cleaned, 4096)
               let chain = Promise.resolve()
               for (let i = 0; i < chunks.length; i++) {
                 const chunk = chunks[i]

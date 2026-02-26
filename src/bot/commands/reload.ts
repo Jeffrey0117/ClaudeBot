@@ -1,7 +1,7 @@
 import type { BotContext } from '../../types/context.js'
 import { reloadPlugins, getLoadedPlugins } from '../../plugins/loader.js'
 import { getEnabledPlugins } from '../../plugins/plugin-manager.js'
-import { getBotInstance, CORE_COMMANDS, wireReminderSendFn, wireSchedulerSendFn } from '../bot.js'
+import { getBotInstance, CORE_COMMANDS, wireReminderSendFn, wireSchedulerSendFn, wireTaskSendFn } from '../bot.js'
 import { setAvailableCommands } from '../../utils/system-prompt.js'
 
 export async function reloadCommand(ctx: BotContext): Promise<void> {
@@ -17,6 +17,7 @@ export async function reloadCommand(ctx: BotContext): Promise<void> {
     if (bot) {
       wireReminderSendFn(bot)
       wireSchedulerSendFn(bot)
+      wireTaskSendFn(bot)
 
       // Update Telegram command list + system prompt
       const pluginCommands = plugins.flatMap((p) =>

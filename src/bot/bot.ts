@@ -53,6 +53,7 @@ import { getEnabledPlugins } from '../plugins/plugin-manager.js'
 import { startHeartbeat } from '../dashboard/heartbeat-writer.js'
 import { startCommandReader } from '../dashboard/command-reader.js'
 import { setAvailableCommands } from '../utils/system-prompt.js'
+import { scheduleRestartNotifications } from './restart-notifier.js'
 
 let botInstance: Telegraf<BotContext> | null = null
 
@@ -67,21 +68,21 @@ export const CORE_COMMANDS = [
   { command: 'status', description: '查看運行狀態' },
   { command: 'cancel', description: '停止目前程序' },
   { command: 'new', description: '新對話' },
-  { command: 'fav', description: '管理書籤' },
-  { command: 'todo', description: '新增待辦' },
-  { command: 'todos', description: '查看待辦' },
-  { command: 'idea', description: '記錄靈感' },
-  { command: 'ideas', description: '瀏覽靈感' },
-  { command: 'run', description: '跨專案執行' },
+  { command: 'fav', description: '管理書籤 (list/add/del)' },
+  { command: 'todo', description: '新增待辦 (文字)' },
+  { command: 'todos', description: '查看待辦 (all=全專案)' },
+  { command: 'idea', description: '記錄靈感 (#tag)' },
+  { command: 'ideas', description: '瀏覽靈感 (#tag/stats)' },
+  { command: 'run', description: '跨專案執行 (專案名 指令)' },
   { command: 'chat', description: '通用對話模式' },
   { command: 'newbot', description: '建立新 bot 實例' },
   { command: 'store', description: 'Plugin Store 瀏覽' },
-  { command: 'install', description: '安裝插件' },
-  { command: 'uninstall', description: '卸載插件' },
+  { command: 'install', description: '安裝插件 (名稱)' },
+  { command: 'uninstall', description: '卸載插件 (名稱)' },
   { command: 'reload', description: '熱重載插件' },
-  { command: 'asr', description: '純語音轉文字' },
-  { command: 'context', description: '上下文管理與釘選' },
-  { command: 'restart', description: '重啟 Bot' },
+  { command: 'asr', description: '語音轉文字 (on/off)' },
+  { command: 'context', description: '上下文管理 (pin/list/clear)' },
+  { command: 'restart', description: '重啟 Bot (all=全部)' },
   { command: 'help', description: '顯示說明' },
 ] as const
 
@@ -101,6 +102,16 @@ export function wireSchedulerSendFn(bot: Telegraf<BotContext>): void {
   ;(mod.setSchedulerSendFn as (fn: (chatId: number, text: string, extra?: { parse_mode?: 'Markdown' }) => Promise<void>) => void)(
     async (chatId, text, extra) => {
       await bot.telegram.sendMessage(chatId, text, { ...extra })
+    }
+  )
+}
+
+export function wireTaskSendFn(bot: Telegraf<BotContext>): void {
+  const mod = getPluginModule('task')
+  if (!mod || typeof mod.setTaskSendFn !== 'function') return
+  ;(mod.setTaskSendFn as (fn: (chatId: number, text: string, extra?: Record<string, unknown>) => Promise<void>) => void)(
+    async (chatId, text, extra) => {
+      await bot.telegram.sendMessage(chatId, text, { parse_mode: 'Markdown', ...extra })
     }
   )
 }
@@ -169,6 +180,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   // Wire plugin-specific integrations (uses same module instance from loader)
   wireReminderSendFn(bot)
   wireSchedulerSendFn(bot)
+  wireTaskSendFn(bot)
 
   // Plugin interceptor — dynamic command dispatch + message handlers
   // Catches plugin commands installed after startup (e.g., via /install)
@@ -240,6 +252,9 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   setAvailableCommands([...CORE_COMMANDS, ...pluginCommands])
 
   bot.telegram.setMyCommands([...CORE_COMMANDS, ...pluginCommands]).catch(() => {})
+
+  // After restart, notify users who had active projects with a "Continue?" button
+  scheduleRestartNotifications(bot)
 
   return bot
 }

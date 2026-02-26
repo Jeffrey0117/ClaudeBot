@@ -8,7 +8,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface, type Interface } from 'node:readline'
 import { env } from '../config/env.js'
 
-const TIMEOUT_MS = 30_000
+const TIMEOUT_MS = 60_000
 
 interface SherpaResponse {
   readonly success: boolean
