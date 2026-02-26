@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClaudeBot — AI Command Center on Your Phone</title>
+  <meta name="description" content="Not a pipe to Claude. A command center on your phone. Telegram Bot platform with plugins, queue, multi-project, and interactive UI.">
+
+  <!-- OG / Twitter -->
+  <meta property="og:title" content="ClaudeBot — AI Command Center">
+  <meta property="og:description" content="Not a pipe to Claude. A command center on your phone.">
+  <meta property="og:image" content="assets/images/logo.png">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ClaudeBot — AI Command Center">
+  <meta name="twitter:description" content="Not a pipe to Claude. A command center on your phone.">
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="assets/css/styles.css">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="assets/images/logo.png">
+</head>
+<body class="bg-white text-gray-900 font-sans antialiased">
+
+  <!-- ============ NAV ============ -->
+  <nav class="fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-lg border-b border-gray-100 z-50">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6">
+      <div class="flex items-center justify-between h-16">
+        <!-- Logo -->
+        <a href="#" class="flex items-center gap-2">
+          <img src="assets/images/logo.png" alt="ClaudeBot" class="w-8 h-8 rounded-lg">
+          <span class="font-bold text-xl gradient-text">ClaudeBot</span>
+        </a>
+
+        <!-- Desktop Nav -->
+        <div class="hidden md:flex items-center gap-8">
+          <a href="#features" class="text-sm text-gray-600 hover:text-gray-900 transition" data-i18n="nav_features">功能</a>
+          <a href="#plugins" class="text-sm text-gray-600 hover:text-gray-900 transition" data-i18n="nav_plugins">插件</a>
+          <a href="#commands" class="text-sm text-gray-600 hover:text-gray-900 transition" data-i18n="nav_commands">指令</a>
+          <a href="#getting-started" class="text-sm text-gray-600 hover:text-gray-900 transition" data-i18n="nav_start">開始使用</a>
+        </div>
+
+        <!-- Right: Lang + GitHub -->
+        <div class="hidden md:flex items-center gap-4">
+          <!-- Language Toggle -->
+          <div class="flex bg-gray-100 rounded-lg p-0.5">
+            <button data-lang-toggle="zh" class="lang-switch px-3 py-1 text-xs rounded-md font-medium bg-white text-gray-900 shadow">繁中</button>
+            <button data-lang-toggle="en" class="lang-switch px-3 py-1 text-xs rounded-md font-medium text-gray-300">EN</button>
+          </div>
+          <!-- GitHub -->
+          <a href="https://github.com/Jeffrey0117/ClaudeBot" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+            GitHub
+          </a>
+        </div>
+
+        <!-- Mobile Hamburger -->
+        <button class="hamburger md:hidden" onclick="toggleMobileMenu()">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+      </div>
+
+      <!-- Mobile Menu -->
+      <div class="mobile-menu md:hidden" id="mobile-menu">
+        <div class="py-4 space-y-3 border-t border-gray-100">
+          <a href="#features" class="block text-gray-600 hover:text-gray-900" data-i18n="nav_features" onclick="closeMobileMenu()">功能</a>
+          <a href="#plugins" class="block text-gray-600 hover:text-gray-900" data-i18n="nav_plugins" onclick="closeMobileMenu()">插件</a>
+          <a href="#commands" class="block text-gray-600 hover:text-gray-900" data-i18n="nav_commands" onclick="closeMobileMenu()">指令</a>
+          <a href="#getting-started" class="block text-gray-600 hover:text-gray-900" data-i18n="nav_start" onclick="closeMobileMenu()">開始使用</a>
+          <div class="flex items-center gap-3 pt-3 border-t border-gray-100">
+            <div class="flex bg-gray-100 rounded-lg p-0.5">
+              <button data-lang-toggle="zh" class="lang-switch px-3 py-1 text-xs rounded-md font-medium bg-white text-gray-900 shadow">繁中</button>
+              <button data-lang-toggle="en" class="lang-switch px-3 py-1 text-xs rounded-md font-medium text-gray-300">EN</button>
+            </div>
+            <a href="https://github.com/Jeffrey0117/ClaudeBot" target="_blank" class="flex items-center gap-1 text-sm text-gray-600">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ============ HERO ============ -->
+  <section class="hero-bg pt-32 pb-20 px-4">
+    <div class="max-w-4xl mx-auto text-center">
+      <!-- Logo -->
+      <div class="mb-8">
+        <img src="assets/images/logo.png" alt="ClaudeBot" class="w-24 h-24 mx-auto rounded-2xl shadow-lg logo-pulse">
+      </div>
+
+      <!-- Tagline -->
+      <h1 class="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight mb-4">
+        <span class="gradient-text" data-i18n="hero_tagline">不只是 Claude 的接口。</span>
+        <br>
+        <span data-i18n="hero_subtitle">你手機上的指揮中心。</span>
+      </h1>
+
+      <p class="text-lg text-gray-600 max-w-2xl mx-auto mb-10" data-i18n="hero_desc">
+        一個 Telegram Bot 平台，整合 Claude Code CLI、插件系統、語音辨識、多專案管理。插件零 AI 成本運行。
+      </p>
+
+      <!-- CTAs -->
+      <div class="flex flex-wrap justify-center gap-4 mb-16">
+        <a href="#getting-started" class="px-8 py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition transform hover:scale-105" data-i18n="hero_cta_start">開始使用</a>
+        <a href="https://github.com/Jeffrey0117/ClaudeBot" target="_blank" class="px-8 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition" data-i18n="hero_cta_github">GitHub</a>
+      </div>
+
+      <!-- Stats -->
+      <div class="inline-flex flex-wrap justify-center bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl px-6 py-4 gap-0">
+        <div class="stat-item flex flex-col items-center px-6 py-2">
+          <span class="text-3xl font-bold text-white">27+</span>
+          <span class="text-blue-100 text-sm" data-i18n="hero_stat_commands">指令</span>
+        </div>
+        <div class="stat-item flex flex-col items-center px-6 py-2">
+          <span class="text-3xl font-bold text-white">13+</span>
+          <span class="text-blue-100 text-sm" data-i18n="hero_stat_plugins">插件</span>
+        </div>
+        <div class="stat-item flex flex-col items-center px-6 py-2">
+          <span class="text-3xl font-bold text-white">3</span>
+          <span class="text-blue-100 text-sm" data-i18n="hero_stat_backends">AI 後端</span>
+        </div>
+        <div class="stat-item flex flex-col items-center px-6 py-2">
+          <span class="text-3xl font-bold text-white">&infin;</span>
+          <span class="text-blue-100 text-sm" data-i18n="hero_stat_projects">專案</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FEATURES ============ -->
+  <section id="features" class="py-24 px-4 bg-gray-50/50">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-16 fade-in">
+        <h2 class="text-3xl sm:text-4xl font-bold mb-4" data-i18n="features_title">核心功能</h2>
+        <p class="text-gray-600 text-lg" data-i18n="features_subtitle">打造最強 Telegram AI 指揮中心</p>
+      </div>
+
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 fade-in-group">
+        <!-- 1. Streaming -->
+        <div class="feature-card fade-in bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div class="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center text-2xl mb-4">⚡</div>
+          <h3 class="font-semibold text-lg mb-2" data-i18n="feat_stream_title">即時串流</h3>
+          <p class="text-gray-600 text-sm leading-relaxed" data-i18n="feat_stream_desc">每秒更新回應狀態、工具名稱、執行耗時，掌握 AI 每一步動態。</p>
+        </div>
+        <!-- 2. Multi-AI -->
+        <div class="feature-card fade-in bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div class="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center text-2xl mb-4">🧠</div>
+          <h3 class="font-semibold text-lg mb-2" data-i18n="feat_ai_title">多 AI 後端</h3>
+          <p class="text-gray-600 text-sm leading-relaxed" data-i18n="feat_ai_desc">支援 Claude / Gemini / auto 模式，/model 一鍵切換，選擇最適合的 AI。</p>
+        </div>
+        <!-- 3. Multi-Project -->
+        <div class="feature-card fade-in bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div class="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center text-2xl mb-4">📁</div>
+          <h3 class="font-semibold text-lg mb-2" data-i18n="feat_project_title">多專案管理</h3>
+          <p class="text-gray-600 text-sm leading-relaxed" data-i18n="feat_project_desc">每個專案獨立 Session，--resume 延續對話，跨專案無縫切換。</p>
+        </div>
+        <!-- 4. Queue -->
+        <div class="feature-card fade-in bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div class="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center text-2xl mb-4">📋</div>
+          <h3 class="font-semibold text-lg mb-2" data-i18n="feat_queue_title">佇列系統</h3>
+          <p class="text-gray-600 text-sm leading-relaxed" data-i18n="feat_queue_desc">序列執行 + 跨 Bot 檔案鎖，確保一次只有一個 CLI 進程運行。</p>
+        </div>
+        <!-- 5. Interactive UI -->
+        <div class="feature-card fade-in bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div class="w-12 h-12 rounded-xl bg-pink-50 flex items-center justify-center text-2xl mb-4">🎛️</div>
+          <h3 class="font-semibold text-lg mb-2" data-i18n="feat_ui_title">互動式 UI</h3>
+          <p class="text-gray-600 text-sm leading-relaxed" data-i18n="feat_ui_desc">確認按鈕、建議追問、選項偵測，讓 AI 互動不只是文字。</p>
+        </div>
+        <!-- 6. Voice ASR -->
+        <div class="feature-card fade-in bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div class="w-12 h-12 rounded-xl bg-red-50 flex items-center justify-center text-2xl mb-4">🎤</div>
+          <h3 class="font-semibold text-lg mb-2" data-i18n="feat_voice_title">語音辨識</h3>
+          <p class="text-gray-600 text-sm leading-relaxed" data-i18n="feat_voice_desc">Sherpa-ONNX 本地語音辨識 + 2x 加速播放 + LLM 智慧修正。</p>
+        </div>
+        <!-- 7. Plugin System -->
+        <div class="feature-card fade-in bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div class="w-12 h-12 rounded-xl bg-indigo-50 flex items-center justify-center text-2xl mb-4">🔌</div>
+          <h3 class="font-semibold text-lg mb-2" data-i18n="feat_plugin_title">插件系統</h3>
+          <p class="text-gray-600 text-sm leading-relaxed" data-i18n="feat_plugin_desc">熱重載、零 AI 成本、Plugin Store 一鍵安裝，輕鬆擴展功能。</p>
+        </div>
+        <!-- 8. Auto-commit -->
+        <div class="feature-card fade-in bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div class="w-12 h-12 rounded-xl bg-teal-50 flex items-center justify-center text-2xl mb-4">🔄</div>
+          <h3 class="font-semibold text-lg mb-2" data-i18n="feat_commit_title">自動提交</h3>
+          <p class="text-gray-600 text-sm leading-relaxed" data-i18n="feat_commit_desc">AI 改動後自動 git commit + push，程式碼版本控制全自動。</p>
+        </div>
+        <!-- 9. Dashboard -->
+        <div class="feature-card fade-in bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div class="w-12 h-12 rounded-xl bg-cyan-50 flex items-center justify-center text-2xl mb-4">📊</div>
+          <h3 class="font-semibold text-lg mb-2" data-i18n="feat_dashboard_title">Web 儀表板</h3>
+          <p class="text-gray-600 text-sm leading-relaxed" data-i18n="feat_dashboard_desc">React 面板 + WebSocket 即時監控，視覺化掌握 Bot 狀態。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HOW IT WORKS ============ -->
+  <section class="py-24 px-4">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-16 fade-in">
+        <h2 class="text-3xl sm:text-4xl font-bold mb-4" data-i18n="how_title">運作方式</h2>
+        <p class="text-gray-600 text-lg" data-i18n="how_subtitle">簡單三層架構，強大無限可能</p>
+      </div>
+
+      <div class="flex flex-col md:flex-row items-center justify-center gap-4 md:gap-0 fade-in">
+        <!-- Step 1: Telegram -->
+        <div class="flow-line flex flex-col items-center text-center px-6 py-4">
+          <div class="w-16 h-16 rounded-2xl bg-blue-100 flex items-center justify-center text-3xl mb-3">📱</div>
+          <h4 class="font-semibold mb-1" data-i18n="how_step1_title">Telegram 訊息</h4>
+          <p class="text-gray-500 text-sm" data-i18n="how_step1_desc">在手機上傳送文字或語音</p>
+        </div>
+        <!-- Step 2: ClaudeBot -->
+        <div class="flow-line flex flex-col items-center text-center px-6 py-4">
+          <div class="w-16 h-16 rounded-2xl bg-purple-100 flex items-center justify-center text-3xl mb-3">🤖</div>
+          <h4 class="font-semibold mb-1" data-i18n="how_step2_title">ClaudeBot 處理</h4>
+          <p class="text-gray-500 text-sm" data-i18n="how_step2_desc">佇列管理、插件路由、Session 追蹤</p>
+        </div>
+        <!-- Step 3: Plugins -->
+        <div class="flow-line flex flex-col items-center text-center px-6 py-4">
+          <div class="w-16 h-16 rounded-2xl bg-green-100 flex items-center justify-center text-3xl mb-3">🔌</div>
+          <h4 class="font-semibold mb-1" data-i18n="how_step3_title">插件（零成本）</h4>
+          <p class="text-gray-500 text-sm" data-i18n="how_step3_desc">骰子、計算機、提醒等不需 AI</p>
+        </div>
+        <!-- Step 4: AI -->
+        <div class="flow-line flex flex-col items-center text-center px-6 py-4">
+          <div class="w-16 h-16 rounded-2xl bg-orange-100 flex items-center justify-center text-3xl mb-3">🧠</div>
+          <h4 class="font-semibold mb-1" data-i18n="how_step4_title">AI 後端</h4>
+          <p class="text-gray-500 text-sm" data-i18n="how_step4_desc">Claude / Gemini 處理複雜請求</p>
+        </div>
+        <!-- Step 5: Projects -->
+        <div class="flow-line flex flex-col items-center text-center px-6 py-4">
+          <div class="w-16 h-16 rounded-2xl bg-teal-100 flex items-center justify-center text-3xl mb-3">📁</div>
+          <h4 class="font-semibold mb-1" data-i18n="how_step5_title">專案檔案</h4>
+          <p class="text-gray-500 text-sm" data-i18n="how_step5_desc">直接操作你的程式碼庫</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PLUGIN CATALOG ============ -->
+  <section id="plugins" class="py-24 px-4 bg-gray-50/50">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-12 fade-in">
+        <h2 class="text-3xl sm:text-4xl font-bold mb-4" data-i18n="plugins_title">插件目錄</h2>
+        <p class="text-gray-600 text-lg" data-i18n="plugins_subtitle">從 Plugin Store 一鍵安裝，零 AI 成本運行</p>
+      </div>
+
+      <!-- Search -->
+      <div class="max-w-md mx-auto mb-10 fade-in">
+        <div class="relative">
+          <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          <input type="text" id="plugin-search" class="w-full pl-12 pr-4 py-3 bg-white rounded-xl border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition" data-i18n-placeholder="plugins_search" placeholder="搜尋插件...">
+        </div>
+      </div>
+
+      <!-- Plugin Grid -->
+      <div id="plugin-grid" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 fade-in-group">
+        <!-- Dynamically loaded by plugins.js -->
+      </div>
+
+      <!-- Loading / Error -->
+      <p id="plugin-loading" class="text-center text-gray-400 py-8" data-i18n="plugins_loading">從 GitHub 載入插件...</p>
+      <p id="plugin-error" class="text-center text-red-400 py-4 hidden" data-i18n="plugins_error">無法載入遠端插件，顯示預設列表</p>
+      <div id="plugin-no-results" class="no-results" data-i18n="plugins_no_results">找不到符合的插件</div>
+    </div>
+  </section>
+
+  <!-- ============ COMMANDS REFERENCE ============ -->
+  <section id="commands" class="py-24 px-4">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-12 fade-in">
+        <h2 class="text-3xl sm:text-4xl font-bold mb-4" data-i18n="commands_title">指令參考</h2>
+        <p class="text-gray-600 text-lg" data-i18n="commands_subtitle">27+ 內建指令，涵蓋專案管理到 Bot 控制</p>
+      </div>
+
+      <!-- Search + Filters -->
+      <div class="max-w-4xl mx-auto mb-8 fade-in">
+        <div class="flex flex-col sm:flex-row gap-4 items-center">
+          <div class="relative flex-1 w-full">
+            <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <input type="text" id="command-search" class="w-full pl-12 pr-4 py-3 bg-white rounded-xl border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition" data-i18n-placeholder="commands_search" placeholder="搜尋指令...">
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button class="command-filter px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white transition" data-filter="all" data-i18n="commands_all">全部</button>
+            <button class="command-filter px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition" data-filter="project" data-i18n="commands_cat_project">專案管理</button>
+            <button class="command-filter px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition" data-filter="ai" data-i18n="commands_cat_ai">AI 控制</button>
+            <button class="command-filter px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition" data-filter="todo" data-i18n="commands_cat_todo">待辦靈感</button>
+            <button class="command-filter px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition" data-filter="bot" data-i18n="commands_cat_bot">Bot 管理</button>
+            <button class="command-filter px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition" data-filter="store" data-i18n="commands_cat_store">Plugin Store</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Commands Table -->
+      <div class="max-w-4xl mx-auto bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm fade-in">
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead>
+              <tr class="bg-gray-50 border-b border-gray-200">
+                <th class="text-left px-6 py-3 text-sm font-semibold text-gray-700" data-i18n="commands_col_command">指令</th>
+                <th class="text-left px-6 py-3 text-sm font-semibold text-gray-700" data-i18n="commands_col_desc">說明</th>
+                <th class="text-left px-6 py-3 text-sm font-semibold text-gray-700" data-i18n="commands_col_cat">分類</th>
+              </tr>
+            </thead>
+            <tbody id="command-table-body">
+              <!-- Project Management -->
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="project">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/projects</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_projects">列出所有專案</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="project" data-i18n="commands_cat_project">專案管理</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="project">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/select</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_select">選擇工作專案</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="project" data-i18n="commands_cat_project">專案管理</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="project">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/fav</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_fav">切換常用專案</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="project" data-i18n="commands_cat_project">專案管理</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="project">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/status</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_status">查看目前狀態</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="project" data-i18n="commands_cat_project">專案管理</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="project">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/context</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_context">注入額外上下文檔案</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="project" data-i18n="commands_cat_project">專案管理</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="project">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/run</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_run">執行 shell 指令</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="project" data-i18n="commands_cat_project">專案管理</span></td>
+              </tr>
+
+              <!-- AI Control -->
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="ai">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/model</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_model">切換 AI 模型</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="ai" data-i18n="commands_cat_ai">AI 控制</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="ai">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/new</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_new">開啟新對話</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="ai" data-i18n="commands_cat_ai">AI 控制</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="ai">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/cancel</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_cancel">取消目前任務</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="ai" data-i18n="commands_cat_ai">AI 控制</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="ai">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/chat</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_chat">輕量聊天模式（不含專案）</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="ai" data-i18n="commands_cat_ai">AI 控制</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="ai">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/asr</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_asr">語音辨識設定</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="ai" data-i18n="commands_cat_ai">AI 控制</span></td>
+              </tr>
+
+              <!-- Todo & Ideas -->
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="todo">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/todo</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_todo">新增待辦事項</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="todo" data-i18n="commands_cat_todo">待辦靈感</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="todo">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/todos</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_todos">查看待辦列表</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="todo" data-i18n="commands_cat_todo">待辦靈感</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="todo">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/idea</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_idea">記錄靈感</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="todo" data-i18n="commands_cat_todo">待辦靈感</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="todo">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/ideas</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_ideas">查看靈感列表</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="todo" data-i18n="commands_cat_todo">待辦靈感</span></td>
+              </tr>
+
+              <!-- Bot Management -->
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="bot">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/help</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_help">查看所有指令</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="bot" data-i18n="commands_cat_bot">Bot 管理</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="bot">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/newbot</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_newbot">產生新 Bot 設定</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="bot" data-i18n="commands_cat_bot">Bot 管理</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="bot">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/reload</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_reload">熱重載插件</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="bot" data-i18n="commands_cat_bot">Bot 管理</span></td>
+              </tr>
+
+              <!-- Plugin Store -->
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="store">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/store</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_store">瀏覽插件商店</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="store" data-i18n="commands_cat_store">Plugin Store</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="store">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/install</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_install">安裝插件</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="store" data-i18n="commands_cat_store">Plugin Store</span></td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50" data-category="store">
+                <td class="px-6 py-3"><code class="text-blue-600 font-mono text-sm">/uninstall</code></td>
+                <td class="px-6 py-3 text-sm text-gray-600" data-i18n="cmd_uninstall">移除插件</td>
+                <td class="px-6 py-3"><span class="category-badge" data-cat="store" data-i18n="commands_cat_store">Plugin Store</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="command-no-results" class="no-results" data-i18n="commands_no_results">找不到符合的指令</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GETTING STARTED ============ -->
+  <section id="getting-started" class="getting-started-bg py-24 px-4 text-white">
+    <div class="max-w-4xl mx-auto">
+      <div class="text-center mb-16 fade-in">
+        <h2 class="text-3xl sm:text-4xl font-bold mb-4" data-i18n="start_title">開始使用</h2>
+        <p class="text-blue-200 text-lg" data-i18n="start_subtitle">三步驟，從零到指揮中心</p>
+      </div>
+
+      <div class="space-y-8 fade-in">
+        <!-- Step 1 -->
+        <div>
+          <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+            <span class="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-sm font-bold">1</span>
+            <span data-i18n="start_step1">步驟一：複製專案</span>
+          </h3>
+          <div class="code-block">
+            <div class="code-header">
+              <div class="code-dot" style="background:#ef4444"></div>
+              <div class="code-dot" style="background:#f59e0b"></div>
+              <div class="code-dot" style="background:#22c55e"></div>
+            </div>
+            <pre><code>git clone https://github.com/Jeffrey0117/ClaudeBot.git
+cd ClaudeBot && npm install</code></pre>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div>
+          <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+            <span class="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-sm font-bold">2</span>
+            <span data-i18n="start_step2">步驟二：設定環境</span>
+          </h3>
+          <div class="code-block">
+            <div class="code-header">
+              <div class="code-dot" style="background:#ef4444"></div>
+              <div class="code-dot" style="background:#f59e0b"></div>
+              <div class="code-dot" style="background:#22c55e"></div>
+            </div>
+            <pre><code>cp .env.example .env</code></pre>
+          </div>
+          <p class="text-blue-200 text-sm mt-3 mb-2" data-i18n="start_env_desc">在 .env 中填入以下設定：</p>
+          <div class="bg-white/10 rounded-lg p-4 space-y-2 text-sm font-mono">
+            <div><span class="text-blue-300">BOT_TOKEN</span>=<span class="text-gray-400"> # <span data-i18n="start_env_token">從 @BotFather 取得</span></span></div>
+            <div><span class="text-blue-300">PASSWORD</span>=<span class="text-gray-400"> # <span data-i18n="start_env_password">你的登入密碼</span></span></div>
+            <div><span class="text-blue-300">ALLOWED_PROJECTS</span>=<span class="text-gray-400"> # <span data-i18n="start_env_projects">專案路徑（逗號分隔）</span></span></div>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div>
+          <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+            <span class="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-sm font-bold">3</span>
+            <span data-i18n="start_step3">步驟三：啟動</span>
+          </h3>
+          <div class="code-block">
+            <div class="code-header">
+              <div class="code-dot" style="background:#ef4444"></div>
+              <div class="code-dot" style="background:#f59e0b"></div>
+              <div class="code-dot" style="background:#22c55e"></div>
+            </div>
+            <pre><code>npm run dev</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="bg-gray-900 text-gray-400 py-16 px-4">
+    <div class="max-w-6xl mx-auto">
+      <div class="grid sm:grid-cols-3 gap-12 mb-12">
+        <!-- Brand -->
+        <div>
+          <div class="flex items-center gap-2 mb-4">
+            <img src="assets/images/logo.png" alt="ClaudeBot" class="w-8 h-8 rounded-lg">
+            <span class="font-bold text-white text-lg">ClaudeBot</span>
+          </div>
+          <p class="text-sm leading-relaxed" data-i18n="footer_desc">你手機上的 AI 指揮中心。開源、可擴展、零成本插件。</p>
+        </div>
+
+        <!-- Links -->
+        <div>
+          <h4 class="text-white font-semibold mb-4" data-i18n="footer_links">連結</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="https://github.com/Jeffrey0117/ClaudeBot" target="_blank" class="hover:text-white transition">GitHub</a></li>
+            <li><a href="https://github.com/Jeffrey0117/claudebot-plugins" target="_blank" class="hover:text-white transition" data-i18n="footer_plugin_store">Plugin Store</a></li>
+            <li><a href="#features" class="hover:text-white transition" data-i18n="nav_features">功能</a></li>
+            <li><a href="#commands" class="hover:text-white transition" data-i18n="nav_commands">指令</a></li>
+          </ul>
+        </div>
+
+        <!-- Resources -->
+        <div>
+          <h4 class="text-white font-semibold mb-4" data-i18n="footer_resources">資源</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" class="hover:text-white transition" data-i18n="footer_docs">Claude Code 文檔</a></li>
+            <li><a href="#getting-started" class="hover:text-white transition" data-i18n="nav_start">開始使用</a></li>
+            <li><a href="https://github.com/Jeffrey0117/ClaudeBot/blob/master/LICENSE" target="_blank" class="hover:text-white transition" data-i18n="footer_license">授權條款</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="border-t border-gray-800 pt-8 text-center text-sm">
+        <p>&copy; 2024-2026 Jeffrey. MIT License.</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ============ SCRIPTS ============ -->
+  <script src="assets/js/i18n.js"></script>
+  <script src="assets/js/plugins.js"></script>
+  <script src="assets/js/commands.js"></script>
+
+  <!-- Scroll Animation Observer -->
+  <script>
+    // Fade-in on scroll
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible')
+        }
+      })
+    }, { threshold: 0.1 })
+
+    document.querySelectorAll('.fade-in').forEach(el => observer.observe(el))
+
+    // Mobile menu
+    function toggleMobileMenu() {
+      const menu = document.getElementById('mobile-menu')
+      const btn = document.querySelector('.hamburger')
+      menu.classList.toggle('open')
+      btn.classList.toggle('active')
+    }
+
+    function closeMobileMenu() {
+      const menu = document.getElementById('mobile-menu')
+      const btn = document.querySelector('.hamburger')
+      menu.classList.remove('open')
+      btn.classList.remove('active')
+    }
+
+    // Navbar background on scroll
+    window.addEventListener('scroll', () => {
+      const nav = document.querySelector('nav')
+      if (window.scrollY > 10) {
+        nav.classList.add('shadow-sm')
+      } else {
+        nav.classList.remove('shadow-sm')
+      }
+    })
+  </script>
+</body>
+</html>

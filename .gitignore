@@ -10,6 +10,7 @@ hotwords.txt
 plan.md
 start.bat
 *.png
+!docs/assets/images/*.png
 gemini-*.txt
 .DS_Store
 Thumbs.db
