@@ -4,8 +4,8 @@ document.addEventListener('DOMContentLoaded', function () {
   var tableBody = document.getElementById('command-table-body')
   var activeCategory = 'all'
 
-  var ACTIVE_CLASSES = ['bg-blue-600', 'text-white']
-  var INACTIVE_CLASSES = ['bg-gray-100', 'text-gray-700', 'hover:bg-gray-200']
+  var ACTIVE_CLASSES = ['bg-ink', 'text-white']
+  var INACTIVE_CLASSES = ['bg-white', 'text-slate-500', 'border', 'border-slate-200', 'hover:border-slate-300']
 
   function getRows() {
     return tableBody ? Array.from(tableBody.querySelectorAll('tr')) : []

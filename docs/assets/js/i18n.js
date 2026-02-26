@@ -256,8 +256,8 @@ const translations = {
 }
 
 const STORAGE_KEY = 'claudebot-lang'
-const ACTIVE_CLASSES = ['bg-white', 'text-gray-900', 'shadow']
-const INACTIVE_CLASSES = ['text-gray-300']
+const ACTIVE_CLASSES = ['bg-white', 'text-ink', 'shadow-sm']
+const INACTIVE_CLASSES = ['text-slate-400']
 
 let currentLang = 'zh'
 
@@ -307,17 +307,35 @@ function updateToggleButtons(lang) {
   })
 }
 
+function updateURL(lang) {
+  var url = new URL(window.location)
+  if (lang === 'zh') {
+    url.searchParams.delete('lang')
+  } else {
+    url.searchParams.set('lang', lang)
+  }
+  window.history.replaceState({}, '', url)
+}
+
+function getURLLang() {
+  try {
+    var params = new URLSearchParams(window.location.search)
+    var lang = params.get('lang')
+    if (lang === 'en' || lang === 'zh') return lang
+  } catch (_) {}
+  return null
+}
+
 function switchLang(lang) {
   if (!translations[lang]) return
   currentLang = lang
 
   try {
     localStorage.setItem(STORAGE_KEY, lang)
-  } catch (_) {
-    // localStorage unavailable — ignore
-  }
+  } catch (_) {}
 
-  // Opacity fade transition
+  updateURL(lang)
+
   document.documentElement.style.transition = 'opacity 0.15s ease'
   document.documentElement.style.opacity = '0.6'
 
@@ -333,20 +351,25 @@ function switchLang(lang) {
 }
 
 // Initialize on DOM ready
+// Priority: URL param > localStorage > default 'zh'
 document.addEventListener('DOMContentLoaded', function () {
+  var urlLang = getURLLang()
   var saved = null
   try {
     saved = localStorage.getItem(STORAGE_KEY)
-  } catch (_) {
-    // localStorage unavailable
-  }
-  currentLang = (saved === 'en' || saved === 'zh') ? saved : 'zh'
+  } catch (_) {}
+
+  currentLang = urlLang || ((saved === 'en' || saved === 'zh') ? saved : 'zh')
 
   applyTranslations(currentLang)
   updateToggleButtons(currentLang)
+  updateURL(currentLang)
   document.documentElement.setAttribute('lang', currentLang === 'zh' ? 'zh-Hant' : 'en')
 
-  // Bind toggle buttons
+  try {
+    localStorage.setItem(STORAGE_KEY, currentLang)
+  } catch (_) {}
+
   document.querySelectorAll('[data-lang-toggle]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       switchLang(btn.getAttribute('data-lang-toggle'))
