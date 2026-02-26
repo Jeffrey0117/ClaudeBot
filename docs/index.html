@@ -100,15 +100,17 @@
     <div class="hero-grid absolute inset-0 pointer-events-none" aria-hidden="true"></div>
 
     <div class="relative max-w-4xl mx-auto text-center">
-      <div class="mb-10">
-        <img src="assets/images/logo.png" alt="ClaudeBot" class="w-20 h-20 mx-auto rounded-2xl shadow-md">
+      <div class="mb-8">
+        <img src="assets/images/logo.png" alt="ClaudeBot" class="w-20 h-20 mx-auto rounded-2xl shadow-md mb-5">
+        <h1 class="font-display text-5xl sm:text-6xl lg:text-7xl font-bold text-ink tracking-tight">ClaudeBot</h1>
       </div>
 
-      <h1 class="font-display text-5xl sm:text-6xl lg:text-7xl font-bold text-ink tracking-tight leading-[1.1] mb-6">
+      <p class="text-xl sm:text-2xl font-display font-semibold text-slate-500 tracking-wide uppercase mb-4">
         <span data-i18n="hero_tagline">不只是 Claude 的接口。</span>
-        <br>
-        <span class="text-accent" data-i18n="hero_subtitle">你手機上的指揮中心。</span>
-      </h1>
+      </p>
+      <p class="text-2xl sm:text-3xl font-display font-bold text-accent mb-6">
+        <span data-i18n="hero_subtitle">你手機上的指揮中心。</span>
+      </p>
 
       <p class="text-lg sm:text-xl text-slate-500 max-w-2xl mx-auto mb-12 leading-relaxed" data-i18n="hero_desc">
         一個 Telegram Bot 平台，整合 Claude Code CLI、插件系統、語音辨識、多專案管理。插件零 AI 成本運行。
@@ -141,106 +143,106 @@
     </div>
   </section>
 
-  <!-- ============ FEATURES (dark section) ============ -->
-  <section id="features" class="features-dark py-28 px-5">
+  <!-- ============ FEATURES ============ -->
+  <section id="features" class="py-28 px-5 border-t border-slate-100">
     <div class="max-w-6xl mx-auto">
-      <div class="mb-16 fade-in">
-        <div class="flex items-center gap-2 mb-6">
-          <span class="text-accent text-lg">&rsaquo;</span>
-          <h2 class="font-display text-3xl sm:text-4xl font-bold text-white" data-i18n="features_title">核心功能</h2>
-        </div>
+      <div class="text-center mb-16 fade-in">
+        <h2 class="font-display text-3xl sm:text-4xl font-bold text-ink mb-4" data-i18n="features_title">核心功能</h2>
+        <p class="text-slate-500" data-i18n="features_subtitle">打造最強 Telegram AI 指揮中心</p>
       </div>
 
       <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 fade-in-group">
         <!-- 1. Streaming -->
-        <div class="feature-card-dark fade-in rounded-2xl p-7 border border-white/[0.07] bg-white/[0.03]">
+        <div class="feature-card fade-in rounded-2xl p-7 border border-slate-200 bg-white">
           <svg class="w-7 h-7 text-accent mb-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-          <h3 class="font-display font-bold text-white text-lg mb-2" data-i18n="feat_stream_title">即時串流</h3>
-          <p class="text-slate-400 text-sm leading-relaxed" data-i18n="feat_stream_desc">每秒更新回應狀態、工具名稱、執行耗時，掌握 AI 每一步動態。</p>
+          <h3 class="font-display font-bold text-ink text-lg mb-2" data-i18n="feat_stream_title">即時串流</h3>
+          <p class="text-slate-500 text-sm leading-relaxed" data-i18n="feat_stream_desc">每秒更新回應狀態、工具名稱、執行耗時，掌握 AI 每一步動態。</p>
         </div>
         <!-- 2. Multi-AI -->
-        <div class="feature-card-dark fade-in rounded-2xl p-7 border border-white/[0.07] bg-white/[0.03]">
+        <div class="feature-card fade-in rounded-2xl p-7 border border-slate-200 bg-white">
           <svg class="w-7 h-7 text-accent mb-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h.01M15 9h.01M9 15l2 1.5L15 15"/></svg>
-          <h3 class="font-display font-bold text-white text-lg mb-2" data-i18n="feat_ai_title">多 AI 後端</h3>
-          <p class="text-slate-400 text-sm leading-relaxed" data-i18n="feat_ai_desc">支援 Claude / Gemini / auto 模式，/model 一鍵切換，選擇最適合的 AI。</p>
+          <h3 class="font-display font-bold text-ink text-lg mb-2" data-i18n="feat_ai_title">多 AI 後端</h3>
+          <p class="text-slate-500 text-sm leading-relaxed" data-i18n="feat_ai_desc">支援 Claude / Gemini / auto 模式，/model 一鍵切換，選擇最適合的 AI。</p>
         </div>
         <!-- 3. Multi-Project -->
-        <div class="feature-card-dark fade-in rounded-2xl p-7 border border-white/[0.07] bg-white/[0.03]">
+        <div class="feature-card fade-in rounded-2xl p-7 border border-slate-200 bg-white">
           <svg class="w-7 h-7 text-accent mb-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><path d="M12 11v6M9 14h6"/></svg>
-          <h3 class="font-display font-bold text-white text-lg mb-2" data-i18n="feat_project_title">多專案管理</h3>
-          <p class="text-slate-400 text-sm leading-relaxed" data-i18n="feat_project_desc">每個專案獨立 Session，--resume 延續對話，跨專案無縫切換。</p>
+          <h3 class="font-display font-bold text-ink text-lg mb-2" data-i18n="feat_project_title">多專案管理</h3>
+          <p class="text-slate-500 text-sm leading-relaxed" data-i18n="feat_project_desc">每個專案獨立 Session，--resume 延續對話，跨專案無縫切換。</p>
         </div>
         <!-- 4. Queue -->
-        <div class="feature-card-dark fade-in rounded-2xl p-7 border border-white/[0.07] bg-white/[0.03]">
+        <div class="feature-card fade-in rounded-2xl p-7 border border-slate-200 bg-white">
           <svg class="w-7 h-7 text-accent mb-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-          <h3 class="font-display font-bold text-white text-lg mb-2" data-i18n="feat_queue_title">佇列系統</h3>
-          <p class="text-slate-400 text-sm leading-relaxed" data-i18n="feat_queue_desc">序列執行 + 跨 Bot 檔案鎖，確保一次只有一個 CLI 進程運行。</p>
+          <h3 class="font-display font-bold text-ink text-lg mb-2" data-i18n="feat_queue_title">佇列系統</h3>
+          <p class="text-slate-500 text-sm leading-relaxed" data-i18n="feat_queue_desc">序列執行 + 跨 Bot 檔案鎖，確保一次只有一個 CLI 進程運行。</p>
         </div>
         <!-- 5. Interactive UI -->
-        <div class="feature-card-dark fade-in rounded-2xl p-7 border border-white/[0.07] bg-white/[0.03]">
+        <div class="feature-card fade-in rounded-2xl p-7 border border-slate-200 bg-white">
           <svg class="w-7 h-7 text-accent mb-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 15l-2 5L9 9l11 4-5 2z"/><path d="M22 22l-5-5"/></svg>
-          <h3 class="font-display font-bold text-white text-lg mb-2" data-i18n="feat_ui_title">互動式 UI</h3>
-          <p class="text-slate-400 text-sm leading-relaxed" data-i18n="feat_ui_desc">確認按鈕、建議追問、選項偵測，讓 AI 互動不只是文字。</p>
+          <h3 class="font-display font-bold text-ink text-lg mb-2" data-i18n="feat_ui_title">互動式 UI</h3>
+          <p class="text-slate-500 text-sm leading-relaxed" data-i18n="feat_ui_desc">確認按鈕、建議追問、選項偵測，讓 AI 互動不只是文字。</p>
         </div>
         <!-- 6. Voice ASR -->
-        <div class="feature-card-dark fade-in rounded-2xl p-7 border border-white/[0.07] bg-white/[0.03]">
+        <div class="feature-card fade-in rounded-2xl p-7 border border-slate-200 bg-white">
           <svg class="w-7 h-7 text-accent mb-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
-          <h3 class="font-display font-bold text-white text-lg mb-2" data-i18n="feat_voice_title">語音辨識</h3>
-          <p class="text-slate-400 text-sm leading-relaxed" data-i18n="feat_voice_desc">Sherpa-ONNX 本地語音辨識 + 2x 加速播放 + LLM 智慧修正。</p>
+          <h3 class="font-display font-bold text-ink text-lg mb-2" data-i18n="feat_voice_title">語音辨識</h3>
+          <p class="text-slate-500 text-sm leading-relaxed" data-i18n="feat_voice_desc">Sherpa-ONNX 本地語音辨識 + 2x 加速播放 + LLM 智慧修正。</p>
         </div>
         <!-- 7. Plugin System -->
-        <div class="feature-card-dark fade-in rounded-2xl p-7 border border-white/[0.07] bg-white/[0.03]">
+        <div class="feature-card fade-in rounded-2xl p-7 border border-slate-200 bg-white">
           <svg class="w-7 h-7 text-accent mb-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
-          <h3 class="font-display font-bold text-white text-lg mb-2" data-i18n="feat_plugin_title">插件系統</h3>
-          <p class="text-slate-400 text-sm leading-relaxed" data-i18n="feat_plugin_desc">熱重載、零 AI 成本、Plugin Store 一鍵安裝，輕鬆擴展功能。</p>
+          <h3 class="font-display font-bold text-ink text-lg mb-2" data-i18n="feat_plugin_title">插件系統</h3>
+          <p class="text-slate-500 text-sm leading-relaxed" data-i18n="feat_plugin_desc">熱重載、零 AI 成本、Plugin Store 一鍵安裝，輕鬆擴展功能。</p>
         </div>
         <!-- 8. Auto-commit -->
-        <div class="feature-card-dark fade-in rounded-2xl p-7 border border-white/[0.07] bg-white/[0.03]">
+        <div class="feature-card fade-in rounded-2xl p-7 border border-slate-200 bg-white">
           <svg class="w-7 h-7 text-accent mb-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><line x1="3" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="21" y2="12"/></svg>
-          <h3 class="font-display font-bold text-white text-lg mb-2" data-i18n="feat_commit_title">自動提交</h3>
-          <p class="text-slate-400 text-sm leading-relaxed" data-i18n="feat_commit_desc">AI 改動後自動 git commit + push，程式碼版本控制全自動。</p>
+          <h3 class="font-display font-bold text-ink text-lg mb-2" data-i18n="feat_commit_title">自動提交</h3>
+          <p class="text-slate-500 text-sm leading-relaxed" data-i18n="feat_commit_desc">AI 改動後自動 git commit + push，程式碼版本控制全自動。</p>
         </div>
         <!-- 9. Dashboard -->
-        <div class="feature-card-dark fade-in rounded-2xl p-7 border border-white/[0.07] bg-white/[0.03]">
+        <div class="feature-card fade-in rounded-2xl p-7 border border-slate-200 bg-white">
           <svg class="w-7 h-7 text-accent mb-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="4" rx="1"/><rect x="14" y="10" width="7" height="11" rx="1"/><rect x="3" y="13" width="7" height="8" rx="1"/></svg>
-          <h3 class="font-display font-bold text-white text-lg mb-2" data-i18n="feat_dashboard_title">Web 儀表板</h3>
-          <p class="text-slate-400 text-sm leading-relaxed" data-i18n="feat_dashboard_desc">React 面板 + WebSocket 即時監控，視覺化掌握 Bot 狀態。</p>
+          <h3 class="font-display font-bold text-ink text-lg mb-2" data-i18n="feat_dashboard_title">Web 儀表板</h3>
+          <p class="text-slate-500 text-sm leading-relaxed" data-i18n="feat_dashboard_desc">React 面板 + WebSocket 即時監控，視覺化掌握 Bot 狀態。</p>
         </div>
       </div>
+    </div>
+  </section>
 
-      <!-- How It Works (inside dark section) -->
-      <div class="mt-24">
-        <div class="flex items-center gap-2 mb-10 fade-in">
-          <span class="text-accent text-lg">&rsaquo;</span>
-          <h2 class="font-display text-3xl sm:text-4xl font-bold text-white" data-i18n="how_title">運作方式</h2>
+  <!-- ============ HOW IT WORKS ============ -->
+  <section class="py-28 px-5 bg-slate-50/60 border-t border-slate-100">
+    <div class="max-w-6xl mx-auto">
+      <div class="text-center mb-14 fade-in">
+        <h2 class="font-display text-3xl sm:text-4xl font-bold text-ink mb-4" data-i18n="how_title">運作方式</h2>
+        <p class="text-slate-500" data-i18n="how_subtitle">簡單三層架構，強大無限可能</p>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 fade-in-group">
+        <div class="feature-card fade-in rounded-2xl border border-slate-200 bg-white p-6 text-center">
+          <svg class="w-7 h-7 text-accent mx-auto mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          <h4 class="font-display font-semibold text-ink text-sm mb-1" data-i18n="how_step1_title">Telegram 訊息</h4>
+          <p class="text-slate-500 text-xs leading-relaxed" data-i18n="how_step1_desc">在手機上傳送文字或語音</p>
         </div>
-
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 fade-in">
-          <div class="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-6 text-center">
-            <svg class="w-7 h-7 text-accent mx-auto mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
-            <h4 class="font-display font-semibold text-white text-sm mb-1" data-i18n="how_step1_title">Telegram 訊息</h4>
-            <p class="text-slate-500 text-xs leading-relaxed" data-i18n="how_step1_desc">在手機上傳送文字或語音</p>
-          </div>
-          <div class="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-6 text-center">
-            <svg class="w-7 h-7 text-accent mx-auto mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/><circle cx="12" cy="16" r="1"/></svg>
-            <h4 class="font-display font-semibold text-white text-sm mb-1" data-i18n="how_step2_title">ClaudeBot 處理</h4>
-            <p class="text-slate-500 text-xs leading-relaxed" data-i18n="how_step2_desc">佇列管理、插件路由、Session 追蹤</p>
-          </div>
-          <div class="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-6 text-center">
-            <svg class="w-7 h-7 text-accent mx-auto mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
-            <h4 class="font-display font-semibold text-white text-sm mb-1" data-i18n="how_step3_title">插件（零成本）</h4>
-            <p class="text-slate-500 text-xs leading-relaxed" data-i18n="how_step3_desc">骰子、計算機、提醒等不需 AI</p>
-          </div>
-          <div class="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-6 text-center">
-            <svg class="w-7 h-7 text-accent mx-auto mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h.01M15 9h.01M9 15l2 1.5L15 15"/></svg>
-            <h4 class="font-display font-semibold text-white text-sm mb-1" data-i18n="how_step4_title">AI 後端</h4>
-            <p class="text-slate-500 text-xs leading-relaxed" data-i18n="how_step4_desc">Claude / Gemini 處理複雜請求</p>
-          </div>
-          <div class="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-6 text-center">
-            <svg class="w-7 h-7 text-accent mx-auto mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-            <h4 class="font-display font-semibold text-white text-sm mb-1" data-i18n="how_step5_title">專案檔案</h4>
-            <p class="text-slate-500 text-xs leading-relaxed" data-i18n="how_step5_desc">直接操作你的程式碼庫</p>
-          </div>
+        <div class="feature-card fade-in rounded-2xl border border-slate-200 bg-white p-6 text-center">
+          <svg class="w-7 h-7 text-accent mx-auto mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/><circle cx="12" cy="16" r="1"/></svg>
+          <h4 class="font-display font-semibold text-ink text-sm mb-1" data-i18n="how_step2_title">ClaudeBot 處理</h4>
+          <p class="text-slate-500 text-xs leading-relaxed" data-i18n="how_step2_desc">佇列管理、插件路由、Session 追蹤</p>
+        </div>
+        <div class="feature-card fade-in rounded-2xl border border-slate-200 bg-white p-6 text-center">
+          <svg class="w-7 h-7 text-accent mx-auto mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+          <h4 class="font-display font-semibold text-ink text-sm mb-1" data-i18n="how_step3_title">插件（零成本）</h4>
+          <p class="text-slate-500 text-xs leading-relaxed" data-i18n="how_step3_desc">骰子、計算機、提醒等不需 AI</p>
+        </div>
+        <div class="feature-card fade-in rounded-2xl border border-slate-200 bg-white p-6 text-center">
+          <svg class="w-7 h-7 text-accent mx-auto mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h.01M15 9h.01M9 15l2 1.5L15 15"/></svg>
+          <h4 class="font-display font-semibold text-ink text-sm mb-1" data-i18n="how_step4_title">AI 後端</h4>
+          <p class="text-slate-500 text-xs leading-relaxed" data-i18n="how_step4_desc">Claude / Gemini 處理複雜請求</p>
+        </div>
+        <div class="feature-card fade-in rounded-2xl border border-slate-200 bg-white p-6 text-center">
+          <svg class="w-7 h-7 text-accent mx-auto mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+          <h4 class="font-display font-semibold text-ink text-sm mb-1" data-i18n="how_step5_title">專案檔案</h4>
+          <p class="text-slate-500 text-xs leading-relaxed" data-i18n="how_step5_desc">直接操作你的程式碼庫</p>
         </div>
       </div>
     </div>

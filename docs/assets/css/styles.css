@@ -76,24 +76,6 @@ body {
   color: var(--accent);
 }
 
-/* ===== Features Dark Section ===== */
-.features-dark {
-  background: var(--code-bg);
-}
-
-.feature-card-dark {
-  transition: border-color 0.2s ease, background-color 0.2s ease;
-}
-
-.feature-card-dark:hover {
-  border-color: rgba(255,255,255,0.14);
-  background-color: rgba(255,255,255,0.05);
-}
-
-.feature-card-dark:hover svg {
-  filter: brightness(1.2);
-}
-
 /* ===== Plugin Cards ===== */
 .plugin-card {
   transition: border-color 0.2s ease;
