@@ -630,7 +630,7 @@ const guideTranslations = {
     // Wire up toggle buttons
     document.querySelectorAll('[data-lang-toggle]').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        switchLang(btn.getAttribute('data-lang-toggle'))
+        window.switchLang(btn.getAttribute('data-lang-toggle'))
       })
     })
   })
