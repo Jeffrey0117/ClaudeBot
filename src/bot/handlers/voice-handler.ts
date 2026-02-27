@@ -40,25 +40,37 @@ interface RefineResult {
   readonly debug: string
 }
 
-// Resolve gemini CLI path (not in PATH when bot runs as child process)
-const GEMINI_CMD = process.platform === 'win32'
-  ? join(process.env.APPDATA || '', 'npm', 'gemini.cmd')
-  : 'gemini'
+// Resolve gemini CLI — use Node to run the JS entry directly on Windows
+// to avoid cmd.exe escaping issues with Chinese text
+function resolveGeminiEntry(): string {
+  if (process.platform !== 'win32') return 'gemini'
+  const jsEntry = join(
+    process.env.APPDATA || '', 'npm', 'node_modules',
+    '@google', 'gemini-cli', 'dist', 'index.js',
+  )
+  if (existsSync(jsEntry)) return jsEntry
+  return join(process.env.APPDATA || '', 'npm', 'gemini.cmd')
+}
+
+const GEMINI_ENTRY = resolveGeminiEntry()
 
 async function refineWithLLM(rawText: string): Promise<RefineResult> {
   try {
     const prompt = `${REFINE_PROMPT}\n\n原始文字：${rawText}`
-    // Windows: use cmd.exe /c to execute .cmd files
-    const isWindows = process.platform === 'win32'
-    const command = isWindows ? 'cmd.exe' : GEMINI_CMD
-    const args = isWindows
-      ? ['/c', GEMINI_CMD, '-p', prompt]
+
+    // Run gemini: on Windows use node + JS entry to bypass cmd.exe
+    const isJsEntry = GEMINI_ENTRY.endsWith('.js')
+    const command = isJsEntry ? process.execPath : GEMINI_ENTRY
+    const args = isJsEntry
+      ? [GEMINI_ENTRY, '-p', prompt]
       : ['-p', prompt]
+
     const { stdout, stderr } = await execFileAsync(command, args, {
       encoding: 'utf-8',
       timeout: 15_000,
       windowsHide: true,
     })
+
     const debugParts = [`stdout=${stdout.length}c`, `stderr=${stderr.length}c`]
     // Strip Gemini CLI preamble lines (e.g. "Loaded cached credentials.")
     const lines = stdout.split('\n').filter(
@@ -72,10 +84,10 @@ async function refineWithLLM(rawText: string): Promise<RefineResult> {
     if (refined.length > rawText.length * 3) {
       return { result: null, debug: `too long (${refined.length}>${rawText.length}*3). ${debugParts.join(',')}` }
     }
-    return { result: refined, debug: debugParts.join(',') }
+    return { result: refined, debug: `${isJsEntry ? 'node' : 'cmd'}. ${debugParts.join(',')}` }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    return { result: null, debug: `FAIL: ${msg.slice(0, 100)}` }
+    return { result: null, debug: `FAIL(${GEMINI_ENTRY.slice(-30)}): ${msg.slice(0, 80)}` }
   }
 }
 
