@@ -180,12 +180,13 @@ function sendCommand(cmd: Record<string, unknown>): Promise<SherpaResponse> {
 
 export async function transcribeAudio(
   wavPath: string,
-): Promise<{ readonly success: boolean; readonly text: string; readonly duration: number }> {
+): Promise<{ readonly success: boolean; readonly text: string; readonly duration: number; readonly error?: string }> {
   const res = await sendCommand({ action: 'transcribe', audio_path: wavPath })
   return {
     success: res.success,
     text: res.text ?? '',
     duration: res.duration ?? 0,
+    error: res.error,
   }
 }
 

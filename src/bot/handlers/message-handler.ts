@@ -65,9 +65,9 @@ async function extractReplyQuote(ctx: BotContext): Promise<string> {
 
   // Voice message — transcribe it
   if ('voice' in reply && reply.voice) {
-    const transcribed = await transcribeVoiceFile(reply.voice.file_id, ctx.telegram)
-    if (transcribed) {
-      return `> [引用語音]\n> ${transcribed.split('\n').join('\n> ')}\n\n`
+    const voiceResult = await transcribeVoiceFile(reply.voice.file_id, ctx.telegram)
+    if (voiceResult.text) {
+      return `> [引用語音]\n> ${voiceResult.text.split('\n').join('\n> ')}\n\n`
     }
   }
 
