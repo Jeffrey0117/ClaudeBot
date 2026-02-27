@@ -48,9 +48,10 @@ const GEMINI_PATH = process.platform === 'win32'
 async function refineWithLLM(rawText: string): Promise<RefineResult> {
   try {
     const prompt = `${REFINE_PROMPT}\n\n原始文字：${rawText}`
+    // Windows needs shell for .cmd files
     const { stdout, stderr } = await execFileAsync(GEMINI_PATH, [
       '-p', prompt,
-    ], { encoding: 'utf-8', timeout: 15_000, windowsHide: true })
+    ], { encoding: 'utf-8', timeout: 15_000, windowsHide: true, shell: true })
     const debugParts = [`stdout=${stdout.length}c`, `stderr=${stderr.length}c`]
     // Strip Gemini CLI preamble lines (e.g. "Loaded cached credentials.")
     const lines = stdout.split('\n').filter(
