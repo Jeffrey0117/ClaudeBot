@@ -18,7 +18,14 @@ async function ensureTempDir(): Promise<void> {
   await mkdir(TEMP_DIR, { recursive: true })
 }
 
-async function captureDesktop(filePath: string, screenIndex?: number): Promise<void> {
+async function captureDesktopMac(filePath: string, screenIndex?: number): Promise<void> {
+  const args = screenIndex !== undefined
+    ? ['-D', String(screenIndex + 1), filePath]
+    : [filePath]
+  await execFileAsync('screencapture', args, { timeout: 15_000 })
+}
+
+async function captureDesktopWindows(filePath: string, screenIndex?: number): Promise<void> {
   const escapedPath = filePath.replace(/'/g, "''")
   const captureAll = screenIndex === undefined
 
@@ -68,7 +75,31 @@ $bmp.Dispose()`
   }
 }
 
-async function listScreens(): Promise<string[]> {
+async function captureDesktop(filePath: string, screenIndex?: number): Promise<void> {
+  if (process.platform === 'darwin') {
+    await captureDesktopMac(filePath, screenIndex)
+  } else if (process.platform === 'win32') {
+    await captureDesktopWindows(filePath, screenIndex)
+  } else {
+    throw new Error('桌面截圖僅支援 Windows 和 macOS')
+  }
+}
+
+async function listScreensMac(): Promise<string[]> {
+  const { stdout } = await execFileAsync('system_profiler', [
+    'SPDisplaysDataType',
+  ], { timeout: 10_000 })
+  const lines: string[] = []
+  const resMatches = [...stdout.matchAll(/Resolution:\s*(\d+\s*x\s*\d+)/gi)]
+  const mainMatch = stdout.match(/Main Display:\s*(Yes)/i)
+  resMatches.forEach((m, i) => {
+    const primary = (i === 0 && mainMatch) ? ' [主螢幕]' : ''
+    lines.push(`${i + 1}: ${m[1].replace(/\s/g, '')}${primary}`)
+  })
+  return lines.length > 0 ? lines : ['1: (無法取得解析度)']
+}
+
+async function listScreensWindows(): Promise<string[]> {
   const psScript = `Add-Type -AssemblyName System.Windows.Forms
 $screens = [System.Windows.Forms.Screen]::AllScreens
 for ($i = 0; $i -lt $screens.Length; $i++) {
@@ -83,6 +114,12 @@ for ($i = 0; $i -lt $screens.Length; $i++) {
   ], { timeout: 10_000, windowsHide: true })
 
   return stdout.trim().split('\n').map((l) => l.trim()).filter(Boolean)
+}
+
+async function listScreens(): Promise<string[]> {
+  if (process.platform === 'darwin') return listScreensMac()
+  if (process.platform === 'win32') return listScreensWindows()
+  throw new Error('螢幕列表僅支援 Windows 和 macOS')
 }
 
 export async function screenshotCommand(ctx: BotContext): Promise<void> {

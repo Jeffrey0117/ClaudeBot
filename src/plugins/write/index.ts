@@ -4,7 +4,7 @@ import { execSync } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
 
-const EVERNOTE_REPO = 'C:\\Users\\jeffb\\Desktop\\code\\Evernote'
+const EVERNOTE_REPO = process.env.EVERNOTE_REPO || path.join(process.cwd(), '..', 'Evernote')
 const POSTS_DIR = path.join(EVERNOTE_REPO, 'src', 'pages', 'posts')
 const NOTES_DIR = path.join(EVERNOTE_REPO, 'src', 'pages', 'notes')
 

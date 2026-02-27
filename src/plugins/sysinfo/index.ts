@@ -24,6 +24,13 @@ function formatUptime(seconds: number): string {
 
 async function getGpuInfo(): Promise<string> {
   try {
+    if (process.platform === 'darwin') {
+      const { stdout } = await execFileAsync('system_profiler', [
+        'SPDisplaysDataType',
+      ], { timeout: 5_000 })
+      const match = stdout.match(/Chipset Model:\s*(.+)/i)
+      return match?.[1]?.trim() || '未知'
+    }
     const { stdout } = await execFileAsync('powershell', [
       '-NoProfile', '-NonInteractive', '-Command',
       'Get-CimInstance Win32_VideoController | Select-Object -First 1 -ExpandProperty Name',
@@ -41,8 +48,30 @@ interface DiskInfo {
   readonly usedPercent: string
 }
 
+async function getDiskInfoMac(): Promise<readonly DiskInfo[]> {
+  const { stdout } = await execFileAsync('df', ['-g'], { timeout: 5_000 })
+  return stdout.trim().split('\n').slice(1).filter(Boolean)
+    .filter((line) => line.startsWith('/'))
+    .map((line) => {
+      const parts = line.split(/\s+/)
+      const totalGb = Number(parts[1])
+      const freeGb = Number(parts[3])
+      const usedPercent = parts[4]?.replace('%', '') ?? '0'
+      const mount = parts.slice(8).join(' ') || parts[5] || '/'
+      return {
+        drive: mount,
+        total: `${totalGb} GB`,
+        free: `${freeGb} GB`,
+        usedPercent,
+      }
+    })
+    .filter((d) => d.total !== '0 GB')
+}
+
 async function getDiskInfo(): Promise<readonly DiskInfo[]> {
   try {
+    if (process.platform === 'darwin') return getDiskInfoMac()
+
     const { stdout } = await execFileAsync('powershell', [
       '-NoProfile', '-NonInteractive', '-Command',
       "Get-CimInstance Win32_LogicalDisk -Filter \"DriveType=3\" | ForEach-Object { \"$($_.DeviceID)|$($_.Size)|$($_.FreeSpace)\" }",
