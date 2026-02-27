@@ -293,6 +293,6 @@ async function handleResume(ctx: BotContext, chatId: number, data: string): Prom
       `\u{1F44C} OK\uFF0C\u{5C08}\u{6848}\u{4FDD}\u{7559}\u{5728} *${name}*\uFF0C\u{96A8}\u{6642}\u{53EF}\u{4EE5}\u{958B}\u{59CB}\u{3002}`,
       { parse_mode: 'Markdown' },
     )
-    await ctx.answerCbQuery()
+    await ctx.answerCbQuery().catch(() => {})
   }
 }

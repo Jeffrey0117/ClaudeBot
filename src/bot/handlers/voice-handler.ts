@@ -99,36 +99,46 @@ export async function transcribeVoiceFile(
   fileId: string,
   telegram: BotContext['telegram'],
 ): Promise<string | null> {
-  if (!isSherpaAvailable()) return null
+  if (!isSherpaAvailable()) {
+    console.error('[voice] Sherpa not available')
+    return null
+  }
 
   const id = randomUUID()
   const oggPath = join(TEMP_DIR, `${id}.ogg`)
   const wavPath = join(TEMP_DIR, `${id}.wav`)
 
   try {
+    console.log('[voice] downloading file...')
     const [fileLink] = await Promise.all([
       telegram.getFileLink(fileId),
       ensureTempDir(),
     ])
     const response = await fetch(fileLink.href)
-    if (!response.ok) return null
+    if (!response.ok) {
+      console.error('[voice] fetch failed:', response.status)
+      return null
+    }
 
     const buffer = Buffer.from(await response.arrayBuffer())
     await writeFile(oggPath, buffer)
+    console.log('[voice] ffmpeg converting...')
 
     await execFileAsync('ffmpeg', [
       '-i', oggPath,
-      '-filter:a', 'atempo=2.0',
       '-ar', '16000', '-ac', '1', '-f', 'wav', '-y', wavPath,
     ])
 
+    console.log('[voice] transcribing...')
     const result = await transcribeAudio(wavPath)
+    console.log('[voice] result:', JSON.stringify(result).slice(0, 200))
     if (!result.success || !result.text) return null
     const rawText = result.text.trim()
 
     const refined = await refineWithLLM(rawText)
     return refined ?? rawText
-  } catch {
+  } catch (err) {
+    console.error('[voice] ERROR:', err)
     return null
   } finally {
     await cleanupFiles(oggPath, wavPath)

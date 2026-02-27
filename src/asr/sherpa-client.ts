@@ -72,8 +72,8 @@ function ensureProcess(): void {
 
   const serverPath = resolveServerPath()
 
-  // --speed 1 because voice-handler already does 2x via ffmpeg atempo
-  proc = spawn('python', [serverPath, '--speed', '1'], {
+  // --speed 1.5: balanced accuracy vs processing time (proper resampling)
+  proc = spawn('python', [serverPath, '--speed', '1.5'], {
     shell: false,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
