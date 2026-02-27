@@ -60,21 +60,23 @@ Telegram ──> ClaudeBot ──> Claude / Gemini / Codex
 ## Quick Start
 
 ```bash
+npx claudebot-app
+```
+
+One command — downloads, installs, runs setup wizard, starts the bot.
+
+> **Prerequisites:** Node.js 20+, [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) (logged in).
+> Optional: Gemini CLI, ffmpeg (voice), Python 3.11+ (punctuation).
+
+<details>
+<summary>Manual install</summary>
+
+```bash
 git clone https://github.com/Jeffrey0117/ClaudeBot.git
 cd ClaudeBot
 npm install
 npm run setup    # interactive wizard — creates .env
-npm run dev      # that's it
-```
-
-> **Prerequisites:** Node.js 20+, [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) (logged in), Git.
-> Optional: Gemini CLI, ffmpeg (voice), Python 3.11+ (punctuation).
-
-<details>
-<summary>Windows one-liner</summary>
-
-```bash
-npx zerosetup
+npm run dev
 ```
 
 </details>

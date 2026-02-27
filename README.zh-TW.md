@@ -60,21 +60,23 @@ Telegram ──> ClaudeBot ──> Claude / Gemini / Codex
 ## 快速開始
 
 ```bash
+npx claudebot-app
+```
+
+一行搞定 — 自動下載、安裝依賴、跑設定精靈、啟動 bot。
+
+> **前置需求：** Node.js 20+、[Claude CLI](https://docs.anthropic.com/en/docs/claude-code)（已登入）。
+> 選裝：Gemini CLI、ffmpeg（語音）、Python 3.11+（標點修正）。
+
+<details>
+<summary>手動安裝</summary>
+
+```bash
 git clone https://github.com/Jeffrey0117/ClaudeBot.git
 cd ClaudeBot
 npm install
 npm run setup    # 互動式引導 — 自動建立 .env
-npm run dev      # 搞定
-```
-
-> **前置需求：** Node.js 20+、[Claude CLI](https://docs.anthropic.com/en/docs/claude-code)（已登入）、Git。
-> 選裝：Gemini CLI、ffmpeg（語音）、Python 3.11+（標點修正）。
-
-<details>
-<summary>Windows 一鍵安裝</summary>
-
-```bash
-npx zerosetup
+npm run dev
 ```
 
 </details>

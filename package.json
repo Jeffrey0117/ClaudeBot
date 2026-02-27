@@ -1,9 +1,15 @@
 {
-  "name": "claudebot",
-  "version": "1.0.0",
+  "name": "claudebot-app",
+  "version": "0.1.0",
   "description": "Telegram Bot to remotely control Claude Code CLI",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "claudebot": "bin/cli.mjs"
+  },
+  "files": [
+    "bin/cli.mjs"
+  ],
   "scripts": {
     "dev": "tsx src/launcher.ts",
     "dev:single": "tsx src/index.ts",
