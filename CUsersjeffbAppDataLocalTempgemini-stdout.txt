@@ -1,0 +1,4 @@
+{"type":"init","timestamp":"2026-02-23T19:49:54.664Z","session_id":"e8141a76-71cc-49a1-980b-f9473bb5cc5b","model":"auto-gemini-2.5"}
+{"type":"message","timestamp":"2026-02-23T19:49:54.665Z","role":"user","content":"Say hi"}
+{"type":"message","timestamp":"2026-02-23T19:49:58.244Z","role":"assistant","content":"Hi! How can I help you today?","delta":true}
+{"type":"result","timestamp":"2026-02-23T19:49:58.248Z","status":"success","stats":{"total_tokens":10326,"input_tokens":10047,"output_tokens":74,"cached":0,"input":10047,"duration_ms":3584,"tool_calls":0}}

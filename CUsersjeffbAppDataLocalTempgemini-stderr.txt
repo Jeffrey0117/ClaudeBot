@@ -1,0 +1,2 @@
+Loaded cached credentials.
+Hook registry initialized with 0 hook entries
