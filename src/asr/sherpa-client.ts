@@ -72,8 +72,8 @@ function ensureProcess(): void {
 
   const serverPath = resolveServerPath()
 
-  // --speed 1.5: proper np.interp resampling, balanced accuracy vs speed
-  proc = spawn('python', [serverPath, '--speed', '1.5'], {
+  // --speed 2: fast processing, np.interp resampling + Gemini LLM fixes errors
+  proc = spawn('python', [serverPath, '--speed', '2'], {
     shell: false,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
