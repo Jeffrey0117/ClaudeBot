@@ -117,7 +117,10 @@ export function wireTaskSendFn(bot: Telegraf<BotContext>): void {
 }
 
 export async function createBot(): Promise<Telegraf<BotContext>> {
-  const bot = new Telegraf<BotContext>(env.BOT_TOKEN)
+  const telegrafOptions = env.TELEGRAM_API_BASE
+    ? { telegram: { apiRoot: env.TELEGRAM_API_BASE } }
+    : {}
+  const bot = new Telegraf<BotContext>(env.BOT_TOKEN, telegrafOptions)
 
   // Middleware (order matters)
   bot.use(errorHandler())
