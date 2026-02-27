@@ -5,6 +5,8 @@ import { env } from '../../config/env.js'
 
 // --- In-memory cost ledger ---
 
+const MAX_LEDGER = 10_000
+
 interface CostEntry {
   readonly timestamp: number
   readonly costUsd: number
@@ -19,6 +21,9 @@ const ledger: CostEntry[] = []
 
 export function recordCost(entry: CostEntry): void {
   ledger.push(entry)
+  if (ledger.length > MAX_LEDGER) {
+    ledger.splice(0, ledger.length - MAX_LEDGER)
+  }
 }
 
 function getTodayEntries(): readonly CostEntry[] {
@@ -219,6 +224,7 @@ async function fetchAnthropicApi<T>(adminKey: string, path: string): Promise<T> 
       'x-api-key': adminKey,
       'anthropic-version': '2023-06-01',
     },
+    signal: AbortSignal.timeout(15_000),
   })
 
   if (!response.ok) {

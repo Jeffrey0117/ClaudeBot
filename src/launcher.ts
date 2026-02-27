@@ -27,6 +27,7 @@ async function notifyAdmin(message: string): Promise<void> {
           text: message,
           parse_mode: 'HTML',
         }),
+        signal: AbortSignal.timeout(5_000),
       },
     )
   } catch {
@@ -192,6 +193,12 @@ function spawnBot(envFile: string): void {
     cwd: root,
     shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  child.on('error', (err) => {
+    console.error(`[${label}] spawn error:`, err.message)
+    children.delete(envFile)
+    notifyAdmin(`🚨 <b>[${label}]</b> spawn failed: ${err.message}`)
   })
 
   child.stdout?.on('data', (chunk: Buffer) => {

@@ -2,8 +2,8 @@ import type { BotContext } from '../../types/context.js'
 import { getUserState } from '../state.js'
 import { addPin, getPins, removePin, clearPins } from '../context-pin-store.js'
 import { getAISessionId, clearAISession } from '../../ai/session-store.js'
+import { resolveBackend } from '../../ai/types.js'
 import { enqueue } from '../../claude/queue.js'
-import { basename } from 'node:path'
 
 export async function contextCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -78,7 +78,7 @@ export async function contextCommand(ctx: BotContext): Promise<void> {
 
   // /context clear
   if (args === 'clear') {
-    const resolvedBackend = state.ai.backend === 'auto' ? 'claude' : state.ai.backend
+    const resolvedBackend = resolveBackend(state.ai.backend)
     clearAISession(resolvedBackend, projectPath)
 
     const pinCount = getPins(projectPath).length
@@ -93,7 +93,7 @@ export async function contextCommand(ctx: BotContext): Promise<void> {
 
   // /context clear pins
   if (args === 'clear pins') {
-    const resolvedBackend = state.ai.backend === 'auto' ? 'claude' : state.ai.backend
+    const resolvedBackend = resolveBackend(state.ai.backend)
     clearAISession(resolvedBackend, projectPath)
     const cleared = clearPins(projectPath)
 
@@ -106,7 +106,7 @@ export async function contextCommand(ctx: BotContext): Promise<void> {
 
   // /context summary
   if (args === 'summary') {
-    const resolvedBackend = state.ai.backend === 'auto' ? 'claude' : state.ai.backend
+    const resolvedBackend = resolveBackend(state.ai.backend)
     const sessionId = getAISessionId(resolvedBackend, projectPath)
 
     if (!sessionId) {
@@ -128,7 +128,7 @@ export async function contextCommand(ctx: BotContext): Promise<void> {
   }
 
   // /context (no args) — show status
-  const resolvedBackend = state.ai.backend === 'auto' ? 'claude' : state.ai.backend
+  const resolvedBackend = resolveBackend(state.ai.backend)
   const sessionId = getAISessionId(resolvedBackend, projectPath)
   const pins = getPins(projectPath)
 

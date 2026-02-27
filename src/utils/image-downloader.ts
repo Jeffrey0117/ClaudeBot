@@ -15,7 +15,7 @@ export async function downloadImage(fileUrl: string, extension: string): Promise
   const filename = `${randomUUID()}.${extension}`
   const filePath = join(TEMP_DIR, filename)
 
-  const response = await fetch(fileUrl)
+  const response = await fetch(fileUrl, { signal: AbortSignal.timeout(30_000) })
   if (!response.ok) {
     throw new Error(`Failed to download image: ${response.status} ${response.statusText}`)
   }

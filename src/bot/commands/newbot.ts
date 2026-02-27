@@ -67,7 +67,9 @@ export async function newbotCommand(ctx: BotContext): Promise<void> {
 
   // Verify the bot token by calling Telegram getMe
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`)
+    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`, {
+      signal: AbortSignal.timeout(5_000),
+    })
     const data = await res.json() as { ok: boolean; result?: { username?: string; first_name?: string } }
 
     if (data.ok && data.result) {

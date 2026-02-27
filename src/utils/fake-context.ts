@@ -25,8 +25,8 @@ interface FakeContextOptions {
 export function createFakeContext(opts: FakeContextOptions): BotContext {
   const { chatId, commandText, telegram } = opts
 
-  const reply = async (text: string, extra?: Record<string, unknown>) => {
-    return telegram.sendMessage(chatId, text, extra as any)
+  const reply: BotContext['reply'] = (text, extra) => {
+    return telegram.sendMessage(chatId, text, extra) as ReturnType<BotContext['reply']>
   }
 
   // Minimal shape that plugins actually read
