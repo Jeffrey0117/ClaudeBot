@@ -1,47 +1,20 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
+import { resolve } from 'node:path'
 import type { ProjectInfo } from '../types/index.js'
+import { createJsonFileStore } from '../utils/json-file-store.js'
 
 const MAX_BOOKMARKS = 9
-const DATA_PATH = resolve('data/bookmarks.json')
 
 type BookmarkData = Record<string, ProjectInfo[]>
 
-let cache: BookmarkData | null = null
-
-function ensureDir(): void {
-  const dir = dirname(DATA_PATH)
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true })
-  }
-}
-
-function load(): BookmarkData {
-  if (cache) return cache
-
-  try {
-    const raw = readFileSync(DATA_PATH, 'utf-8')
-    cache = JSON.parse(raw) as BookmarkData
-  } catch {
-    cache = {}
-  }
-
-  return cache
-}
-
-function save(data: BookmarkData): void {
-  ensureDir()
-  writeFileSync(DATA_PATH, JSON.stringify(data, null, 2), 'utf-8')
-  cache = data
-}
+const store = createJsonFileStore<BookmarkData>(resolve('data/bookmarks.json'), () => ({}))
 
 export function getBookmarks(chatId: number): readonly ProjectInfo[] {
-  const data = load()
+  const data = store.load()
   return data[String(chatId)] ?? []
 }
 
 export function addBookmark(chatId: number, project: ProjectInfo): number | null {
-  const data = load()
+  const data = store.load()
   const key = String(chatId)
   const list = [...(data[key] ?? [])]
 
@@ -49,12 +22,12 @@ export function addBookmark(chatId: number, project: ProjectInfo): number | null
   if (list.some((b) => b.path === project.path)) return null
 
   list.push({ name: project.name, path: project.path })
-  save({ ...data, [key]: list })
+  store.save({ ...data, [key]: list })
   return list.length
 }
 
 export function removeBookmark(chatId: number, slot: number): boolean {
-  const data = load()
+  const data = store.load()
   const key = String(chatId)
   const list = [...(data[key] ?? [])]
   const index = slot - 1
@@ -62,7 +35,7 @@ export function removeBookmark(chatId: number, slot: number): boolean {
   if (index < 0 || index >= list.length) return false
 
   list.splice(index, 1)
-  save({ ...data, [key]: list })
+  store.save({ ...data, [key]: list })
   return true
 }
 
@@ -74,7 +47,7 @@ export function getBookmark(chatId: number, slot: number): ProjectInfo | null {
 }
 
 export function addBookmarkAt(chatId: number, project: ProjectInfo, slot: number): boolean {
-  const data = load()
+  const data = store.load()
   const key = String(chatId)
   const list = [...(data[key] ?? [])]
 
@@ -90,12 +63,12 @@ export function addBookmarkAt(chatId: number, project: ProjectInfo, slot: number
 
   // Trim to max and remove trailing nulls
   const trimmed = list.slice(0, MAX_BOOKMARKS).filter(Boolean)
-  save({ ...data, [key]: trimmed })
+  store.save({ ...data, [key]: trimmed })
   return true
 }
 
 export function swapBookmarks(chatId: number, slotA: number, slotB: number): boolean {
-  const data = load()
+  const data = store.load()
   const key = String(chatId)
   const list = [...(data[key] ?? [])]
 
@@ -109,6 +82,6 @@ export function swapBookmarks(chatId: number, slotA: number, slotB: number): boo
   list[idxA] = list[idxB]
   list[idxB] = temp
 
-  save({ ...data, [key]: list })
+  store.save({ ...data, [key]: list })
   return true
 }
