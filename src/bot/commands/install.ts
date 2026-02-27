@@ -49,7 +49,10 @@ export async function installCommand(ctx: BotContext): Promise<void> {
     // Delete the "downloading" message
     await ctx.telegram.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {})
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error)
+    console.error('[install] error:', error)
+    const raw = error instanceof Error ? error.message : String(error)
+    // Strip file system paths to avoid leaking server internals
+    const msg = raw.replace(/[A-Za-z]:\\[^\s:]+|\/[\w/.-]+/g, '<path>')
     await ctx.reply(`❌ 安裝失敗: ${msg}`)
   }
 }

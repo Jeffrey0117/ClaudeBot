@@ -79,6 +79,21 @@ function ensureProcess(): void {
     env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
   })
 
+  proc.on('error', (err) => {
+    console.error('[sherpa] spawn error:', err.message)
+    proc = null
+    rl = null
+    if (pending) {
+      const { reject, timer } = pending
+      pending = null
+      clearTimeout(timer)
+      reject(new Error(`Sherpa 啟動失敗: ${err.message}`))
+    }
+    for (const queued of commandQueue.splice(0)) {
+      queued.reject(new Error(`Sherpa 啟動失敗: ${err.message}`))
+    }
+  })
+
   rl = createInterface({ input: proc.stdout! })
 
   // Log stderr for debugging

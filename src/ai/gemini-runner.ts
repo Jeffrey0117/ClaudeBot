@@ -1,4 +1,6 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, execSync, type ChildProcess } from 'node:child_process'
+import { readFileSync, existsSync } from 'node:fs'
+import path from 'node:path'
 import type { AIRunner, AIRunOptions, AIBackend } from './types.js'
 import { setAISessionId } from './session-store.js'
 import { validateProjectPath } from '../utils/path-validator.js'
@@ -15,6 +17,29 @@ const MODEL_MAP: Record<string, string> = {
 function resolveModel(alias: string): string {
   return MODEL_MAP[alias] ?? alias
 }
+
+function resolveGeminiCli(): { cmd: string; prefix: readonly string[]; shell: boolean } {
+  if (process.platform !== 'win32') {
+    return { cmd: 'gemini', prefix: [], shell: false }
+  }
+  try {
+    const cmdPath = execSync('where gemini.cmd', { encoding: 'utf-8' }).trim().split('\n')[0].trim()
+    const dir = path.dirname(cmdPath)
+    const content = readFileSync(cmdPath, 'utf-8')
+    // Extract JS entry point from npm .cmd shim (e.g. "%~dp0\node_modules\pkg\cli.js")
+    const matches = [...content.matchAll(/(?:%~dp0|%dp0%)\\([^\s"]+\.js)/gi)]
+    if (matches.length > 0) {
+      const relPath = matches[matches.length - 1][1]
+      const cliJs = path.join(dir, relPath)
+      if (existsSync(cliJs)) {
+        return { cmd: process.execPath, prefix: [cliJs], shell: false }
+      }
+    }
+  } catch { /* fallback below */ }
+  return { cmd: 'gemini', prefix: [], shell: true }
+}
+
+const geminiCli = resolveGeminiCli()
 
 interface ActiveProcess {
   readonly proc: ChildProcess
@@ -85,10 +110,9 @@ export const geminiRunner: AIRunner = {
     console.log('[gemini-runner] spawning gemini, cwd:', validatedPath)
     console.log('[gemini-runner] model:', resolvedModel, 'prompt:', prompt.slice(0, 50))
 
-    // Windows: gemini is a .cmd shim, needs shell: true
-    const proc = spawn('gemini', args, {
+    const proc = spawn(geminiCli.cmd, [...geminiCli.prefix, ...args], {
       cwd: validatedPath,
-      shell: process.platform === 'win32',
+      shell: geminiCli.shell,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     })

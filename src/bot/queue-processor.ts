@@ -347,6 +347,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
             const detectedImages = detectImagePaths(responseText)
             const validImages = detectedImages.filter((p) => existsSync(p))
 
+            const failedImages: string[] = []
             let imageChain = Promise.resolve()
             for (const imgPath of validImages) {
               imageChain = imageChain.then(() =>
@@ -355,13 +356,26 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
                 }).then(() => {})
               ).catch((err) => {
                 console.error('[queue] sendPhoto error:', err)
+                failedImages.push(imgPath)
               })
             }
 
             // After images, send text response, then check for cross-project tasks
             imageChain.then(async () => {
+              if (failedImages.length > 0) {
+                const names = failedImages.map((p) => p.split(/[\\/]/).pop()).join(', ')
+                telegram.sendMessage(
+                  item.chatId,
+                  `⚠️ ${failedImages.length} 張圖片傳送失敗: ${names}`,
+                ).catch(() => {})
+              }
+
               // Dispatch cross-project tasks from raw text (before stripping)
-              dispatchCrossProjectTasks(telegram, item, rawText)
+              try {
+                dispatchCrossProjectTasks(telegram, item, rawText)
+              } catch (err) {
+                console.error('[queue] cross-project dispatch error:', err)
+              }
 
               if (!responseText) {
                 done()
