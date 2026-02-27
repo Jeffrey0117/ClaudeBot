@@ -21,6 +21,7 @@ async function pinchtabFetch<T>(path: string, options?: RequestInit): Promise<T>
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: { 'Content-Type': 'application/json', ...options?.headers },
+    signal: AbortSignal.timeout(10_000),
   })
   if (!response.ok) {
     throw new Error(`Pinchtab ${path} failed: ${response.status}`)
@@ -30,7 +31,7 @@ async function pinchtabFetch<T>(path: string, options?: RequestInit): Promise<T>
 
 async function pinchtabFetchBuffer(path: string): Promise<Buffer> {
   const baseUrl = parsePinchtabUrl()
-  const response = await fetch(`${baseUrl}${path}`)
+  const response = await fetch(`${baseUrl}${path}`, { signal: AbortSignal.timeout(10_000) })
   if (!response.ok) {
     throw new Error(`Pinchtab ${path} failed: ${response.status}`)
   }

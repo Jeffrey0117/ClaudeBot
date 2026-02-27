@@ -118,7 +118,7 @@ export async function transcribeVoiceFile(
       telegram.getFileLink(fileId),
       ensureTempDir(),
     ])
-    const response = await fetch(fileLink.href)
+    const response = await fetch(fileLink.href, { signal: AbortSignal.timeout(30_000) })
     if (!response.ok) {
       console.error('[voice] fetch failed:', response.status)
       return null

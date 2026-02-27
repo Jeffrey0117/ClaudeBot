@@ -104,7 +104,9 @@ async function main(): Promise<void> {
   // Verify token
   console.log('  Verifying token...')
   try {
-    const res = await fetch(`https://api.telegram.org/bot${botToken}/getMe`)
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/getMe`, {
+      signal: AbortSignal.timeout(5_000),
+    })
     const data = await res.json() as { ok: boolean; result?: { username?: string } }
     if (data.ok && data.result?.username) {
       console.log(`  Bot found: @${data.result.username}`)

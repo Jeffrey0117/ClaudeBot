@@ -87,6 +87,7 @@ export async function fetchRegistry(): Promise<readonly RegistryEntry[]> {
   const url = env.PLUGIN_REGISTRY_URL
   const response = await fetch(url, {
     headers: { 'User-Agent': 'ClaudeBot-PluginStore' },
+    signal: AbortSignal.timeout(15_000),
   })
 
   if (!response.ok) {
@@ -114,6 +115,7 @@ async function ghFetch(path: string): Promise<Response> {
       'User-Agent': 'ClaudeBot-PluginStore',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
+    signal: AbortSignal.timeout(15_000),
   })
 }
 
@@ -143,6 +145,7 @@ export async function downloadPlugin(name: string): Promise<void> {
     if (item.type === 'file' && item.download_url) {
       const fileRes = await fetch(item.download_url, {
         headers: { 'User-Agent': 'ClaudeBot-PluginStore' },
+        signal: AbortSignal.timeout(30_000),
       })
       if (!fileRes.ok) {
         throw new Error(`Failed to download ${item.name}: ${fileRes.status}`)

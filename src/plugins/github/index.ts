@@ -24,6 +24,7 @@ async function ghFetch(path: string, options: RequestInit = {}): Promise<Respons
       ...(env.GITHUB_TOKEN ? { Authorization: `Bearer ${env.GITHUB_TOKEN}` } : {}),
       ...options.headers,
     },
+    signal: AbortSignal.timeout(10_000),
   })
 }
 

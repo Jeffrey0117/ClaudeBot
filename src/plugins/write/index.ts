@@ -66,6 +66,7 @@ CONTENT:
       max_tokens: 3000,
       messages: [{ role: 'user', content: prompt }],
     }),
+    signal: AbortSignal.timeout(60_000),
   })
 
   if (!response.ok) {
@@ -73,7 +74,7 @@ CONTENT:
     throw new Error(`Claude API error: ${response.status} ${error}`)
   }
 
-  const data = (await response.json()) as any
+  const data = (await response.json()) as { content: readonly { text: string }[] }
   const text = data.content[0].text
 
   const titleMatch = text.match(/TITLE:\s*(.+)/)
