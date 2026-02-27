@@ -20,6 +20,7 @@ import { transcribeAudio, isSherpaAvailable } from '../../asr/sherpa-client.js'
 import { env } from '../../config/env.js'
 import { getAsrMode, consumeAsrMode } from '../asr-store.js'
 import { addVoice, getVoiceActive } from '../ordered-message-buffer.js'
+import { telegramFetch } from '../../utils/telegram-fetch.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -132,13 +133,7 @@ export async function transcribeVoiceFile(
       telegram.getFileLink(fileId),
       ensureTempDir(),
     ])
-    const response = await fetch(fileLink.href, { signal: AbortSignal.timeout(30_000) })
-    if (!response.ok) {
-      console.error('[voice] fetch failed:', response.status)
-      return { text: null, error: `下載失敗 (${response.status})` }
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer())
+    const buffer = await telegramFetch(fileLink.href)
     await writeFile(oggPath, buffer)
 
     try {

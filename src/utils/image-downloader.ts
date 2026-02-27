@@ -2,6 +2,7 @@ import { writeFile, mkdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import { telegramFetch } from './telegram-fetch.js'
 
 const TEMP_DIR = join(tmpdir(), 'claudebot-images')
 
@@ -15,12 +16,7 @@ export async function downloadImage(fileUrl: string, extension: string): Promise
   const filename = `${randomUUID()}.${extension}`
   const filePath = join(TEMP_DIR, filename)
 
-  const response = await fetch(fileUrl, { signal: AbortSignal.timeout(30_000) })
-  if (!response.ok) {
-    throw new Error(`Failed to download image: ${response.status} ${response.statusText}`)
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer())
+  const buffer = await telegramFetch(fileUrl)
   await writeFile(filePath, buffer)
 
   return filePath

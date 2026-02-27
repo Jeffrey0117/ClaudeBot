@@ -66,6 +66,7 @@ const envSchema = z.object({
     .default('false')
     .transform((val) => val === 'true'),
   BIAODIAN_PATH: z.string().default(''),
+  TELEGRAM_PROXY: z.string().default(''),
 })
 
 export type Env = z.infer<typeof envSchema>
