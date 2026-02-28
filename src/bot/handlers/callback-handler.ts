@@ -33,8 +33,6 @@ export async function callbackHandler(ctx: BotContext): Promise<void> {
   } else if (data.startsWith('model:')) {
     // Backward compat: old model:xxx callbacks → translate to ai:claude:xxx
     await handleAISelect(ctx, chatId, `claude:${data.slice('model:'.length)}`)
-  } else if (data.startsWith('resume:')) {
-    await handleResume(ctx, chatId, data)
   } else if (data === 'bookmark:add') {
     await handleBookmarkAdd(ctx, chatId)
   } else if (data.startsWith('bookmark:remove:')) {
@@ -255,38 +253,3 @@ async function handleBookmarkRemove(ctx: BotContext, chatId: number, slot: numbe
   await ctx.answerCbQuery()
 }
 
-async function handleResume(ctx: BotContext, chatId: number, data: string): Promise<void> {
-  const threadId = getThreadId(ctx)
-  const state = getUserState(chatId, threadId)
-
-  if (data === 'resume:yes') {
-    if (!state.selectedProject) {
-      await ctx.editMessageText('\u{26A0}\u{FE0F} \u{5C08}\u{6848}\u{5DF2}\u{4E0D}\u{5B58}\u{5728}\uFF0C\u{8ACB}\u{91CD}\u{65B0} /projects')
-      await ctx.answerCbQuery()
-      return
-    }
-
-    await ctx.editMessageText(
-      `\u{2705} \u{7E7C}\u{7E8C} *${state.selectedProject.name}*`,
-      { parse_mode: 'Markdown' },
-    )
-    await ctx.answerCbQuery()
-
-    const sessionId = getAISessionId(resolveBackend(state.ai.backend), state.selectedProject.path)
-    enqueue({
-      chatId,
-      prompt: '\u{7E7C}\u{7E8C}\u{4E0A}\u{6B21}\u{7684}\u{5DE5}\u{4F5C}',
-      project: state.selectedProject,
-      ai: state.ai,
-      sessionId,
-      imagePaths: [],
-    })
-  } else {
-    const name = state.selectedProject?.name ?? '\u{7121}'
-    await ctx.editMessageText(
-      `\u{1F44C} OK\uFF0C\u{5C08}\u{6848}\u{4FDD}\u{7559}\u{5728} *${name}*\uFF0C\u{96A8}\u{6642}\u{53EF}\u{4EE5}\u{958B}\u{59CB}\u{3002}`,
-      { parse_mode: 'Markdown' },
-    )
-    await ctx.answerCbQuery().catch(() => {})
-  }
-}
