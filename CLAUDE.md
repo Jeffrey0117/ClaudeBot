@@ -39,6 +39,12 @@ Claude CLI `--resume <session_id>` keeps conversation context.
 Session IDs stored in `.sessions.json`, keyed by `${BOT_ID}:${projectPath}`.
 BOT_ID = last 6 chars of bot token → each bot instance has isolated sessions.
 
+### Voice pipeline
+ASR flow: OGG → ffmpeg 16kHz WAV → Sherpa ASR → biaodian punctuation.
+- **Normal mode** (有選專案): show `🗣⚡` immediately → resolve buffer → background Gemini refinement (semaphore=1, non-blocking). If Gemini succeeds, edit message to remove ⚡.
+- **ASR mode** (`/asr`): show code block for copy, no Gemini.
+- Gemini CLI runs via `node @google/gemini-cli/dist/index.js` (bypasses cmd.exe on Windows).
+
 ### Stream output
 Claude CLI `--output-format stream-json` parsed line-by-line from stdout.
 Telegram message edited with 1s debounce, truncated at 4096 chars.
