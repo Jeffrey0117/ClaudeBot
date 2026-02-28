@@ -55,6 +55,7 @@ function resolveGeminiEntry(): string {
 const GEMINI_ENTRY = resolveGeminiEntry()
 
 async function refineWithLLM(rawText: string): Promise<RefineResult> {
+  const t0 = Date.now()
   try {
     const prompt = `${REFINE_PROMPT}\n\n原始文字：${rawText}`
 
@@ -67,11 +68,12 @@ async function refineWithLLM(rawText: string): Promise<RefineResult> {
 
     const { stdout, stderr } = await execFileAsync(command, args, {
       encoding: 'utf-8',
-      timeout: 15_000,
+      timeout: 30_000,
       windowsHide: true,
     })
 
-    const debugParts = [`stdout=${stdout.length}c`, `stderr=${stderr.length}c`]
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+    const debugParts = [`${elapsed}s`, `stdout=${stdout.length}c`, `stderr=${stderr.length}c`]
     // Strip Gemini CLI preamble lines (e.g. "Loaded cached credentials.")
     const lines = stdout.split('\n').filter(
       (l) => l.trim() && !l.includes('credentials') && !l.includes('Hook registry'),
@@ -85,9 +87,13 @@ async function refineWithLLM(rawText: string): Promise<RefineResult> {
       return { result: null, debug: `too long (${refined.length}>${rawText.length}*3). ${debugParts.join(',')}` }
     }
     return { result: refined, debug: `${isJsEntry ? 'node' : 'cmd'}. ${debugParts.join(',')}` }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return { result: null, debug: `FAIL(${GEMINI_ENTRY.slice(-30)}): ${msg.slice(0, 80)}` }
+  } catch (err: unknown) {
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+    const execErr = err as { message?: string; stderr?: string; code?: string | number; killed?: boolean }
+    const stderr = execErr.stderr?.trim().slice(0, 120) || ''
+    const code = execErr.killed ? 'TIMEOUT' : (execErr.code ?? '')
+    const msg = execErr.message?.slice(0, 60) || String(err).slice(0, 60)
+    return { result: null, debug: `FAIL[${code}][${elapsed}s]: ${msg} | stderr: ${stderr}` }
   }
 }
 
