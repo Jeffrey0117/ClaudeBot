@@ -1,10 +1,12 @@
 /**
  * Voice message handler.
- * Downloads OGG → ffmpeg converts to 16 kHz WAV → Sherpa ASR →
- * LLM refinement (fix typos/grammar) → ordered message buffer → AI queue.
+ * Downloads OGG → ffmpeg → 16 kHz WAV → Sherpa ASR → biaodian punctuation.
  *
- * Graceful degradation: when >= 2 voice messages are processing concurrently,
- * skip Gemini refinement and use fast biaodian punctuation instead.
+ * Non-blocking Gemini refinement:
+ * 1. Show punctuated text immediately with ⚡ indicator
+ * 2. Resolve buffer → queue proceeds without waiting
+ * 3. Background: Gemini refines → edit message, ⚡ removed
+ * 4. If Gemini fails or overloaded (≥2 voices), ⚡ stays
  */
 
 import { execFile } from 'node:child_process'
@@ -154,15 +156,13 @@ async function cleanupFiles(...paths: string[]): Promise<void> {
  */
 export interface VoiceResult {
   readonly text: string | null
+  readonly rawText?: string
   readonly error?: string
-  readonly refinedBy?: 'gemini' | 'biaodian' | 'none'
-  readonly debugInfo?: string
 }
 
 export async function transcribeVoiceFile(
   fileId: string,
   telegram: BotContext['telegram'],
-  options?: { skipGemini?: boolean },
 ): Promise<VoiceResult> {
   if (!isSherpaAvailable()) {
     console.error('[voice] Sherpa not available')
@@ -196,18 +196,8 @@ export async function transcribeVoiceFile(
       return { text: null, error: `辨識失敗${result.error ? `: ${result.error}` : ''}` }
     }
     const rawText = result.text.trim()
-
-    // Graceful degradation: skip Gemini when overloaded, use fast punctuation
-    if (options?.skipGemini) {
-      console.error('[voice] skipping Gemini (overloaded), using biaodian')
-      const punctuated = await addPunctuation(rawText)
-      return { text: punctuated, refinedBy: 'biaodian' }
-    }
-
-    console.error('[voice] calling Gemini for refinement...')
-    const { result: refined, debug } = await refineWithLLM(rawText)
-    console.error(`[voice] Gemini result: ${refined ? 'OK' : 'FAILED, using raw text'}`)
-    return { text: refined ?? rawText, refinedBy: refined ? 'gemini' : 'none', debugInfo: debug }
+    const punctuated = await addPunctuation(rawText)
+    return { text: punctuated, rawText }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[voice] ERROR:', err)
@@ -303,15 +293,17 @@ async function processAsrOnly(
     return
   }
 
-  const punctuated = await addPunctuation(result.text)
-  const formatted = formatAsrText(punctuated)
+  const formatted = formatAsrText(result.text)
   await telegram.sendMessage(chatId,
     `📝 辨識結果：\n\`\`\`\n${formatted}\n\`\`\`\n💡 _點擊上方文字可複製_`,
     { parse_mode: 'Markdown' },
   )
 }
 
-/** Normal mode: transcribe → resolve buffer entry → OMB auto-flushes. */
+/**
+ * Normal mode: ASR → show immediately with ⚡ → resolve buffer →
+ * background Gemini refinement → edit message to remove ⚡.
+ */
 async function processVoiceInBackground(
   telegram: BotContext['telegram'],
   chatId: number,
@@ -322,10 +314,7 @@ async function processVoiceInBackground(
 ): Promise<void> {
   const deleteAck = () => telegram.deleteMessage(chatId, ackMsgId).catch(() => {})
 
-  // Graceful degradation: skip Gemini when >= 2 voices active
-  const skipGemini = getVoiceActive(chatId, threadId) >= 2
-
-  const result = await transcribeVoiceFile(fileId, telegram, { skipGemini })
+  const result = await transcribeVoiceFile(fileId, telegram)
 
   deleteAck()
 
@@ -337,13 +326,33 @@ async function processVoiceInBackground(
     return
   }
 
-  // Show transcribed text to user (break into paragraphs at sentence endings)
+  // Show punctuated text immediately with ⚡ (pending Gemini refinement)
   const formatted = formatAsrText(result.text)
-  // TODO: remove debug tag after confirming Gemini works
-  const debugTag = result.refinedBy ? ` [${result.refinedBy}]` : ''
-  const debugInfo = result.debugInfo ? `\n_debug: ${result.debugInfo}_` : ''
-  telegram.sendMessage(chatId, `🗣${debugTag} ${formatted}${debugInfo}`, { parse_mode: 'Markdown' }).catch(() => {})
+  const sentMsg = await telegram.sendMessage(chatId, `🗣⚡ ${formatted}`)
+    .catch(() => null)
 
-  // Resolve the buffer entry — OMB will auto-flush consecutive ready entries
+  // Resolve buffer immediately — don't block queue
   resolveVoice(result.text)
+
+  // Background: Gemini refinement → edit message silently
+  if (sentMsg && getVoiceActive(chatId, threadId) < 2) {
+    const rawText = result.rawText ?? result.text
+    refineInBackground(telegram, chatId, sentMsg.message_id, rawText)
+  }
+}
+
+/** Fire-and-forget Gemini refinement. Edits message on success, ⚡ stays on failure. */
+function refineInBackground(
+  telegram: BotContext['telegram'],
+  chatId: number,
+  messageId: number,
+  rawText: string,
+): void {
+  refineWithLLM(rawText).then(({ result: refined }) => {
+    if (refined) {
+      const formatted = formatAsrText(refined)
+      telegram.editMessageText(chatId, messageId, undefined, `🗣 ${formatted}`)
+        .catch(() => {})
+    }
+  }).catch(() => {})
 }
