@@ -19,7 +19,7 @@ async function resolveRemotePath(code: string, inputPath: string): Promise<strin
     await remoteToolCall(code, 'remote_execute_command', {
       command: 'node -e "console.log(require(\'os\').homedir())"',
     })
-  ).trim()
+  ).trim().replace(/\r/g, '')
   // Take the last non-empty line (skip any stderr noise)
   const homeDir = raw.split('\n').filter(Boolean).pop() ?? raw
 

@@ -160,7 +160,11 @@ async function handleExecuteCommand(
 }
 
 async function handleFetchFile(args: Record<string, unknown>, validatePath: (p: string) => string): Promise<string> {
-  const filePath = validatePath(String(args.path))
+  const rawPath = String(args.path)
+  // If relative path like "Desktop/file.txt", resolve against user's home directory
+  const isAbs = isAbsolute(rawPath) || /^[a-zA-Z]:/.test(rawPath)
+  const expandedPath = isAbs ? rawPath : join(homedir(), rawPath)
+  const filePath = validatePath(expandedPath)
   const stats = await stat(filePath)
   if (stats.size > MAX_TRANSFER_SIZE) {
     throw new Error(`File too large: ${stats.size} bytes (max ${MAX_TRANSFER_SIZE})`)
