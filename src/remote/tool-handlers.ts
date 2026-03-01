@@ -5,31 +5,47 @@
 
 import { readFile, writeFile, readdir, stat, mkdir, open } from 'node:fs/promises'
 import { exec } from 'node:child_process'
-import { resolve, join, relative, sep } from 'node:path'
+import { resolve, join, relative, sep, isAbsolute } from 'node:path'
+import { homedir } from 'node:os'
 
 const MAX_FILE_SIZE = 100 * 1024
 const EXEC_TIMEOUT_MS = 30_000
 const MAX_SEARCH_RESULTS = 50
 const IS_WIN = process.platform === 'win32'
 
+function normalizeCmp(p: string): string {
+  return IS_WIN ? p.toLowerCase() : p
+}
+
+function isUnderDir(target: string, dir: string): boolean {
+  const cmpTarget = normalizeCmp(target)
+  const cmpDir = normalizeCmp(dir)
+  return cmpTarget === cmpDir || cmpTarget.startsWith(cmpDir + sep)
+}
+
 export function createPathValidator(baseDir: string): (targetPath: string) => string {
   const normalizedBase = resolve(baseDir)
-  const baseLower = IS_WIN ? normalizedBase.toLowerCase() : normalizedBase
+  const homeDir = resolve(homedir())
+
   return (targetPath: string): string => {
-    // Block absolute paths and UNC paths
-    if (/^[a-zA-Z]:/.test(targetPath) || targetPath.startsWith('\\\\') || targetPath.startsWith('//')) {
-      throw new Error('Absolute paths not allowed')
+    // Block UNC paths
+    if (targetPath.startsWith('\\\\') || targetPath.startsWith('//')) {
+      throw new Error('UNC paths not allowed')
     }
-    const resolved = resolve(normalizedBase, targetPath)
-    const cmp = IS_WIN ? resolved.toLowerCase() : resolved
-    const cmpBase = baseLower
-    const baseWithSep = cmpBase + sep
-    if (!cmp.startsWith(baseWithSep) && cmp !== cmpBase) {
-      throw new Error('Path traversal blocked')
+
+    const isAbs = isAbsolute(targetPath) || /^[a-zA-Z]:/.test(targetPath)
+    const resolved = isAbs ? resolve(targetPath) : resolve(normalizedBase, targetPath)
+
+    // Absolute paths: must be within user's home directory
+    if (isAbs) {
+      if (!isUnderDir(resolved, homeDir)) {
+        throw new Error(`Absolute path must be within home directory (${homeDir})`)
+      }
+      return resolved
     }
-    // Double-check via relative()
-    const rel = relative(normalizedBase, resolved)
-    if (rel.startsWith('..')) {
+
+    // Relative paths: must stay within baseDir
+    if (!isUnderDir(resolved, normalizedBase)) {
       throw new Error('Path traversal blocked')
     }
     return resolved
