@@ -61,6 +61,13 @@ export function getBotInstance(): Telegraf<BotContext> | null {
   return botInstance
 }
 
+// Registry of core command handlers for programmatic dispatch (e.g. @cmd directives)
+const coreHandlers = new Map<string, (ctx: BotContext) => Promise<void>>()
+
+export function getCoreCommandHandler(name: string): ((ctx: BotContext) => Promise<void>) | undefined {
+  return coreHandlers.get(name)
+}
+
 export const CORE_COMMANDS = [
   { command: 'projects', description: '瀏覽與選擇專案' },
   { command: 'select', description: '快速切換專案' },
@@ -128,35 +135,41 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   bot.use(rateLimitMiddleware())
   bot.use(authMiddleware())
 
-  // Core commands
-  bot.command('start', startCommand)
-  bot.command('login', loginCommand)
-  bot.command('logout', logoutCommand)
-  bot.command('projects', projectsCommand)
-  bot.command('select', selectCommand)
-  bot.command('status', statusCommand)
-  bot.command('cancel', cancelCommand)
-  bot.command('model', modelCommand)
-  bot.command('help', helpCommand)
-  bot.command('new', newSessionCommand)
-  bot.command('fav', favCommand)
-  bot.command('todo', todoCommand)
-  bot.command('todos', todosCommand)
-  bot.command('idea', ideaCommand)
-  bot.command('ideas', ideasCommand)
-  bot.command('mkdir', mkdirCommand)
-  bot.command('cd', cdCommand)
-  bot.command('prompt', promptCommand)
-  bot.command('run', runCommand)
-  bot.command('chat', chatCommand)
-  bot.command('restart', restartCommand)
-  bot.command('newbot', newbotCommand)
-  bot.command('store', storeCommand)
-  bot.command('install', installCommand)
-  bot.command('uninstall', uninstallCommand)
-  bot.command('asr', asrCommand)
-  bot.command('context', contextCommand)
-  bot.command('reload', reloadCommand)
+  // Core commands — register with Telegraf AND populate handler map for @cmd dispatch
+  const coreEntries: ReadonlyArray<[string, (ctx: BotContext) => Promise<void>]> = [
+    ['start', startCommand],
+    ['login', loginCommand],
+    ['logout', logoutCommand],
+    ['projects', projectsCommand],
+    ['select', selectCommand],
+    ['status', statusCommand],
+    ['cancel', cancelCommand],
+    ['model', modelCommand],
+    ['help', helpCommand],
+    ['new', newSessionCommand],
+    ['fav', favCommand],
+    ['todo', todoCommand],
+    ['todos', todosCommand],
+    ['idea', ideaCommand],
+    ['ideas', ideasCommand],
+    ['mkdir', mkdirCommand],
+    ['cd', cdCommand],
+    ['prompt', promptCommand],
+    ['run', runCommand],
+    ['chat', chatCommand],
+    ['restart', restartCommand],
+    ['newbot', newbotCommand],
+    ['store', storeCommand],
+    ['install', installCommand],
+    ['uninstall', uninstallCommand],
+    ['asr', asrCommand],
+    ['context', contextCommand],
+    ['reload', reloadCommand],
+  ]
+  for (const [name, handler] of coreEntries) {
+    bot.command(name, handler)
+    coreHandlers.set(name, handler)
+  }
 
   // Bookmark shortcuts /1 through /9
   for (let i = 1; i <= 9; i++) {

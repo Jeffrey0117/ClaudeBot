@@ -11,7 +11,8 @@ import { detectImagePaths } from '../utils/image-detector.js'
 import { parseCrossProjectTasks, stripRunDirectives } from '../utils/cross-project-parser.js'
 import { parseCommandDirectives, stripCommandDirectives } from '../utils/command-executor.js'
 import { createFakeContext } from '../utils/fake-context.js'
-import { dispatchPluginCommand, dispatchOutputHooks } from '../plugins/loader.js'
+import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand } from '../plugins/loader.js'
+import { getCoreCommandHandler } from './bot.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
 import { getAISessionId } from '../ai/session-store.js'
 import { detectChoices } from '../utils/choice-detector.js'
@@ -113,7 +114,15 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
           commandText: cmd.command,
           telegram: ctx.telegram,
         })
-        await dispatchPluginCommand(cmd.name, fakeCtx)
+        // Core commands first, then plugin commands
+        const coreHandler = getCoreCommandHandler(cmd.name)
+        if (coreHandler) {
+          await coreHandler(fakeCtx)
+        } else if (isPluginCommand(cmd.name)) {
+          await dispatchPluginCommand(cmd.name, fakeCtx)
+        } else {
+          console.warn(`[queue] @cmd unknown command: ${cmd.command}`)
+        }
       } catch (err) {
         console.error(`[queue] @cmd(${cmd.command}) failed:`, err)
       }
