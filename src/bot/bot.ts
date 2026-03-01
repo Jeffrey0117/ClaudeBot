@@ -32,6 +32,7 @@ import { asrCommand } from './commands/asr.js'
 import { storeCommand } from './commands/store.js'
 import { installCommand } from './commands/install.js'
 import { uninstallCommand } from './commands/uninstall.js'
+import { deployCommand } from './commands/deploy.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
@@ -90,6 +91,7 @@ export const CORE_COMMANDS = [
   { command: 'asr', description: '語音轉文字 (on/off)' },
   { command: 'context', description: '上下文管理 (pin/list/clear)' },
   { command: 'restart', description: '重啟 Bot (all=全部)' },
+  { command: 'deploy', description: '部署專案 (commit + push)' },
   { command: 'help', description: '顯示說明' },
 ] as const
 
@@ -165,6 +167,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['asr', asrCommand],
     ['context', contextCommand],
     ['reload', reloadCommand],
+    ['deploy', deployCommand],
   ]
   for (const [name, handler] of coreEntries) {
     bot.command(name, handler)
