@@ -42,6 +42,68 @@ function saveSessions(): void {
 
 const sessions = loadSessions()
 
+// Known AI backends for key format validation
+const KNOWN_BACKENDS = new Set(['claude', 'gemini', 'codex'])
+
+/** Check if a key is the valid new format: BOT_ID:backend:path */
+function isNewFormatKey(key: string): boolean {
+  const firstColon = key.indexOf(':')
+  if (firstColon === -1) return false
+  const afterBotId = key.substring(firstColon + 1)
+  const secondColon = afterBotId.indexOf(':')
+  if (secondColon === -1) return false
+  const backend = afterBotId.substring(0, secondColon)
+  return KNOWN_BACKENDS.has(backend)
+}
+
+// One-time migration: remove legacy keys and detect shared session IDs.
+// Root cause of cross-bot contamination: all bots inherited the same session ID
+// from bare keys, so --resume would load another bot's conversation history.
+{
+  let migrationNeeded = false
+  const myPrefix = `${BOT_ID}:`
+
+  // Phase 1: Remove any key that is NOT the valid new format (BOT_ID:backend:path)
+  for (const key of [...sessions.keys()]) {
+    if (!isNewFormatKey(key)) {
+      sessions.delete(key)
+      migrationNeeded = true
+    }
+  }
+
+  // Phase 2: Detect session IDs shared across different bots and clear ours.
+  // If another bot uses the same session ID, we must start a fresh session.
+  const sessionIdToOwners = new Map<string, string[]>()
+  for (const [key, sid] of sessions) {
+    const owners = sessionIdToOwners.get(sid) ?? []
+    owners.push(key)
+    sessionIdToOwners.set(sid, owners)
+  }
+  for (const [sid, owners] of sessionIdToOwners) {
+    if (owners.length <= 1) continue
+    const hasForeignOwner = owners.some((k) => !k.startsWith(myPrefix))
+    if (!hasForeignOwner) continue
+    for (const key of owners) {
+      if (key.startsWith(myPrefix)) {
+        console.error(`[ai-session] ${BOT_ID}: clearing contaminated session ${sid.slice(0, 8)}... (shared with other bot)`)
+        sessions.delete(key)
+        migrationNeeded = true
+      }
+    }
+  }
+
+  // Write synchronously to minimize race window with other bot processes
+  if (migrationNeeded) {
+    try {
+      const tmp = `${SESSION_FILE}.tmp`
+      writeFileSync(tmp, JSON.stringify(Object.fromEntries(sessions), null, 2))
+      renameSync(tmp, SESSION_FILE)
+    } catch (err) {
+      console.error('[ai-session] migration save failed:', err)
+    }
+  }
+}
+
 function makeKey(backend: AIBackend, projectPath: string): string {
   return `${BOT_ID}:${backend}:${projectPath}`
 }
@@ -69,12 +131,6 @@ export function getAISessionId(backend: AIBackend, projectPath: string): string 
     lastActivity.set(key, Date.now())
     return namespaced
   }
-  // Backward compat: check bare path key (old Claude-only format)
-  if (backend === 'claude') {
-    const bare = sessions.get(projectPath) ?? null
-    if (bare) lastActivity.set(key, Date.now())
-    return bare
-  }
   return null
 }
 
@@ -88,10 +144,6 @@ export function setAISessionId(backend: AIBackend, projectPath: string, sessionI
 export function clearAISession(backend: AIBackend, projectPath: string): boolean {
   const key = makeKey(backend, projectPath)
   const deleted = sessions.delete(key)
-  // Also clear bare path key for backward compat
-  if (backend === 'claude') {
-    sessions.delete(projectPath)
-  }
   if (deleted) saveSessions()
   return deleted
 }
