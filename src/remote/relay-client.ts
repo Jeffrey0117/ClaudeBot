@@ -92,6 +92,7 @@ export async function remoteToolCall(
         if (err.id === id) {
           settled = true
           cleanup()
+          console.error(`[relay-client] tool_error for ${tool}: ${err.error}`)
           reject(new Error(err.error))
         }
       }
