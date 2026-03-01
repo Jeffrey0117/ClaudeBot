@@ -1,12 +1,17 @@
 /**
- * In-memory pairing state for remote vibe-coding sessions.
- * A-side generates pairing codes; N-side connects with the code via relay.
+ * File-backed pairing state for remote vibe-coding sessions.
+ * Uses a JSON file so all bot processes (main, bot2, bot5, etc.)
+ * share the same pairing data — relay runs in main but /pair
+ * can be called from any bot instance.
  */
 
 import { randomBytes } from 'node:crypto'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import path from 'node:path'
 import { sessionKey } from '../bot/state.js'
 
 const PAIRING_TTL_MS = 5 * 60 * 1000 // 5 minutes
+const STORE_PATH = path.resolve('data', 'pairings.json')
 
 export interface PairingSession {
   readonly code: string
@@ -17,25 +22,34 @@ export interface PairingSession {
   readonly connected: boolean
 }
 
-/** Key: sessionKey(chatId, threadId) → PairingSession */
-const pairings = new Map<string, PairingSession>()
-
-/** Reverse lookup: code → sessionKey */
-const codeIndex = new Map<string, string>()
-
-function isExpired(session: PairingSession): boolean {
-  // Connected sessions don't expire
-  if (session.connected) return false
-  return Date.now() - session.createdAt > PAIRING_TTL_MS
+interface StoreData {
+  /** Key: sessionKey(chatId, threadId) → PairingSession */
+  readonly pairings: Record<string, PairingSession>
+  /** Reverse lookup: code → sessionKey */
+  readonly codeIndex: Record<string, string>
 }
 
-function purgeExpired(key: string, session: PairingSession): boolean {
-  if (isExpired(session)) {
-    codeIndex.delete(session.code)
-    pairings.delete(key)
-    return true
+function ensureDir(): void {
+  mkdirSync(path.dirname(STORE_PATH), { recursive: true })
+}
+
+function readStore(): StoreData {
+  try {
+    const raw = readFileSync(STORE_PATH, 'utf-8')
+    return JSON.parse(raw) as StoreData
+  } catch {
+    return { pairings: {}, codeIndex: {} }
   }
-  return false
+}
+
+function writeStore(data: StoreData): void {
+  ensureDir()
+  writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), 'utf-8')
+}
+
+function isExpired(session: PairingSession): boolean {
+  if (session.connected) return false
+  return Date.now() - session.createdAt > PAIRING_TTL_MS
 }
 
 export function createPairingCode(
@@ -43,15 +57,18 @@ export function createPairingCode(
   threadId: number | undefined,
 ): string {
   const key = sessionKey(chatId, threadId)
+  const store = readStore()
+  const pairings = { ...store.pairings }
+  const codeIndex = { ...store.codeIndex }
 
   // Remove previous pairing for this chat if any
-  const prev = pairings.get(key)
+  const prev = pairings[key]
   if (prev) {
-    codeIndex.delete(prev.code)
-    pairings.delete(key)
+    delete codeIndex[prev.code]
+    delete pairings[key]
   }
 
-  // 8-char alphanumeric code (~2^47 possibilities vs 6-digit ~900k)
+  // 8-char alphanumeric code (~2^47 possibilities)
   const code = randomBytes(5).toString('base64url').slice(0, 8).toUpperCase()
   const session: PairingSession = {
     code,
@@ -62,8 +79,9 @@ export function createPairingCode(
     connected: false,
   }
 
-  pairings.set(key, session)
-  codeIndex.set(code, key)
+  pairings[key] = session
+  codeIndex[code] = key
+  writeStore({ pairings, codeIndex })
   return code
 }
 
@@ -72,36 +90,57 @@ export function getPairing(
   threadId: number | undefined,
 ): PairingSession | null {
   const key = sessionKey(chatId, threadId)
-  const session = pairings.get(key)
+  const store = readStore()
+  const session = store.pairings[key]
   if (!session) return null
-  if (purgeExpired(key, session)) return null
+  if (isExpired(session)) {
+    // Purge expired
+    const pairings = { ...store.pairings }
+    const codeIndex = { ...store.codeIndex }
+    delete codeIndex[session.code]
+    delete pairings[key]
+    writeStore({ pairings, codeIndex })
+    return null
+  }
   return session
 }
 
 export function findByCode(code: string): PairingSession | null {
-  const key = codeIndex.get(code)
+  const store = readStore()
+  const key = store.codeIndex[code]
   if (!key) return null
-  const session = pairings.get(key)
+  const session = store.pairings[key]
   if (!session) return null
-  if (purgeExpired(key, session)) return null
+  if (isExpired(session)) {
+    const pairings = { ...store.pairings }
+    const codeIndex = { ...store.codeIndex }
+    delete codeIndex[code]
+    delete pairings[key]
+    writeStore({ pairings, codeIndex })
+    return null
+  }
   return session
 }
 
 export function markConnected(code: string, label: string): boolean {
-  const key = codeIndex.get(code)
+  const store = readStore()
+  const key = store.codeIndex[code]
   if (!key) return false
-  const session = pairings.get(key)
+  const session = store.pairings[key]
   if (!session) return false
-  pairings.set(key, { ...session, connected: true, label })
+  const pairings = { ...store.pairings, [key]: { ...session, connected: true, label } }
+  writeStore({ pairings, codeIndex: store.codeIndex })
   return true
 }
 
 export function markDisconnected(code: string): void {
-  const key = codeIndex.get(code)
+  const store = readStore()
+  const key = store.codeIndex[code]
   if (!key) return
-  const session = pairings.get(key)
+  const session = store.pairings[key]
   if (!session) return
-  pairings.set(key, { ...session, connected: false })
+  const pairings = { ...store.pairings, [key]: { ...session, connected: false } }
+  writeStore({ pairings, codeIndex: store.codeIndex })
 }
 
 export function removePairing(
@@ -109,10 +148,14 @@ export function removePairing(
   threadId: number | undefined,
 ): boolean {
   const key = sessionKey(chatId, threadId)
-  const session = pairings.get(key)
+  const store = readStore()
+  const session = store.pairings[key]
   if (!session) return false
-  codeIndex.delete(session.code)
-  pairings.delete(key)
+  const pairings = { ...store.pairings }
+  const codeIndex = { ...store.codeIndex }
+  delete codeIndex[session.code]
+  delete pairings[key]
+  writeStore({ pairings, codeIndex })
   return true
 }
 
@@ -120,6 +163,7 @@ export function getCodeForChat(
   chatId: number,
   threadId: number | undefined,
 ): string | null {
-  const session = pairings.get(sessionKey(chatId, threadId))
+  const store = readStore()
+  const session = store.pairings[sessionKey(chatId, threadId)]
   return session?.code ?? null
 }
