@@ -9,6 +9,7 @@ import { scanProjects } from '../../config/projects.js'
 import { updateBotBio, pinProjectStatus } from '../bio-updater.js'
 import { recordActivity } from '../../plugins/stats/activity-logger.js'
 import { addText, clearBuffer } from '../ordered-message-buffer.js'
+import { getPairing } from '../../remote/pairing-store.js'
 import type { ProjectInfo } from '../../types/index.js'
 
 function extractMentionText(ctx: BotContext, rawText: string): string | null {
@@ -124,6 +125,22 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
       })
       return
     }
+  }
+
+  // Remote pairing active — bypass project selection, use CWD as project
+  const pairing = getPairing(chatId, threadId)
+  if (!state.selectedProject && pairing?.connected) {
+    const remoteProject = { name: 'remote', path: process.cwd() }
+    const sessionId = getAISessionId(resolveBackend(state.ai.backend), remoteProject.path)
+    enqueue({
+      chatId,
+      prompt: replyQuote + text,
+      project: remoteProject,
+      ai: state.ai,
+      sessionId,
+      imagePaths: [],
+    })
+    return
   }
 
   // No project selected — bypass buffer, show help
