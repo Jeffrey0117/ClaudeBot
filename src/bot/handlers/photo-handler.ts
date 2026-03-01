@@ -4,6 +4,8 @@ import { resolveBackend } from '../../ai/types.js'
 import { getAISessionId } from '../../ai/session-store.js'
 import { enqueue } from '../../claude/queue.js'
 import { downloadImage } from '../../utils/image-downloader.js'
+import { getPairing } from '../../remote/pairing-store.js'
+import { remoteToolCall } from '../../remote/relay-client.js'
 
 const IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
@@ -69,11 +71,23 @@ export async function documentHandler(ctx: BotContext): Promise<void> {
   const message = ctx.message
   if (!message || !('document' in message) || !message.document) return
 
-  const { mime_type: mimeType, file_id: fileId } = message.document
-  if (!mimeType || !IMAGE_MIME_TYPES.has(mimeType)) {
-    return // Not an image document, ignore silently
+  const { mime_type: mimeType, file_id: fileId, file_name: fileName } = message.document
+  const isImage = mimeType != null && IMAGE_MIME_TYPES.has(mimeType)
+  const threadId = message.message_thread_id
+  const caption = ('caption' in message ? message.caption : '') || ''
+
+  // Non-image file + active pairing → push to remote
+  if (!isImage) {
+    const pairing = getPairing(chatId, threadId)
+    if (pairing?.connected) {
+      await pushToRemote(ctx, pairing.code, fileId, fileName ?? 'file', caption)
+      return
+    }
+    // No pairing — silently ignore non-image docs (original behaviour)
+    return
   }
 
+  // Image document → send to AI (original flow)
   const state = getUserState(chatId)
   if (!state.selectedProject) {
     await ctx.reply('\u{7528} /projects \u{9078}\u{64C7}\u{5C08}\u{6848}\u{FF0C}\u{6216} /chat \u{9032}\u{5165}\u{901A}\u{7528}\u{5C0D}\u{8A71}\u{6A21}\u{5F0F}\u{3002}')
@@ -81,13 +95,12 @@ export async function documentHandler(ctx: BotContext): Promise<void> {
   }
 
   const project = state.selectedProject
-  const caption = ('caption' in message ? message.caption : '') || ''
   const prompt = caption || DEFAULT_PROMPT
   const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
 
   try {
     const fileLink = await ctx.telegram.getFileLink(fileId)
-    const extension = getExtensionFromMime(mimeType)
+    const extension = getExtensionFromMime(mimeType!)
     const imagePath = await downloadImage(fileLink.href, extension)
 
     enqueue({
@@ -103,6 +116,30 @@ export async function documentHandler(ctx: BotContext): Promise<void> {
   } catch (error) {
     console.error('[photo-handler] Failed to download document image:', error)
     await ctx.reply('Failed to download image. Please try again.')
+  }
+}
+
+async function pushToRemote(
+  ctx: BotContext,
+  code: string,
+  fileId: string,
+  fileName: string,
+  caption: string,
+): Promise<void> {
+  const remotePath = caption.trim() || `~/Downloads/${fileName}`
+
+  try {
+    const fileLink = await ctx.telegram.getFileLink(fileId)
+    const res = await fetch(fileLink.href)
+    if (!res.ok) throw new Error(`Telegram download failed: ${res.status}`)
+    const arrayBuf = await res.arrayBuffer()
+    const base64 = Buffer.from(arrayBuf).toString('base64')
+
+    await remoteToolCall(code, 'remote_push_file', { path: remotePath, base64 })
+    await ctx.reply(`✅ 已傳到遠端 \`${remotePath}\``, { parse_mode: 'Markdown' })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await ctx.reply(`❌ 上傳失敗: ${msg}`)
   }
 }
 

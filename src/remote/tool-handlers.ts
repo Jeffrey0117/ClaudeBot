@@ -9,6 +9,7 @@ import { resolve, join, relative, sep, isAbsolute } from 'node:path'
 import { homedir } from 'node:os'
 
 const MAX_FILE_SIZE = 100 * 1024
+const MAX_TRANSFER_SIZE = 20 * 1024 * 1024 // 20 MB for file transfer
 const EXEC_TIMEOUT_MS = 30_000
 const MAX_SEARCH_RESULTS = 50
 const IS_WIN = process.platform === 'win32'
@@ -158,6 +159,30 @@ async function handleExecuteCommand(
   })
 }
 
+async function handleFetchFile(args: Record<string, unknown>, validatePath: (p: string) => string): Promise<string> {
+  const filePath = validatePath(String(args.path))
+  const stats = await stat(filePath)
+  if (stats.size > MAX_TRANSFER_SIZE) {
+    throw new Error(`File too large: ${stats.size} bytes (max ${MAX_TRANSFER_SIZE})`)
+  }
+  const buffer = await readFile(filePath)
+  const name = filePath.split(sep).pop() ?? 'file'
+  return JSON.stringify({ name, size: stats.size, base64: buffer.toString('base64') })
+}
+
+async function handlePushFile(args: Record<string, unknown>, validatePath: (p: string) => string): Promise<string> {
+  const filePath = validatePath(String(args.path))
+  const base64 = String(args.base64)
+  const buffer = Buffer.from(base64, 'base64')
+  if (buffer.length > MAX_TRANSFER_SIZE) {
+    throw new Error(`File too large: ${buffer.length} bytes (max ${MAX_TRANSFER_SIZE})`)
+  }
+  const dir = resolve(filePath, '..')
+  await mkdir(dir, { recursive: true })
+  await writeFile(filePath, buffer)
+  return `Written ${buffer.length} bytes to ${filePath}`
+}
+
 export interface ToolDispatcher {
   dispatch(tool: string, args: Record<string, unknown>): Promise<string>
 }
@@ -173,6 +198,8 @@ export function createToolDispatcher(baseDir: string): ToolDispatcher {
         case 'remote_list_directory': return handleListDirectory(args, validatePath)
         case 'remote_search_files': return handleSearchFiles(args, validatePath, baseDir)
         case 'remote_execute_command': return handleExecuteCommand(args, validatePath, baseDir)
+        case 'remote_fetch_file': return handleFetchFile(args, validatePath)
+        case 'remote_push_file': return handlePushFile(args, validatePath)
         default: throw new Error(`Unknown tool: ${tool}`)
       }
     },
