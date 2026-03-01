@@ -194,9 +194,8 @@ function formatWeek(): string {
     barLines.push(`${dayName} ${bar(count, maxDaily, 12)} ${count}`)
   }
 
-  // Streak
-  const streakGit = scanGitActivity(new Date(daysAgo(90)).toISOString().slice(0, 10))
-  const streak = calcStreak(streakGit)
+  // Streak (reuse the week's git data — streak only needs recent daily commits)
+  const streak = calcStreak(s.git)
 
   return [
     '📊 *本週統計*',

@@ -1,4 +1,6 @@
 import { execSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { scanProjects } from '../../config/projects.js'
 
 export interface CommitInfo {
@@ -26,7 +28,7 @@ function runGit(cwd: string, args: string): string {
     return execSync(`git ${args}`, {
       cwd,
       encoding: 'utf-8',
-      timeout: 10_000,
+      timeout: 5_000,
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim()
   } catch {
@@ -34,16 +36,39 @@ function runGit(cwd: string, args: string): string {
   }
 }
 
+/** Cache: key = "sinceDate|untilDate", short TTL to avoid repeated scans within one request */
+let gitCache: { key: string; data: GitSummary; ts: number } | null = null
+const GIT_CACHE_TTL_MS = 3_000
+
+/** Directories already confirmed as git repos (persists per process) */
+const gitRepoCache = new Map<string, boolean>()
+
+function isGitRepo(dirPath: string): boolean {
+  const cached = gitRepoCache.get(dirPath)
+  if (cached !== undefined) return cached
+  const isRepo = existsSync(join(dirPath, '.git'))
+  gitRepoCache.set(dirPath, isRepo)
+  return isRepo
+}
+
 /**
  * Scan git logs across all projects for a given time range.
  */
 export function scanGitActivity(sinceDate: string, untilDate?: string): GitSummary {
+  const cacheKey = `${sinceDate}|${untilDate ?? ''}`
+  if (gitCache && gitCache.key === cacheKey && Date.now() - gitCache.ts < GIT_CACHE_TTL_MS) {
+    return gitCache.data
+  }
+
   const projects = scanProjects()
   const allCommits: CommitInfo[] = []
 
   const untilArg = untilDate ? ` --until="${untilDate}"` : ''
 
   for (const project of projects) {
+    // Skip non-git directories to avoid wasted execSync calls
+    if (!isGitRepo(project.path)) continue
+
     // Get commit log with stats
     const log = runGit(
       project.path,
@@ -123,7 +148,7 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
     .map(([name, stats]) => ({ name, ...stats }))
     .sort((a, b) => b.commits - a.commits)
 
-  return {
+  const result: GitSummary = {
     totalCommits: allCommits.length,
     totalInsertions: allCommits.reduce((s, c) => s + c.insertions, 0),
     totalDeletions: allCommits.reduce((s, c) => s + c.deletions, 0),
@@ -134,4 +159,7 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
       .sort((a, b) => a.date.localeCompare(b.date)),
     commits: allCommits,
   }
+
+  gitCache = { key: cacheKey, data: result, ts: Date.now() }
+  return result
 }
