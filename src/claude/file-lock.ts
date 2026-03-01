@@ -8,8 +8,10 @@ const STALE_TIMEOUT_MS = 35 * 60 * 1000 // 35 min (longer than Claude 30min time
 
 interface LockInfo {
   readonly botToken: string
+  readonly botLabel: string
   readonly pid: number
   readonly startedAt: number
+  readonly task?: string
 }
 
 function lockPath(projectPath: string): string {
@@ -19,6 +21,14 @@ function lockPath(projectPath: string): string {
 function botId(): string {
   // Last 6 chars of token as identifier
   return env.BOT_TOKEN.slice(-6)
+}
+
+function botLabel(): string {
+  const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
+  if (!envArg || envArg === '.env') return 'Main Bot'
+  // .env.bot2 → "Bot 2", .env.bot3 → "Bot 3"
+  const num = envArg.match(/\.env\.bot(\d+)/)?.[1]
+  return num ? `Bot ${num}` : envArg.replace('.env.', 'Bot ')
 }
 
 function isOurLock(info: LockInfo): boolean {
@@ -50,7 +60,7 @@ function isStale(info: LockInfo): boolean {
   return false
 }
 
-export async function acquireLock(projectPath: string): Promise<boolean> {
+export async function acquireLock(projectPath: string, task?: string): Promise<boolean> {
   const existing = await readLock(projectPath)
 
   if (existing) {
@@ -65,8 +75,10 @@ export async function acquireLock(projectPath: string): Promise<boolean> {
 
   const info: LockInfo = {
     botToken: botId(),
+    botLabel: botLabel(),
     pid: process.pid,
     startedAt: Date.now(),
+    ...(task ? { task } : {}),
   }
 
   await writeFile(lockPath(projectPath), JSON.stringify(info), 'utf-8')
@@ -85,7 +97,8 @@ export async function getLockHolder(projectPath: string): Promise<string | null>
   const info = await readLock(projectPath)
   if (!info || isStale(info)) return null
   if (isOurLock(info)) return null
-  return `bot ...${info.botToken}`
+  const name = info.botLabel || `Bot ...${info.botToken}`
+  return info.task ? `${name} (${info.task})` : name
 }
 
 export async function waitForLock(

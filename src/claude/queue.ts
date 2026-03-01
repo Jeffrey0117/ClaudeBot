@@ -124,8 +124,11 @@ async function processNext(projectPath: string): Promise<void> {
   }
 
   try {
+    // Task summary for lock file (so other bots can show what we're doing)
+    const taskPreview = firstItem.prompt.slice(0, 60).replace(/\n/g, ' ')
+
     // Try to acquire cross-process file lock
-    const acquired = await acquireLock(projectPath)
+    const acquired = await acquireLock(projectPath, taskPreview)
 
     if (!acquired) {
       // Another bot is working on this project — notify and wait
@@ -136,6 +139,8 @@ async function processNext(projectPath: string): Promise<void> {
           lockNotifyFn(firstItem.chatId, firstItem.project.name, holder)
         }
       })
+      // Re-acquire with our task info now that lock is free
+      await acquireLock(projectPath, taskPreview)
     }
 
     // Lock acquired — merge any prompts that accumulated during wait
