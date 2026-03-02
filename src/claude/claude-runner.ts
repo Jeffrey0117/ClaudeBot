@@ -135,18 +135,30 @@ export function runClaude(options: RunOptions): void {
     if (pairing?.connected) {
       parts.push(
         `[遠端配對模式]\n` +
-        `你目前已配對一台遠端電腦。請使用 remote_* MCP 工具來操作遠端檔案系統：\n` +
-        `- remote_read_file: 讀取檔案（限 500KB）\n` +
-        `- remote_write_file: 寫入檔案\n` +
-        `- remote_list_directory: 列出目錄\n` +
-        `- remote_search_files: 搜尋檔案（名稱/內容）\n` +
-        `- remote_execute_command: 執行指令（grep, find, git, npm 等）\n` +
+        `你已配對一台遠端電腦，所有操作都針對遠端。使用 remote_* MCP 工具：\n` +
         `\n` +
-        `重要規則：\n` +
-        `1. 不要用你自己的 Read/Write/Edit/Bash 工具，那些是操作本地的。使用者要你操作的是遠端電腦。\n` +
-        `2. 開始工作前，先用 remote_read_file 讀取遠端專案根目錄的 CLAUDE.md（如果存在），了解專案架構和規範。\n` +
-        `3. 搜尋檔案時優先用 remote_execute_command 跑 grep -r 或 find，比 remote_search_files 更快更靈活。\n` +
-        `4. 修改檔案前先 remote_read_file 讀取完整內容，理解現有程式碼。\n` +
+        `檔案操作：\n` +
+        `- remote_read_file(path): 讀取檔案（限 500KB）\n` +
+        `- remote_write_file(path, content): 寫入檔案\n` +
+        `- remote_list_directory(path): 列出目錄\n` +
+        `- remote_search_files(path, pattern, contentPattern?): 搜尋檔案\n` +
+        `\n` +
+        `搜尋與分析：\n` +
+        `- remote_grep(pattern, path?, include?, maxResults?): 快速內容搜尋（正則、行號、自動排除 node_modules）\n` +
+        `- remote_project_overview(path?): 一次看專案全貌（目錄樹 + CLAUDE.md + package.json + git status）\n` +
+        `- remote_system_info(): 遠端系統資訊（OS、磁碟、記憶體、網路）\n` +
+        `\n` +
+        `執行與傳輸：\n` +
+        `- remote_execute_command(command, cwd?): 執行任意指令\n` +
+        `- remote_fetch_file(path): 下載檔案（base64，限 20MB）\n` +
+        `- remote_push_file(path, base64): 上傳檔案（base64，限 20MB）\n` +
+        `\n` +
+        `規則：\n` +
+        `1. 不要用 Read/Write/Edit/Bash 工具，那些是操作本地的。\n` +
+        `2. 使用者可能在操作電腦（找檔案、傳東西、看狀態），不一定在做專案開發。根據需求選擇合適的工具。\n` +
+        `3. 如果使用者要做專案開發，先用 remote_project_overview 了解專案全貌，特別是 CLAUDE.md。\n` +
+        `4. 搜尋程式碼用 remote_grep，比 remote_search_files 快很多。\n` +
+        `5. 修改檔案前先 remote_read_file 讀取完整內容。\n` +
         `[/遠端配對模式]`,
       )
     }
