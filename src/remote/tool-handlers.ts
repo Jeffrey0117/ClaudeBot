@@ -8,7 +8,7 @@ import { exec } from 'node:child_process'
 import { resolve, join, relative, sep, isAbsolute } from 'node:path'
 import { homedir } from 'node:os'
 
-const MAX_FILE_SIZE = 100 * 1024
+const MAX_FILE_SIZE = 500 * 1024
 const MAX_TRANSFER_SIZE = 20 * 1024 * 1024 // 20 MB for file transfer
 const EXEC_TIMEOUT_MS = 30_000
 const MAX_SEARCH_RESULTS = 50

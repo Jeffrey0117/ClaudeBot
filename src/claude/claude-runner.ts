@@ -135,8 +135,18 @@ export function runClaude(options: RunOptions): void {
     if (pairing?.connected) {
       parts.push(
         `[遠端配對模式]\n` +
-        `你目前已配對一台遠端電腦。請使用 remote_* MCP 工具（remote_read_file, remote_write_file, remote_list_directory, remote_search_files, remote_execute_command）來操作遠端檔案系統。\n` +
-        `不要用你自己的 Read/Write/Edit/Bash 工具，那些是操作本地的。使用者要你操作的是遠端電腦。\n` +
+        `你目前已配對一台遠端電腦。請使用 remote_* MCP 工具來操作遠端檔案系統：\n` +
+        `- remote_read_file: 讀取檔案（限 500KB）\n` +
+        `- remote_write_file: 寫入檔案\n` +
+        `- remote_list_directory: 列出目錄\n` +
+        `- remote_search_files: 搜尋檔案（名稱/內容）\n` +
+        `- remote_execute_command: 執行指令（grep, find, git, npm 等）\n` +
+        `\n` +
+        `重要規則：\n` +
+        `1. 不要用你自己的 Read/Write/Edit/Bash 工具，那些是操作本地的。使用者要你操作的是遠端電腦。\n` +
+        `2. 開始工作前，先用 remote_read_file 讀取遠端專案根目錄的 CLAUDE.md（如果存在），了解專案架構和規範。\n` +
+        `3. 搜尋檔案時優先用 remote_execute_command 跑 grep -r 或 find，比 remote_search_files 更快更靈活。\n` +
+        `4. 修改檔案前先 remote_read_file 讀取完整內容，理解現有程式碼。\n` +
         `[/遠端配對模式]`,
       )
     }

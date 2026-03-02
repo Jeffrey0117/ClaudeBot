@@ -31,7 +31,6 @@ export async function grabCommand(ctx: BotContext): Promise<void> {
 
   try {
     // Path resolution (relative → home dir) is handled by the remote agent's handleFetchFile
-    console.error(`[grab] remotePath="${remotePath}" code="${pairing.code}" chatId=${chatId}`)
     const result = await remoteToolCall(pairing.code, 'remote_fetch_file', { path: remotePath })
     const parsed = JSON.parse(result) as { name: string; size: number; base64: string }
     const buffer = Buffer.from(parsed.base64, 'base64')

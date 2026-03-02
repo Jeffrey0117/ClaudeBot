@@ -86,7 +86,36 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
 
     const rawText = ctx.accumulated || result.resultText || ''
 
-    const hookResult = await dispatchOutputHooks(rawText, {
+    // Parse @cmd directives BEFORE output hooks (e.g. mdfix) run,
+    // so filenames with underscores aren't escaped (REMOTE_SUCCESS → REMOTE\_SUCCESS)
+    const rawAfterRun = stripRunDirectives(rawText)
+    const cmdDirectives = parseCommandDirectives(rawAfterRun)
+    for (const cmd of cmdDirectives) {
+      try {
+        const fakeCtx = createFakeContext({
+          chatId: ctx.item.chatId,
+          commandText: cmd.command,
+          telegram: ctx.telegram,
+        })
+        const coreHandler = getCoreCommandHandler(cmd.name)
+        if (coreHandler) {
+          await coreHandler(fakeCtx)
+        } else if (isPluginCommand(cmd.name)) {
+          await dispatchPluginCommand(cmd.name, fakeCtx)
+        } else {
+          console.warn(`[queue] @cmd unknown command: ${cmd.command}`)
+        }
+      } catch (err) {
+        console.error(`[queue] @cmd(${cmd.command}) failed:`, err)
+      }
+    }
+
+    // Strip @cmd directives before passing to output hooks
+    const textForHooks = cmdDirectives.length > 0
+      ? stripCommandDirectives(rawAfterRun)
+      : rawAfterRun
+
+    const hookResult = await dispatchOutputHooks(textForHooks, {
       projectPath: ctx.item.project.path,
       projectName: ctx.item.project.name,
       model: ctx.resolvedAI.model,
@@ -104,33 +133,7 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       setLastResponse(ctx.item.project.path, hookedText)
     }
 
-    const afterRun = stripRunDirectives(hookedText)
-
-    const cmdDirectives = parseCommandDirectives(afterRun)
-    for (const cmd of cmdDirectives) {
-      try {
-        const fakeCtx = createFakeContext({
-          chatId: ctx.item.chatId,
-          commandText: cmd.command,
-          telegram: ctx.telegram,
-        })
-        // Core commands first, then plugin commands
-        const coreHandler = getCoreCommandHandler(cmd.name)
-        if (coreHandler) {
-          await coreHandler(fakeCtx)
-        } else if (isPluginCommand(cmd.name)) {
-          await dispatchPluginCommand(cmd.name, fakeCtx)
-        } else {
-          console.warn(`[queue] @cmd unknown command: ${cmd.command}`)
-        }
-      } catch (err) {
-        console.error(`[queue] @cmd(${cmd.command}) failed:`, err)
-      }
-    }
-
-    const responseText = cmdDirectives.length > 0
-      ? stripCommandDirectives(afterRun)
-      : afterRun
+    const responseText = hookedText
     const totalTime = ((Date.now() - ctx.startTime) / 1000).toFixed(1)
     const cost = (result.costUsd ?? 0).toFixed(4)
 
