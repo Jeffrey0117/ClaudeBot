@@ -23,6 +23,7 @@ import { env } from '../../config/env.js'
 import { getAsrMode, consumeAsrMode } from '../asr-store.js'
 import { addVoice, getVoiceActive } from '../ordered-message-buffer.js'
 import { telegramFetch } from '../../utils/telegram-fetch.js'
+import { getPairing } from '../../remote/pairing-store.js'
 
 const execFileAsync = promisify(execFile)
 
