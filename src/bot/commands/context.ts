@@ -4,6 +4,7 @@ import { addPin, getPins, removePin, clearPins } from '../context-pin-store.js'
 import { getAISessionId, clearAISession } from '../../ai/session-store.js'
 import { resolveBackend } from '../../ai/types.js'
 import { enqueue } from '../../claude/queue.js'
+import { getPairing } from '../../remote/pairing-store.js'
 
 export async function contextCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -15,13 +16,16 @@ export async function contextCommand(ctx: BotContext): Promise<void> {
   const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
   const state = getUserState(chatId, threadId)
 
-  if (!state.selectedProject) {
+  const project = state.selectedProject
+    ?? (getPairing(chatId, threadId)?.connected ? { name: 'remote', path: process.cwd() } : null)
+
+  if (!project) {
     await ctx.reply('⚠️ 尚未選擇專案。請先用 /projects。')
     return
   }
 
-  const projectPath = state.selectedProject.path
-  const projectName = state.selectedProject.name
+  const projectPath = project.path
+  const projectName = project.name
 
   // /context pin <text>
   if (args.startsWith('pin ')) {
@@ -117,7 +121,7 @@ export async function contextCommand(ctx: BotContext): Promise<void> {
     enqueue({
       chatId,
       prompt: '請用 3-5 個重點摘要我們目前的對話狀態：正在做什麼、做到哪裡、還有什麼待做。',
-      project: state.selectedProject,
+      project,
       ai: state.ai,
       sessionId,
       imagePaths: [],

@@ -1,21 +1,26 @@
 import type { BotContext } from '../../types/context.js'
 import { getUserState } from '../state.js'
 import { clearAISession } from '../../ai/session-store.js'
+import { getPairing } from '../../remote/pairing-store.js'
 
 export async function newSessionCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
   if (!chatId) return
 
-  const state = getUserState(chatId)
-  if (!state.selectedProject) {
-    await ctx.reply('\u{26A0}\u{FE0F} \u{5C1A}\u{672A}\u{9078}\u{64C7}\u{5C08}\u{6848}\u{3002}\u{8ACB}\u{5148}\u{7528} /projects\u{3002}')
+  const threadId = ctx.message?.message_thread_id
+  const state = getUserState(chatId, threadId)
+  const project = state.selectedProject
+    ?? (getPairing(chatId, threadId)?.connected ? { name: 'remote', path: process.cwd() } : null)
+
+  if (!project) {
+    await ctx.reply('⚠️ 尚未選擇專案。請先用 /projects。')
     return
   }
 
   const resolvedBackend = state.ai.backend === 'auto' ? 'claude' : state.ai.backend
-  clearAISession(resolvedBackend, state.selectedProject.path)
+  clearAISession(resolvedBackend, project.path)
   await ctx.reply(
-    `\u{1F504} \u{5DF2}\u{6E05}\u{9664} *${state.selectedProject.name}* \u{7684}\u{5C0D}\u{8A71}\u{3002}\n\u{4E0B}\u{6B21}\u{50B3}\u{8A0A}\u{5C07}\u{958B}\u{59CB}\u{65B0}\u{5C0D}\u{8A71}\u{3002}`,
+    `🔄 已清除 *${project.name}* 的對話。\n下次傳訊將開始新對話。`,
     { parse_mode: 'Markdown' }
   )
 }
