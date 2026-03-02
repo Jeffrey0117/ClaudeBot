@@ -9,9 +9,19 @@ import { getChoice, clearChoices } from '../choice-store.js'
 import { enqueue } from '../../claude/queue.js'
 import { getAISessionId } from '../../ai/session-store.js'
 import { Markup } from 'telegraf'
-import type { AIModelSelection } from '../../types/index.js'
+import type { AIModelSelection, ProjectInfo } from '../../types/index.js'
 import { formatAILabel, resolveBackend } from '../../ai/types.js'
 import { getThreadId } from '../../utils/callback-helpers.js'
+import { getPairing } from '../../remote/pairing-store.js'
+
+/** Get selected project, or fall back to remote project if paired. */
+function getEffectiveProject(chatId: number, threadId: number | undefined): ProjectInfo | null {
+  const state = getUserState(chatId, threadId)
+  if (state.selectedProject) return state.selectedProject
+  const pairing = getPairing(chatId, threadId)
+  if (pairing?.connected) return { name: 'remote', path: process.cwd() }
+  return null
+}
 
 export async function callbackHandler(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -130,22 +140,23 @@ async function handleConfirm(ctx: BotContext, chatId: number, data: string): Pro
 
   const threadId = getThreadId(ctx)
   const state = getUserState(chatId, threadId)
+  const project = getEffectiveProject(chatId, threadId)
 
   // Remove buttons
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {})
   await ctx.answerCbQuery(`已回答: ${answer}`)
 
-  if (!state.selectedProject) {
+  if (!project) {
     await ctx.telegram.sendMessage(chatId, '⚠️ 尚未選擇專案')
     return
   }
 
-  const sessionId = getAISessionId(resolveBackend(state.ai.backend), state.selectedProject.path)
+  const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
 
   enqueue({
     chatId,
     prompt: answer,
-    project: state.selectedProject,
+    project,
     ai: state.ai,
     sessionId,
     imagePaths: [],
@@ -157,13 +168,14 @@ async function handleChoice(ctx: BotContext, chatId: number, data: string): Prom
 
   const threadId = getThreadId(ctx)
   const state = getUserState(chatId, threadId)
+  const project = getEffectiveProject(chatId, threadId)
 
-  if (!state.selectedProject) {
+  if (!project) {
     await ctx.answerCbQuery('\u5C1A\u672A\u9078\u64C7\u5C08\u6848')
     return
   }
 
-  const choice = getChoice(chatId, state.selectedProject.path, index)
+  const choice = getChoice(chatId, project.path, index)
   if (!choice) {
     await ctx.answerCbQuery('\u9078\u9805\u5DF2\u904E\u671F')
     return
@@ -173,13 +185,13 @@ async function handleChoice(ctx: BotContext, chatId: number, data: string): Prom
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {})
   await ctx.answerCbQuery()
 
-  const sessionId = getAISessionId(resolveBackend(state.ai.backend), state.selectedProject.path)
-  clearChoices(chatId, state.selectedProject.path)
+  const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
+  clearChoices(chatId, project.path)
 
   enqueue({
     chatId,
     prompt: choice,
-    project: state.selectedProject,
+    project,
     ai: state.ai,
     sessionId,
     imagePaths: [],
@@ -191,13 +203,14 @@ async function handleSuggestion(ctx: BotContext, chatId: number, data: string): 
 
   const threadId = getThreadId(ctx)
   const state = getUserState(chatId, threadId)
+  const project = getEffectiveProject(chatId, threadId)
 
-  if (!state.selectedProject) {
+  if (!project) {
     await ctx.answerCbQuery('尚未選擇專案')
     return
   }
 
-  const suggestion = getSuggestion(chatId, state.selectedProject.path, index)
+  const suggestion = getSuggestion(chatId, project.path, index)
   if (!suggestion) {
     await ctx.answerCbQuery('建議已過期')
     return
@@ -207,13 +220,13 @@ async function handleSuggestion(ctx: BotContext, chatId: number, data: string): 
   await ctx.editMessageText(`💡 → ${suggestion}`).catch(() => {})
   await ctx.answerCbQuery()
 
-  const sessionId = getAISessionId(resolveBackend(state.ai.backend), state.selectedProject.path)
-  clearSuggestions(chatId, state.selectedProject.path)
+  const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
+  clearSuggestions(chatId, project.path)
 
   enqueue({
     chatId,
     prompt: suggestion,
-    project: state.selectedProject,
+    project,
     ai: state.ai,
     sessionId,
     imagePaths: [],
