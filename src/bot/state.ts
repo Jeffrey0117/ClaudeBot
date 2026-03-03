@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ProjectInfo, AIModelSelection } from '../types/index.js'
 import { env } from '../config/env.js'
+import { resolveWorktreePath } from '../config/projects.js'
 
 /** Short bot identifier from token (last 6 chars) for state isolation. */
 const BOT_ID = env.BOT_TOKEN.slice(-6)
@@ -75,6 +76,14 @@ export function getUserState(chatId: number, threadId?: number): Readonly<UserSt
       ai: { backend: 'auto', model: env.DEFAULT_MODEL },
     }
     userStates.set(key, state)
+  }
+  // Auto-resolve worktree path for persisted states from before worktree was enabled
+  if (state.selectedProject && env.WORKTREE_BRANCH) {
+    const resolved = resolveWorktreePath(state.selectedProject)
+    if (resolved.path !== state.selectedProject.path) {
+      state = { ...state, selectedProject: resolved }
+      userStates.set(key, state)
+    }
   }
   return state
 }
