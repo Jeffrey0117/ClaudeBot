@@ -207,6 +207,15 @@ async function handleExecuteCommand(
   })
 }
 
+// Cache whether rg is available (checked once at first grep call)
+let rgAvailable: boolean | null = null
+
+function checkRgAvailable(): Promise<boolean> {
+  return new Promise((res) => {
+    exec('rg --version', { timeout: 3000 }, (err) => res(!err))
+  })
+}
+
 async function handleGrep(
   args: Record<string, unknown>,
   validatePath: (p: string) => string,
@@ -217,10 +226,13 @@ async function handleGrep(
   const include = args.include ? String(args.include) : ''
   const maxResults = Math.min(Number(args.maxResults) || 100, 200)
 
-  const excludeDirs = '--exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=.next'
-  const includeFlag = include ? `--include="${include}"` : ''
-  // Use grep (available via Git for Windows on Windows, native on Linux/Mac)
-  const cmd = `grep -rn ${excludeDirs} ${includeFlag} -m ${maxResults} -- "${pattern.replace(/"/g, '\\"')}" "${searchPath}"`
+  // Check rg availability once
+  if (rgAvailable === null) rgAvailable = await checkRgAvailable()
+
+  const escapedPattern = pattern.replace(/"/g, '\\"')
+  const cmd = rgAvailable
+    ? buildRgCommand(escapedPattern, searchPath, include, maxResults)
+    : buildGrepCommand(escapedPattern, searchPath, include, maxResults)
 
   return new Promise((res) => {
     exec(cmd, { timeout: EXEC_TIMEOUT_MS, maxBuffer: 512 * 1024 }, (error, stdout) => {
@@ -239,6 +251,18 @@ async function handleGrep(
       }
     })
   })
+}
+
+function buildRgCommand(pattern: string, searchPath: string, include: string, maxResults: number): string {
+  // ripgrep: auto-respects .gitignore, much faster, better regex
+  const globFlag = include ? `--glob "${include}"` : ''
+  return `rg -n --no-heading --max-count ${maxResults} ${globFlag} -- "${pattern}" "${searchPath}"`
+}
+
+function buildGrepCommand(pattern: string, searchPath: string, include: string, maxResults: number): string {
+  const excludeDirs = '--exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=.next'
+  const includeFlag = include ? `--include="${include}"` : ''
+  return `grep -rn ${excludeDirs} ${includeFlag} -m ${maxResults} -- "${pattern}" "${searchPath}"`
 }
 
 function handleSystemInfo(baseDir: string): Promise<string> {
