@@ -7,6 +7,8 @@ import { promisify } from 'node:util'
 import { chromium } from 'playwright'
 import { Input } from 'telegraf'
 import type { BotContext } from '../../types/context.js'
+import { getPairing, getCodeForChat } from '../../remote/pairing-store.js'
+import { remoteToolCall } from '../../remote/relay-client.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -122,6 +124,78 @@ async function listScreens(): Promise<string[]> {
   throw new Error('螢幕列表僅支援 Windows 和 macOS')
 }
 
+// --- Remote screenshot via relay ---
+
+async function captureRemoteScreenshot(ctx: BotContext, code: string): Promise<void> {
+  const chatId = ctx.chat?.id
+  if (!chatId) return
+
+  const statusMsg = await ctx.reply('🖥️ 遠端截圖中...')
+
+  try {
+    // Run PowerShell screenshot on remote, save to temp file
+    const remotePath = '$env:TEMP\\claudebot-screenshot.png'
+    const psScript = [
+      'Add-Type -AssemblyName System.Windows.Forms',
+      'Add-Type -AssemblyName System.Drawing',
+      '$screens = [System.Windows.Forms.Screen]::AllScreens',
+      '$minX = ($screens | ForEach-Object { $_.Bounds.X } | Measure-Object -Minimum).Minimum',
+      '$minY = ($screens | ForEach-Object { $_.Bounds.Y } | Measure-Object -Minimum).Minimum',
+      '$maxX = ($screens | ForEach-Object { $_.Bounds.X + $_.Bounds.Width } | Measure-Object -Maximum).Maximum',
+      '$maxY = ($screens | ForEach-Object { $_.Bounds.Y + $_.Bounds.Height } | Measure-Object -Maximum).Maximum',
+      '$w = [int]($maxX - $minX)',
+      '$h = [int]($maxY - $minY)',
+      '$bmp = New-Object System.Drawing.Bitmap($w, $h)',
+      '$g = [System.Drawing.Graphics]::FromImage($bmp)',
+      '$g.CopyFromScreen([int]$minX, [int]$minY, 0, 0, [System.Drawing.Size]::new($w, $h))',
+      '$g.Dispose()',
+      `$bmp.Save("${remotePath}", [System.Drawing.Imaging.ImageFormat]::Png)`,
+      '$bmp.Dispose()',
+      `Write-Output (Resolve-Path "${remotePath}").Path`,
+    ].join('; ')
+
+    const captureResult = await remoteToolCall(code, 'remote_execute_command', {
+      command: `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "${psScript.replace(/"/g, '\\"')}"`,
+      timeout: 20000,
+    }, 25_000)
+
+    const resolvedPath = captureResult.trim().split('\n').pop()?.trim()
+    if (!resolvedPath) throw new Error('遠端截圖路徑取得失敗')
+
+    // Fetch the screenshot file as base64
+    const base64Data = await remoteToolCall(code, 'remote_fetch_file', {
+      path: resolvedPath,
+    }, 30_000)
+
+    // Parse the base64 response — remote_fetch_file returns JSON with base64 field
+    let imageBase64: string
+    try {
+      const parsed = JSON.parse(base64Data) as { base64?: string; content?: string }
+      imageBase64 = parsed.base64 ?? parsed.content ?? base64Data
+    } catch {
+      imageBase64 = base64Data
+    }
+
+    const imageBuffer = Buffer.from(imageBase64, 'base64')
+
+    await ctx.replyWithPhoto(Input.fromBuffer(imageBuffer, 'screenshot.png'), {
+      caption: '🖥️ 遠端桌面',
+    })
+    await ctx.telegram.deleteMessage(chatId, statusMsg.message_id).catch(() => {})
+
+    // Cleanup remote temp file
+    await remoteToolCall(code, 'remote_execute_command', {
+      command: `del "${resolvedPath}" 2>nul`,
+    }, 5_000).catch(() => {})
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    await ctx.telegram.editMessageText(
+      chatId, statusMsg.message_id, undefined,
+      `❌ 遠端截圖失敗: ${msg}`
+    ).catch(() => {})
+  }
+}
+
 export async function screenshotCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
   if (!chatId) return
@@ -130,8 +204,30 @@ export async function screenshotCommand(ctx: BotContext): Promise<void> {
   const args = raw.replace(/^\/screenshot\s*/, '').trim().split(/\s+/)
   const firstArg = args[0] || ''
 
+  // Check remote pairing
+  const threadId = ctx.message?.message_thread_id
+  const pairing = getPairing(chatId, threadId)
+  const isRemotePaired = !!pairing?.connected
+  const forceLocal = firstArg === 'local'
+
+  // Remote mode: paired + not forcing local + not URL + not list
+  if (isRemotePaired && !forceLocal && firstArg !== 'list' && firstArg !== 'ls') {
+    // If it's a URL, still handle locally (web screenshot)
+    const isUrl = firstArg.startsWith('http://') || firstArg.startsWith('https://')
+    if (!isUrl) {
+      const code = getCodeForChat(chatId, threadId)
+      if (code) {
+        await captureRemoteScreenshot(ctx, code)
+        return
+      }
+    }
+  }
+
+  // Strip 'local' arg so rest of logic works
+  const effectiveFirstArg = forceLocal ? (args[1] || '') : firstArg
+
   // /screenshot list — show available screens
-  if (firstArg === 'list' || firstArg === 'ls') {
+  if (effectiveFirstArg === 'list' || effectiveFirstArg === 'ls') {
     try {
       const screens = await listScreens()
       await ctx.reply(
@@ -146,9 +242,9 @@ export async function screenshotCommand(ctx: BotContext): Promise<void> {
   }
 
   // /screenshot N — specific screen
-  const screenNum = /^[1-9]$/.test(firstArg) ? parseInt(firstArg, 10) : 0
+  const screenNum = /^[1-9]$/.test(effectiveFirstArg) ? parseInt(effectiveFirstArg, 10) : 0
 
-  if (screenNum > 0 || !firstArg) {
+  if (screenNum > 0 || !effectiveFirstArg) {
     const screenIndex = screenNum > 0 ? screenNum - 1 : undefined
     const label = screenNum > 0 ? `螢幕 ${screenNum}` : '全部螢幕'
     const statusMsg = await ctx.reply(`🖥️ ${label}截圖中...`)
