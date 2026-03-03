@@ -83,6 +83,16 @@ export function resolveWorktreePath(project: ProjectInfo): ProjectInfo {
   const branch = env.WORKTREE_BRANCH
   if (!branch) return project
 
+  // WORKTREE_PROJECTS scoping: if set, only listed projects get worktree isolation.
+  // Other projects stay on master (avoid pushing to botN branch by accident).
+  const scoped = env.WORKTREE_PROJECTS
+  if (scoped.length > 0) {
+    const isListed = scoped.some(
+      (name) => name.toLowerCase() === project.name.toLowerCase(),
+    )
+    if (!isListed) return project
+  }
+
   if (!isGitRepo(project.path)) return project
 
   try {

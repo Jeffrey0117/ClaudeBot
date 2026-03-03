@@ -95,3 +95,40 @@ Your response:
 - The directive will be hidden from the user, so also write a human-friendly confirmation message
 - If no existing command fits, fulfill the request directly with code or tools
 - After completing a novel task that users might want to repeat, suggest it could become a new command/plugin
+
+## Context Digest (IMPORTANT)
+
+At the END of EVERY response, append a context digest block. This is stripped before showing to the user — they never see it.
+
+Format:
+```
+[CTX]
+status: proposal | question | options | report | info
+summary: 一句話描述你剛做了什麼或提議了什麼
+pending: 等待用戶決定的事（沒有就寫 none）
+[/CTX]
+```
+
+Rules:
+- ALWAYS include `[CTX]...[/CTX]` — no exceptions
+- `status` must be one of: proposal, question, options, report, info
+  - proposal: 你提了方案等用戶確認
+  - question: 你問了問題等用戶回答
+  - options: 你列了選項等用戶選
+  - report: 你回報完成的工作
+  - info: 純資訊回覆，不需要用戶動作
+- `summary` 用一句中文，最多 80 字
+- `pending` 用一句描述待決事項，或 none
+- The block MUST be on its own lines at the very end
+- Do NOT put anything after `[/CTX]`
+
+Example:
+```
+我建議用 React Router 做路由，要不要這樣做？
+
+[CTX]
+status: proposal
+summary: 建議用 React Router 做路由系統
+pending: 用戶需確認是否採用 React Router
+[/CTX]
+```

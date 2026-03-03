@@ -3,6 +3,7 @@ import { env } from './config/env.js'
 import { scanProjects } from './config/projects.js'
 import { startDashboardServer } from './dashboard/server.js'
 import { startRelayServer } from './remote/relay-server.js'
+import { syncWorktreeOnStartup } from './git/worktree-sync.js'
 
 // P0: Catch unhandled errors — heartbeat keeps writing so watchdog can decide
 process.on('unhandledRejection', (reason) => {
@@ -25,6 +26,9 @@ function sleep(ms: number): Promise<void> {
 
 async function main(): Promise<void> {
   console.log('Starting ClaudeBot...')
+
+  // Auto-sync worktree branch with master on startup
+  syncWorktreeOnStartup()
 
   const projects = scanProjects()
   console.log(`Found ${projects.length} projects in ${env.PROJECTS_BASE_DIR.join(', ')}`)

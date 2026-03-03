@@ -39,6 +39,7 @@ import { grabCommand } from './commands/grab.js'
 import { claudemdCommand } from './commands/claudemd.js'
 import { rstatusCommand } from './commands/rstatus.js'
 import { rlogCommand } from './commands/rlog.js'
+import { parallelCommand } from './commands/parallel.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
@@ -105,6 +106,7 @@ export const CORE_COMMANDS = [
   { command: 'claudemd', description: '自動生成/更新 CLAUDE.md' },
   { command: 'rstatus', description: '查看遠端系統狀態' },
   { command: 'rlog', description: '查看遠端 log' },
+  { command: 'parallel', description: '平行執行多個任務' },
   { command: 'help', description: '顯示說明' },
 ] as const
 
@@ -188,6 +190,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['claudemd', claudemdCommand],
     ['rstatus', rstatusCommand],
     ['rlog', rlogCommand],
+    ['parallel', parallelCommand],
   ]
   for (const [name, handler] of coreEntries) {
     bot.command(name, handler)

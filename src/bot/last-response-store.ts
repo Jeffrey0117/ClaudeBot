@@ -6,7 +6,7 @@
 
 const lastResponses = new Map<string, string>()
 
-const MAX_STORE_LENGTH = 400
+const MAX_STORE_LENGTH = 1500
 
 export function setLastResponse(projectPath: string, text: string): void {
   lastResponses.set(projectPath, text.slice(-MAX_STORE_LENGTH))

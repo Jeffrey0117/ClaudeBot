@@ -10,7 +10,31 @@ import { updateBotBio, pinProjectStatus } from '../bio-updater.js'
 import { recordActivity } from '../../plugins/stats/activity-logger.js'
 import { addText, clearBuffer } from '../ordered-message-buffer.js'
 import { getPairing } from '../../remote/pairing-store.js'
+import { detectParallelCandidate } from '../../utils/parallel-detector.js'
+import { getActiveJob } from '../parallel-store.js'
+import { isGitRepo } from '../../git/worktree.js'
+import { Markup } from 'telegraf'
 import type { ProjectInfo } from '../../types/index.js'
+
+/** Temporary store for parallel suggestions awaiting user decision. */
+export interface ParallelSuggestionEntry {
+  readonly tasks: readonly string[]
+  readonly originalText: string
+  readonly messageId: number
+  readonly threadId: number | undefined
+  readonly expiresAt: number
+}
+
+const parallelSuggestions = new Map<number, ParallelSuggestionEntry>()
+
+/** Get and consume a stored parallel suggestion. */
+export function consumeParallelSuggestion(chatId: number): ParallelSuggestionEntry | null {
+  const entry = parallelSuggestions.get(chatId)
+  if (!entry) return null
+  parallelSuggestions.delete(chatId)
+  if (Date.now() > entry.expiresAt) return null
+  return entry
+}
 
 function extractMentionText(ctx: BotContext, rawText: string): string | null {
   const isGroup = ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup'
@@ -204,6 +228,34 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
         ai: state.ai,
         sessionId,
         imagePaths: [],
+      })
+      return
+    }
+  }
+
+  // Smart parallel detection: suggest /parallel for multi-task messages
+  if (!getActiveJob(chatId) && isGitRepo(project.path)) {
+    const suggestion = detectParallelCandidate(text)
+    if (suggestion && suggestion.tasks.length >= 2) {
+      const taskList = suggestion.tasks.map((t, i) => `${i + 1}. ${t}`).join('\n')
+
+      await ctx.reply(
+        `⚡ 偵測到 ${suggestion.tasks.length} 個獨立任務，建議使用平行模式：\n\n${taskList}`,
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback('⚡ 用平行模式', `parallel_suggest:${chatId}`),
+            Markup.button.callback('➡️ 照常發送', `parallel_suggest_skip:${chatId}`),
+          ],
+        ]),
+      )
+
+      // Store suggestion for callback
+      parallelSuggestions.set(chatId, {
+        tasks: suggestion.tasks,
+        originalText: replyQuote + text,
+        messageId,
+        threadId,
+        expiresAt: Date.now() + 60_000,
       })
       return
     }

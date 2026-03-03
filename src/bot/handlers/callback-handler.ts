@@ -8,6 +8,9 @@ import { getSuggestion, clearSuggestions } from '../suggestion-store.js'
 import { getChoice, clearChoices } from '../choice-store.js'
 import { enqueue } from '../../claude/queue.js'
 import { getAISessionId } from '../../ai/session-store.js'
+import { handleParallelCallback, createParallelJobFromSuggestion } from '../commands/parallel.js'
+import { consumeParallelSuggestion } from './message-handler.js'
+import { addText } from '../ordered-message-buffer.js'
 import { Markup } from 'telegraf'
 import type { AIModelSelection, ProjectInfo } from '../../types/index.js'
 import { formatAILabel, resolveBackend } from '../../ai/types.js'
@@ -43,6 +46,12 @@ export async function callbackHandler(ctx: BotContext): Promise<void> {
   } else if (data.startsWith('model:')) {
     // Backward compat: old model:xxx callbacks → translate to ai:claude:xxx
     await handleAISelect(ctx, chatId, `claude:${data.slice('model:'.length)}`)
+  } else if (data.startsWith('parallel_suggest:')) {
+    await handleParallelSuggest(ctx, chatId, true)
+  } else if (data.startsWith('parallel_suggest_skip:')) {
+    await handleParallelSuggest(ctx, chatId, false)
+  } else if (data.startsWith('parallel:')) {
+    await handleParallelCallback(ctx, chatId, data)
   } else if (data === 'bookmark:add') {
     await handleBookmarkAdd(ctx, chatId)
   } else if (data.startsWith('bookmark:remove:')) {
@@ -264,5 +273,29 @@ async function handleBookmarkRemove(ctx: BotContext, chatId: number, slot: numbe
     { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) }
   )
   await ctx.answerCbQuery()
+}
+
+async function handleParallelSuggest(ctx: BotContext, chatId: number, useParallel: boolean): Promise<void> {
+  const suggestion = consumeParallelSuggestion(chatId)
+
+  // Remove buttons
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {})
+
+  if (!suggestion) {
+    await ctx.answerCbQuery('建議已過期')
+    return
+  }
+
+  if (useParallel) {
+    await ctx.answerCbQuery('切換到平行模式！')
+    await ctx.editMessageText('⚡ 已轉為平行模式')
+    // Directly create job and show confirm buttons
+    await createParallelJobFromSuggestion(ctx, chatId, suggestion.tasks, suggestion.threadId)
+  } else {
+    await ctx.answerCbQuery('照常發送')
+    await ctx.editMessageText('➡️ 照常發送到 Claude')
+    // Send original text through the normal buffer
+    addText(chatId, suggestion.messageId, suggestion.threadId, suggestion.originalText, '')
+  }
 }
 

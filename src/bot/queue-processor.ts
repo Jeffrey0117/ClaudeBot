@@ -28,6 +28,7 @@ import { recordCost } from '../plugins/cost/index.js'
 import { recordActivity } from '../plugins/stats/activity-logger.js'
 import { emitResponseChunk, emitResponseComplete, emitResponseError } from '../dashboard/response-broker.js'
 import { setLastResponse } from './last-response-store.js'
+import { extractDigest, setContext } from './context-digest-store.js'
 import { autoCommitAndPush } from '../utils/auto-commit.js'
 import { env } from '../config/env.js'
 
@@ -129,11 +130,17 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       ctx.telegram.sendMessage(ctx.item.chatId, `\u{26A0}\u{FE0F} ${warnText}`).catch(() => {})
     }
 
+    // Extract [CTX] digest and strip from display text
+    const { digest, cleaned: digestCleaned } = hookedText
+      ? extractDigest(hookedText)
+      : { digest: null, cleaned: '' }
+
     if (hookedText) {
-      setLastResponse(ctx.item.project.path, hookedText)
+      setLastResponse(ctx.item.project.path, digestCleaned || hookedText)
+      setContext(ctx.item.project.path, digestCleaned || hookedText, digest)
     }
 
-    const responseText = hookedText
+    const responseText = digestCleaned || hookedText
     const totalTime = ((Date.now() - ctx.startTime) / 1000).toFixed(1)
     const cost = (result.costUsd ?? 0).toFixed(4)
 

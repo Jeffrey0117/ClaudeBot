@@ -6,8 +6,15 @@ type LockNotifyFn = (chatId: number, projectName: string, holder: string) => voi
 
 const queues = new Map<string, QueueItem[]>()
 const processing = new Set<string>()
+type CompletionFn = (projectPath: string) => void
+
 let processFn: ProcessFn = async () => {}
 let lockNotifyFn: LockNotifyFn = () => {}
+let completionFn: CompletionFn = () => {}
+
+export function setCompletionHook(fn: CompletionFn): void {
+  completionFn = fn
+}
 
 export function setProcessor(fn: ProcessFn): void {
   processFn = fn
@@ -152,6 +159,7 @@ async function processNext(projectPath: string): Promise<void> {
   } finally {
     await releaseLock(projectPath)
     processing.delete(projectPath)
+    completionFn(projectPath)
     processNext(projectPath)
   }
 }

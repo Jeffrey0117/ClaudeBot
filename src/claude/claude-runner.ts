@@ -7,6 +7,7 @@ import { validateProjectPath } from '../utils/path-validator.js'
 import { getTodos } from '../bot/todo-store.js'
 import { formatPinsForPrompt } from '../bot/context-pin-store.js'
 import { getLastResponse } from '../bot/last-response-store.js'
+import { buildContextInjection } from '../bot/context-digest-store.js'
 import { getSystemPrompt } from '../utils/system-prompt.js'
 import { env } from '../config/env.js'
 import { getPairing } from '../remote/pairing-store.js'
@@ -169,13 +170,14 @@ export function runClaude(options: RunOptions): void {
     }
   }
 
-  // For short or affirmative replies, inject last response tail so Claude
-  // knows what the user is referring to after context compression.
-  // Triggers on: very short messages (≤15 chars) OR affirmative phrases (≤80 chars).
+  // For short or affirmative replies, inject context so Claude knows what
+  // the user is referring to after context compression.
+  // Prefers structured [CTX] digest; falls back to raw response tail.
   if (prompt.length <= 15 || (prompt.length <= 80 && looksAffirmative(prompt))) {
-    const lastResponse = getLastResponse(validatedPath)
-    if (lastResponse) {
-      parts.push(`[前次回覆參考]\n${lastResponse}\n[/前次回覆參考]`)
+    const isAffirmative = looksAffirmative(prompt)
+    const injection = buildContextInjection(validatedPath, isAffirmative)
+    if (injection) {
+      parts.push(injection)
     }
   }
 
