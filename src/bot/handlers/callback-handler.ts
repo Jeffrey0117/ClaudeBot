@@ -33,7 +33,9 @@ export async function callbackHandler(ctx: BotContext): Promise<void> {
   const data = ctx.callbackQuery.data
   if (!data) return
 
-  if (data.startsWith('confirm:')) {
+  if (data.startsWith('confirm_directive:')) {
+    await handleConfirmDirective(ctx, chatId, data)
+  } else if (data.startsWith('confirm:')) {
     await handleConfirm(ctx, chatId, data)
   } else if (data.startsWith('choice:')) {
     await handleChoice(ctx, chatId, data)
@@ -142,6 +144,35 @@ async function handleBookmarkAdd(ctx: BotContext, chatId: number): Promise<void>
     { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) }
   )
   await ctx.answerCbQuery()
+}
+
+async function handleConfirmDirective(ctx: BotContext, chatId: number, data: string): Promise<void> {
+  // data = "confirm_directive:0:Option Text"
+  const parts = data.split(':')
+  const answer = parts.slice(2).join(':') || `選項 ${parts[1]}`
+
+  const threadId = getThreadId(ctx)
+  const state = getUserState(chatId, threadId)
+  const project = getEffectiveProject(chatId, threadId)
+
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {})
+  await ctx.answerCbQuery(`已選擇: ${answer}`)
+
+  if (!project) {
+    await ctx.telegram.sendMessage(chatId, '⚠️ 尚未選擇專案')
+    return
+  }
+
+  const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
+
+  enqueue({
+    chatId,
+    prompt: answer,
+    project,
+    ai: state.ai,
+    sessionId,
+    imagePaths: [],
+  })
 }
 
 async function handleConfirm(ctx: BotContext, chatId: number, data: string): Promise<void> {

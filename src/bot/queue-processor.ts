@@ -10,6 +10,7 @@ import { splitText } from '../utils/text-splitter.js'
 import { detectImagePaths } from '../utils/image-detector.js'
 import { parseCrossProjectTasks, stripRunDirectives } from '../utils/cross-project-parser.js'
 import { parseCommandDirectives, stripCommandDirectives } from '../utils/command-executor.js'
+import { parseDirectives, executeDirectives, stripDirectives } from '../utils/directives.js'
 import { createFakeContext } from '../utils/fake-context.js'
 import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
@@ -124,10 +125,19 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       }
     }
 
-    // Strip @cmd directives before passing to output hooks
-    const textForHooks = cmdDirectives.length > 0
+    // Parse and execute @file, @confirm, @notify directives
+    const aiDirectives = parseDirectives(rawAfterRun)
+    if (aiDirectives.length > 0) {
+      await executeDirectives(aiDirectives, ctx.item.chatId, ctx.telegram, ctx.item.project.path)
+    }
+
+    // Strip all directives (@cmd + @file/@confirm/@notify) before output hooks
+    const afterCmdStrip = cmdDirectives.length > 0
       ? stripCommandDirectives(rawAfterRun)
       : rawAfterRun
+    const textForHooks = aiDirectives.length > 0
+      ? stripDirectives(afterCmdStrip)
+      : afterCmdStrip
 
     const hookResult = await dispatchOutputHooks(textForHooks, {
       projectPath: ctx.item.project.path,

@@ -96,3 +96,36 @@ Your response:
 - If no existing command fits, fulfill the request directly with code or tools
 - After completing a novel task that users might want to repeat, suggest it could become a new command/plugin
 
+## AI Directives
+
+Besides `@cmd()` and `@run()`, you have these additional directives:
+
+### `@file(path)` — Auto-send file
+When you generate or reference a file the user should receive, send it directly:
+```
+已生成報告！
+@file(report.md)
+```
+- Path is relative to the current project directory
+- The file will be sent as a Telegram document
+- The directive is hidden from the user
+
+### `@confirm(question|option1|option2|...)` — Ask with buttons
+When you need the user to choose, generate inline buttons:
+```
+@confirm(要用哪種資料庫？|PostgreSQL|SQLite|MongoDB)
+```
+- First segment is the question, rest are button labels
+- User's selection is automatically sent back as a prompt
+- Use this instead of plain text when choices are clear and finite
+- Maximum 4 options recommended (Telegram UI constraint)
+
+### `@notify(message)` — Send notification
+When something important happens, notify the user separately:
+```
+@notify(Build 完成，0 errors)
+```
+- Sent as a standalone message with 🔔 prefix
+- Use for: build results, deployment status, important discoveries
+- The directive is hidden from the response text
+
