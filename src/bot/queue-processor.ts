@@ -20,7 +20,7 @@ import { cleanMarkdown } from '../utils/markdown-cleaner.js'
 import { generateSuggestions } from '../utils/suggestion-generator.js'
 import { setSuggestions } from './suggestion-store.js'
 import { setChoices } from './choice-store.js'
-import { formatAILabel } from '../ai/types.js'
+import { formatAILabel, resolveBackend } from '../ai/types.js'
 import type { AIModelSelection, AIResult } from '../ai/types.js'
 import { autoRoute } from '../ai/router.js'
 import { setActiveRunner, updateRunnerTool, removeActiveRunner } from '../dashboard/runner-tracker.js'
@@ -485,12 +485,16 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         lastTool: null,
       })
 
+      // Re-fetch session ID at execution time (not the stale one from enqueue time)
+      // This ensures we use the latest session after previous tasks complete.
+      const freshSessionId = getAISessionId(resolveBackend(resolvedAI.backend), item.project.path)
+
       const runner = getRunner(backend)
       runner.run({
         prompt: item.prompt,
         projectPath: item.project.path,
         model: resolvedAI.model,
-        sessionId: item.sessionId,
+        sessionId: freshSessionId,
         imagePaths: item.imagePaths,
         chatId: item.chatId,
         onTextDelta: (delta, acc) => {
