@@ -209,7 +209,17 @@ const services: Record<string, ServiceHandler> = {
       }
       case 'call': {
         if (!param) return '❌ 需要提供 tool 名稱'
-        const result = await pipeRequest('POST', `${base}/call`, { tool: param }, token)
+        // param may be "toolName, {args}" — split tool name from arguments
+        const callComma = param.indexOf(',')
+        const toolName = callComma === -1 ? param.trim() : param.slice(0, callComma).trim()
+        const toolArgsRaw = callComma === -1 ? '' : param.slice(callComma + 1).trim()
+        let toolArgs: Record<string, unknown> | undefined
+        if (toolArgsRaw) {
+          try { toolArgs = JSON.parse(toolArgsRaw) } catch { /* not JSON, ignore */ }
+        }
+        const body: Record<string, unknown> = { tool: toolName }
+        if (toolArgs) body.args = toolArgs
+        const result = await pipeRequest('POST', `${base}/call`, body, token)
         if (!result.ok) {
           const errData = result.data as { error?: string } | string
           const errMsg = typeof errData === 'string' ? errData : errData?.error ?? JSON.stringify(errData)
@@ -224,12 +234,12 @@ const services: Record<string, ServiceHandler> = {
                 ? `\n\n可用的 tools:\n${names.map((n) => `• ${n}`).join('\n')}`
                 : ''
             }
-            return `❌ Tool \`${param}\` 不存在${toolList}`
+            return `❌ Tool \`${toolName}\` 不存在${toolList}`
           }
           return `❌ Tool 呼叫失敗 (${result.status}): ${errMsg}`
         }
         const formatted = JSON.stringify(result.data, null, 2)
-        return `🔧 ${param} 結果:\n${formatted}`
+        return `🔧 ${toolName} 結果:\n${formatted}`
       }
       case 'pipelines': {
         const result = await pipeRequest('GET', `${base}/pipelines`, undefined, token)
