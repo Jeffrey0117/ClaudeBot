@@ -214,7 +214,17 @@ const services: Record<string, ServiceHandler> = {
           const errData = result.data as { error?: string } | string
           const errMsg = typeof errData === 'string' ? errData : errData?.error ?? JSON.stringify(errData)
           if (result.status === 404 || /not found/i.test(errMsg)) {
-            return `❌ Tool \`${param}\` 不存在\n💡 用 \`@pipe(gateway.tools)\` 查看可用的 tools`
+            // Auto-fetch available tools so Claude can self-correct
+            const toolsResult = await pipeRequest('GET', `${base}/tools`, undefined, token)
+            let toolList = ''
+            if (toolsResult.ok) {
+              const toolsData = toolsResult.data as GatewayToolsResponse
+              const names = toolsData.tools?.map((t) => t.name) ?? []
+              toolList = names.length > 0
+                ? `\n\n可用的 tools:\n${names.map((n) => `• ${n}`).join('\n')}`
+                : ''
+            }
+            return `❌ Tool \`${param}\` 不存在${toolList}`
           }
           return `❌ Tool 呼叫失敗 (${result.status}): ${errMsg}`
         }
