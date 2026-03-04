@@ -3,6 +3,12 @@ import { tailText, splitText } from '../utils/text-splitter.js'
 
 const EDIT_DEBOUNCE_MS = 1000
 const TELEGRAM_MAX_LENGTH = 4096
+const USE_STREAMING_API = true // Bot API 9.5: sendMessageDraft
+
+interface DraftMessage {
+  chatId: number
+  messageId: number
+}
 
 interface PendingEdit {
   lastText: string
@@ -11,6 +17,7 @@ interface PendingEdit {
 }
 
 const pending = new Map<string, PendingEdit>()
+const draftMessages = new Map<string, DraftMessage>()
 
 function key(chatId: number, messageId: number): string {
   return `${chatId}:${messageId}`
@@ -23,6 +30,15 @@ export function updateStreamMessage(
   telegram: Telegram
 ): void {
   const k = key(chatId, messageId)
+
+  if (USE_STREAMING_API) {
+    // Use Bot API 9.5 native streaming (no debounce needed)
+    const displayText = tailText(accumulated, TELEGRAM_MAX_LENGTH - 50)
+    sendMessageDraft(chatId, messageId, displayText, telegram).catch(() => {})
+    return
+  }
+
+  // Fallback to old debounce + editMessageText
   let edit = pending.get(k)
 
   if (!edit) {
@@ -135,5 +151,36 @@ export async function safeSendMessage(
       return msg.message_id
     }
     throw error
+  }
+}
+
+/**
+ * Bot API 9.5: sendMessageDraft for native streaming
+ * https://core.telegram.org/bots/api#sendmessagedraft
+ */
+async function sendMessageDraft(
+  chatId: number,
+  messageId: number,
+  text: string,
+  telegram: Telegram
+): Promise<void> {
+  const k = key(chatId, messageId)
+
+  try {
+    // @ts-expect-error - callApi not in Telegraf types but exists
+    await telegram.callApi('sendMessageDraft', {
+      chat_id: chatId,
+      text,
+      message_id: messageId,
+    })
+
+    draftMessages.set(k, { chatId, messageId })
+  } catch (error) {
+    // Fallback to editMessageText if draft fails
+    if (error instanceof Error && error.message.includes('method not found')) {
+      console.error('[sendMessageDraft] Not supported, falling back to edit')
+      await safeEdit(telegram, chatId, messageId, text)
+    }
+    // Ignore other errors (rate limit, message not modified, etc.)
   }
 }
