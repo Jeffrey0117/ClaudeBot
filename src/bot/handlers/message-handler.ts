@@ -1,6 +1,7 @@
 import type { BotContext } from '../../types/context.js'
 import { env } from '../../config/env.js'
 import { getUserState, setUserProject } from '../state.js'
+import { recordUserMessage } from '../last-message-store.js'
 import { resolveBackend, formatAILabel } from '../../ai/types.js'
 import { getAISessionId } from '../../ai/session-store.js'
 import { enqueue, isProcessing } from '../../claude/queue.js'
@@ -128,6 +129,9 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
     await ctx.reply(`❌ 未知指令 ${cmd}。用 /help 查看所有指令。`)
     return
   }
+
+  // Record for /last re-send
+  recordUserMessage(chatId, text)
 
   const messageId = ctx.message?.message_id ?? 0
   const threadId = ctx.message?.message_thread_id
