@@ -67,7 +67,7 @@ npx claudebot-app
 一行搞定 — 自動下載、安裝依賴、跑設定精靈、啟動 bot。
 
 > **前置需求：** Node.js 20+、[Claude CLI](https://docs.anthropic.com/en/docs/claude-code)（已登入）。
-> 選裝：Gemini CLI、ffmpeg（語音）、Python 3.11+（標點修正）。
+> 選裝：[Gemini CLI](https://github.com/google-gemini/gemini-cli)、ffmpeg（語音）、Python 3.11+（標點修正）。
 
 <details>
 <summary>手動安裝</summary>
@@ -82,11 +82,94 @@ npm run dev
 
 </details>
 
+<details>
+<summary>Windows 安裝注意事項</summary>
+
+**bcrypt 編譯問題**
+
+bcrypt 需要 C++ 編譯工具。如果 `npm install` 失敗：
+
+```powershell
+npm install -g windows-build-tools
+# 或安裝 Visual Studio Build Tools（勾選「C++ 建置工具」）
+```
+
+**.env 路徑格式**
+
+反斜線或正斜線都可以：
+
+```
+PROJECTS_BASE_DIR=C:\Users\you\code
+# 或
+PROJECTS_BASE_DIR=C:/Users/you/code
+```
+
+**一鍵安裝**
+
+```powershell
+npx zerosetup    # 自動安裝 Node.js、ffmpeg、依賴
+```
+
+</details>
+
+<details>
+<summary>語音辨識設定（選裝）</summary>
+
+語音功能需要三樣東西：
+
+1. **ffmpeg** — 將 Telegram 語音訊息轉成 WAV
+   - Windows: `winget install Gyan.FFmpeg` 或 `scoop install ffmpeg`
+   - macOS: `brew install ffmpeg`
+   - Linux: `sudo apt install ffmpeg`
+
+2. **Python 3.11+** — 標點符號模組
+   - 下載: https://www.python.org/downloads/
+
+3. **Sherpa ASR** — 語音辨識引擎
+   ```bash
+   # Clone 到 ClaudeBot 旁邊（自動偵測）
+   cd ..
+   git clone https://github.com/Jeffrey0117/Sherpa_ASR.git
+   ```
+
+沒裝語音功能 bot 一樣正常運作 — 收到語音訊息會顯示安裝說明，不會 crash。
+
+</details>
+
 ## 完整文件
 
 安裝指南、插件開發、多 Bot 架構、語音辨識、指令大全：
 
 **[jeffrey0117.github.io/ClaudeBot](https://jeffrey0117.github.io/ClaudeBot/)**
+
+## 疑難排解
+
+<details>
+<summary>常見問題</summary>
+
+**`npm install` 在 Windows 失敗（bcrypt/node-gyp）**
+→ 安裝建置工具: `npm install -g windows-build-tools`
+→ 或安裝 Visual Studio Build Tools（勾選 C++ 工作負載）
+
+**語音訊息報錯**
+→ 檢查: `ffmpeg --version`（必須在 PATH 中）
+→ 檢查: `python --version`（建議 3.11+）
+→ 檢查: `../Sherpa_ASR/` 存在於 ClaudeBot 旁邊
+
+**Bot 啟動了但不回應**
+→ 確認 `ALLOWED_CHAT_IDS` 與你的 Telegram user ID 一致
+→ 先發 `/start`
+→ 檢查 `.env` 中 `AUTO_AUTH=true`
+
+**「Claude CLI not found」**
+→ 安裝: `npm install -g @anthropic-ai/claude-code`
+→ 然後執行 `claude` 登入
+
+**Session/上下文消失**
+→ 長對話後正常現象 — Claude CLI 有 context window 限制
+→ 用 `/new` 開始新 session
+
+</details>
 
 ---
 

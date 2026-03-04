@@ -167,7 +167,7 @@ export async function transcribeVoiceFile(
 ): Promise<VoiceResult> {
   if (!isSherpaAvailable()) {
     console.error('[voice] Sherpa not available')
-    return { text: null, error: 'Sherpa ASR 未啟動' }
+    return { text: null, error: 'Sherpa ASR not running / 未啟動' }
   }
 
   const id = randomUUID()
@@ -189,7 +189,11 @@ export async function transcribeVoiceFile(
       ], { timeout: 30_000 })
     } catch (ffErr) {
       console.error('[voice] ffmpeg error:', ffErr)
-      return { text: null, error: 'ffmpeg 轉檔失敗' }
+      const isNotFound = ffErr instanceof Error && ffErr.message.includes('ENOENT')
+      const hint = isNotFound
+        ? 'ffmpeg not found. Install: winget install Gyan.FFmpeg (Windows) / brew install ffmpeg (macOS)'
+        : 'ffmpeg conversion failed / ffmpeg 轉檔失敗'
+      return { text: null, error: hint }
     }
 
     const result = await transcribeAudio(wavPath)
@@ -210,7 +214,14 @@ export async function transcribeVoiceFile(
 
 export async function voiceHandler(ctx: BotContext): Promise<void> {
   if (!isSherpaAvailable()) {
-    await ctx.reply('🎙️ 語音辨識未啟用。\n需要安裝 Sherpa ASR：github.com/Jeffrey0117/Sherpa_ASR')
+    await ctx.reply(
+      '🎙️ Voice recognition not enabled / 語音辨識未啟用\n\n' +
+      'Required / 需要安裝:\n' +
+      '1. ffmpeg — audio conversion\n' +
+      '2. Python 3.11+ — punctuation\n' +
+      '3. Sherpa ASR — github.com/Jeffrey0117/Sherpa_ASR\n\n' +
+      'See README for setup instructions.',
+    )
     return
   }
 

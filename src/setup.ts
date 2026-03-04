@@ -72,7 +72,47 @@ async function main(): Promise<void> {
     console.log('  [v] Gemini CLI found')
   } else {
     console.log('  [ ] Gemini CLI not found (optional)')
-    console.log('      Install: npm install -g @anthropic-ai/claude-code  (or Gemini CLI)')
+    console.log('      Install: npm install -g @google/gemini-cli')
+  }
+
+  // Check optional voice dependencies
+  const hasFfmpeg = checkCli('ffmpeg')
+  const hasPython = checkCli('python') || checkCli('python3')
+
+  if (hasFfmpeg) {
+    console.log('  [v] ffmpeg found (voice)')
+  } else {
+    console.log('  [ ] ffmpeg not found (optional — needed for voice recognition)')
+    if (process.platform === 'win32') {
+      console.log('      Install: winget install Gyan.FFmpeg  (or scoop install ffmpeg)')
+    } else if (process.platform === 'darwin') {
+      console.log('      Install: brew install ffmpeg')
+    } else {
+      console.log('      Install: sudo apt install ffmpeg')
+    }
+  }
+
+  if (hasPython) {
+    console.log('  [v] Python found (voice punctuation)')
+  } else {
+    console.log('  [ ] Python not found (optional — needed for voice punctuation)')
+    console.log('      Install: https://www.python.org/downloads/')
+  }
+
+  // Check Sherpa ASR sibling repo
+  const sherpaPath = path.join(process.cwd(), '..', 'Sherpa_ASR', 'sherpa_server.py')
+  if (existsSync(sherpaPath)) {
+    console.log('  [v] Sherpa ASR found (voice)')
+  } else {
+    console.log('  [ ] Sherpa ASR not found (optional — needed for voice recognition)')
+    console.log('      Clone next to ClaudeBot:')
+    console.log('      git clone https://github.com/Jeffrey0117/Sherpa_ASR.git')
+  }
+
+  if (!hasFfmpeg || !hasPython) {
+    console.log('')
+    console.log('  Note: Voice features require ffmpeg + Python + Sherpa ASR.')
+    console.log('  The bot works fine without them — voice messages will be skipped.')
   }
 
   if (!hasClaude) {

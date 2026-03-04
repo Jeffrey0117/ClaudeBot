@@ -87,10 +87,10 @@ function ensureProcess(): void {
       const { reject, timer } = pending
       pending = null
       clearTimeout(timer)
-      reject(new Error(`Sherpa 啟動失敗: ${err.message}`))
+      reject(new Error(`Sherpa failed to start: ${err.message}`))
     }
     for (const queued of commandQueue.splice(0)) {
-      queued.reject(new Error(`Sherpa 啟動失敗: ${err.message}`))
+      queued.reject(new Error(`Sherpa failed to start: ${err.message}`))
     }
   })
 
