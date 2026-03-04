@@ -8,6 +8,7 @@
  *   @file(path)           — Send a local file to the user
  *   @confirm(question|A|B|C) — Show inline buttons for user selection
  *   @notify(message)      — Send a standalone notification message
+ *   @pipe(tool, params)   — Call CloudPipe gateway tool
  *
  * All directives:
  * - Are stripped from the displayed response text
@@ -21,6 +22,7 @@ import { resolve } from 'node:path'
 import { Input, Markup } from 'telegraf'
 import type { Telegraf } from 'telegraf'
 import type { BotContext } from '../types/context.js'
+import { callCloudPipeTool } from './cloudpipe.js'
 
 // --- Types ---
 
@@ -43,7 +45,14 @@ export interface NotifyDirective {
   readonly raw: string
 }
 
-export type Directive = FileDirective | ConfirmDirective | NotifyDirective
+export interface PipeDirective {
+  readonly type: 'pipe'
+  readonly tool: string
+  readonly params: Record<string, unknown>
+  readonly raw: string
+}
+
+export type Directive = FileDirective | ConfirmDirective | NotifyDirective | PipeDirective
 
 // --- Patterns ---
 
@@ -51,6 +60,7 @@ const CODE_BLOCK_RE = /```[\s\S]*?```/g
 const FILE_PATTERN = /^[ \t]*`?@file[（(]([^)）]+)[)）]`?\s*$/gm
 const CONFIRM_PATTERN = /^[ \t]*`?@confirm[（(]([^)）]+)[)）]`?\s*$/gm
 const NOTIFY_PATTERN = /^[ \t]*`?@notify[（(]([^)）]+)[)）]`?\s*$/gm
+const PIPE_PATTERN = /^[ \t]*`?@pipe[（(]([^)）]+)[)）]`?\s*$/gm
 
 function withoutCodeBlocks(text: string): string {
   return text.replace(CODE_BLOCK_RE, '')
@@ -87,12 +97,54 @@ export function parseDirectives(text: string): readonly Directive[] {
     if (message) results.push({ type: 'notify', message, raw: match[0] })
   }
 
+  // @pipe(tool, params)
+  PIPE_PATTERN.lastIndex = 0
+  while ((match = PIPE_PATTERN.exec(clean)) !== null) {
+    const content = match[1].trim()
+    const parsed = parsePipeArgs(content)
+    if (parsed) {
+      results.push({ type: 'pipe', tool: parsed.tool, params: parsed.params, raw: match[0] })
+    }
+  }
+
   return results
+}
+
+/**
+ * Parse @pipe arguments: "tool, key=value, key=value"
+ * Examples:
+ *   repic_remove_background, url=https://...
+ *   monitor.status
+ */
+function parsePipeArgs(content: string): { tool: string; params: Record<string, unknown> } | null {
+  const parts = content.split(',').map((s) => s.trim())
+  if (parts.length === 0) return null
+
+  const tool = parts[0]
+  if (!tool) return null
+
+  const params: Record<string, unknown> = {}
+  for (let i = 1; i < parts.length; i++) {
+    const kv = parts[i].split('=')
+    if (kv.length === 2) {
+      const key = kv[0].trim()
+      const value = kv[1].trim()
+      // Try to parse JSON values (numbers, booleans, objects)
+      try {
+        params[key] = JSON.parse(value)
+      } catch {
+        // Fallback to string
+        params[key] = value
+      }
+    }
+  }
+
+  return { tool, params }
 }
 
 // --- Strip ---
 
-const ALL_DIRECTIVE_PATTERN = /^[ \t]*`?@(?:file|confirm|notify)[（(]([^)）]+)[)）]`?\s*$/gm
+const ALL_DIRECTIVE_PATTERN = /^[ \t]*`?@(?:file|confirm|notify|pipe)[（(]([^)）]+)[)）]`?\s*$/gm
 
 export function stripDirectives(text: string): string {
   return text
@@ -120,6 +172,9 @@ export async function executeDirectives(
           break
         case 'notify':
           await executeNotify(d, chatId, telegram)
+          break
+        case 'pipe':
+          await executePipe(d, chatId, telegram)
           break
       }
     } catch (err) {
@@ -174,4 +229,89 @@ async function executeNotify(
   telegram: Telegraf<BotContext>['telegram'],
 ): Promise<void> {
   await telegram.sendMessage(chatId, `🔔 ${d.message}`)
+}
+
+async function executePipe(
+  d: PipeDirective,
+  chatId: number,
+  telegram: Telegraf<BotContext>['telegram'],
+): Promise<void> {
+  // Call CloudPipe gateway
+  const result = await callCloudPipeTool(d.tool, d.params)
+
+  if (!result.ok) {
+    const errorMsg = result.error || 'Unknown error'
+    telegram
+      .sendMessage(chatId, `⚠️ CloudPipe call failed: \`${d.tool}\`\n${errorMsg}`, {
+        parse_mode: 'Markdown',
+      })
+      .catch(() => {})
+    return
+  }
+
+  // Handle result based on type
+  const data = result.data
+
+  // If result contains a base64 image (repic_remove_background)
+  if (isImageResult(data)) {
+    const base64Data = extractBase64(data)
+    if (base64Data) {
+      const buffer = Buffer.from(base64Data, 'base64')
+      await telegram.sendPhoto(chatId, { source: buffer }, { caption: `✅ ${d.tool}` })
+      return
+    }
+  }
+
+  // If result contains a URL
+  if (isUrlResult(data)) {
+    const url = extractUrl(data)
+    if (url) {
+      await telegram.sendMessage(chatId, `✅ ${d.tool}\n${url}`)
+      return
+    }
+  }
+
+  // Fallback: send JSON result
+  const formatted = JSON.stringify(data, null, 2)
+  await telegram.sendMessage(chatId, `✅ ${d.tool}\n\`\`\`json\n${formatted}\n\`\`\``, {
+    parse_mode: 'Markdown',
+  })
+}
+
+// --- Result parsers ---
+
+function isImageResult(data: unknown): boolean {
+  if (typeof data !== 'object' || data === null) return false
+  const obj = data as Record<string, unknown>
+  return typeof obj.image === 'string' || typeof obj.data === 'string'
+}
+
+function extractBase64(data: unknown): string | null {
+  if (typeof data !== 'object' || data === null) return null
+  const obj = data as Record<string, unknown>
+
+  // repic returns { image: "data:image/png;base64,..." } or { data: "base64..." }
+  if (typeof obj.image === 'string') {
+    const match = obj.image.match(/^data:image\/\w+;base64,(.+)$/)
+    return match ? match[1] : obj.image
+  }
+
+  if (typeof obj.data === 'string') {
+    const match = obj.data.match(/^data:image\/\w+;base64,(.+)$/)
+    return match ? match[1] : obj.data
+  }
+
+  return null
+}
+
+function isUrlResult(data: unknown): boolean {
+  if (typeof data !== 'object' || data === null) return false
+  const obj = data as Record<string, unknown>
+  return typeof obj.url === 'string'
+}
+
+function extractUrl(data: unknown): string | null {
+  if (typeof data !== 'object' || data === null) return null
+  const obj = data as Record<string, unknown>
+  return typeof obj.url === 'string' ? obj.url : null
 }

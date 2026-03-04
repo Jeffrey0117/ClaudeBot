@@ -64,6 +64,13 @@ Telegram → Bot (A-side) → relay-server.ts → WS → agent.ts (N-side) → t
 `/pair`, `/unpair`, `/rpair`, `/grab`. Doc push: send file to bot while paired.
 Remote mode fallback: `state.selectedProject ?? (getPairing(...)?.connected ? remote : null)`.
 
+### CloudPipe integration
+`@pipe(tool, params)` directive calls CloudPipe gateway API.
+- `src/utils/cloudpipe.ts` — Gateway client (GET /api/gateway/tools, POST /api/gateway/call)
+- `src/utils/directives.ts` — Parses `@pipe` and auto-executes CloudPipe tools
+- `.env`: `CLOUDPIPE_URL`, `CLOUDPIPE_SERVICE_TOKEN` (optional)
+- Example: `@pipe(repic_remove_background, url=https://...)` → returns processed image
+
 ## Coding rules
 
 - **Immutability**: Always create new objects, never mutate

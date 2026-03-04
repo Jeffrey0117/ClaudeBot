@@ -83,6 +83,8 @@ const envSchema = z.object({
     .default('')
     .transform((val) => val.split(',').map((s) => s.trim()).filter(Boolean)),
   MAX_PARALLEL: z.coerce.number().int().min(2).max(10).default(3),
+  CLOUDPIPE_URL: z.string().default(''),
+  CLOUDPIPE_SERVICE_TOKEN: z.string().default(''),
 })
 
 export type Env = z.infer<typeof envSchema>
