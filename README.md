@@ -340,12 +340,7 @@ ClaudeBot is one piece of a developer toolkit that covers your entire workflow â
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=Jeffrey0117%2FClaudeBot&type=Date&legend=top-left#gh-light-mode-only">
-  <img src="https://api.star-history.com/svg?repos=Jeffrey0117/ClaudeBot&type=Date&legend=top-left" alt="Star History Chart" width="100%" />
-</a>
-<a href="https://www.star-history.com/?repos=Jeffrey0117%2FClaudeBot&type=Date&legend=top-left#gh-dark-mode-only">
-  <img src="https://api.star-history.com/svg?repos=Jeffrey0117/ClaudeBot&type=Date&theme=dark&legend=top-left" alt="Star History Chart" width="100%" />
-</a>
+[![Star History Chart](https://api.star-history.com/svg?repos=Jeffrey0117/ClaudeBot&type=date&legend=top-left)](https://www.star-history.com/?repos=Jeffrey0117%2FClaudeBot&type=date&legend=top-left)
 
 ## License
 
