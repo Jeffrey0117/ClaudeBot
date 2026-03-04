@@ -53,6 +53,9 @@ body {
 .fade-in-group > .fade-in:nth-child(7) { transition-delay: 360ms; }
 .fade-in-group > .fade-in:nth-child(8) { transition-delay: 420ms; }
 .fade-in-group > .fade-in:nth-child(9) { transition-delay: 480ms; }
+.fade-in-group > .fade-in:nth-child(10) { transition-delay: 540ms; }
+.fade-in-group > .fade-in:nth-child(11) { transition-delay: 600ms; }
+.fade-in-group > .fade-in:nth-child(12) { transition-delay: 660ms; }
 
 /* ===== Feature Cards ===== */
 .feature-card {
@@ -228,6 +231,7 @@ body {
 .category-badge[data-cat="todo"] { background: #fef3c7; color: #b45309; }
 .category-badge[data-cat="bot"] { background: #d1fae5; color: #047857; }
 .category-badge[data-cat="store"] { background: #fce7f3; color: #be185d; }
+.category-badge[data-cat="remote"] { background: #ccfbf1; color: #0f766e; }
 
 /* ===== Scrollbar ===== */
 ::-webkit-scrollbar { width: 6px; }

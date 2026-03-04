@@ -9,8 +9,8 @@ const MY_PREFIX = `${BOT_ID}:`
 
 const SESSION_FILE = join(process.cwd(), '.sessions.json')
 
-/** Sessions auto-expire after 30 minutes of inactivity */
-const SESSION_TTL_MS = 30 * 60 * 1000
+/** Sessions auto-expire after 4 hours of inactivity */
+const SESSION_TTL_MS = 4 * 60 * 60 * 1000
 
 /** Track last activity time per session key (in-memory only) */
 const lastActivity = new Map<string, number>()

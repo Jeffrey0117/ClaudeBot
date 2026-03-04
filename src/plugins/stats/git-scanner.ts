@@ -65,6 +65,9 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
 
   const untilArg = untilDate ? ` --until="${untilDate}"` : ''
 
+  // Track seen commits across all projects to avoid duplicates (git log --all shows all branches)
+  const seenCommits = new Set<string>()
+
   for (const project of projects) {
     // Skip non-git directories to avoid wasted execSync calls
     if (!isGitRepo(project.path)) continue
@@ -89,6 +92,15 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
       const [hash, date, ...msgParts] = line.split('|')
       const message = msgParts.join('|')
       const timestamp = new Date(date).getTime()
+
+      // Skip if we've already seen this commit (same commit visible in multiple branches)
+      if (seenCommits.has(hash)) {
+        i++
+        // Still need to skip stat line if present
+        if (i < lines.length && lines[i].trim().match(/\d+ (insertion|deletion)/)) i++
+        continue
+      }
+      seenCommits.add(hash)
 
       // Next line(s) might be the stat line
       let insertions = 0
