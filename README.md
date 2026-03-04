@@ -104,6 +104,15 @@ ClaudeBot is one piece of a developer toolkit that covers your entire workflow â
 
 **ClaudeBot + CloudPipe** = you write code from Telegram, CloudPipe auto-deploys it, and notifies you when it's live. Idea to production without opening a laptop.
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=Jeffrey0117%2FClaudeBot&type=Date&legend=top-left#gh-light-mode-only">
+  <img src="https://api.star-history.com/svg?repos=Jeffrey0117/ClaudeBot&type=Date&legend=top-left" alt="Star History Chart" width="100%" />
+</a>
+<a href="https://www.star-history.com/?repos=Jeffrey0117%2FClaudeBot&type=Date&legend=top-left#gh-dark-mode-only">
+  <img src="https://api.star-history.com/svg?repos=Jeffrey0117/ClaudeBot&type=Date&theme=dark&legend=top-left" alt="Star History Chart" width="100%" />
+</a>
+
 ## License
 
 MIT
