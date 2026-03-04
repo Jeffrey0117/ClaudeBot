@@ -11,6 +11,7 @@ import { detectImagePaths } from '../utils/image-detector.js'
 import { parseCrossProjectTasks, stripRunDirectives } from '../utils/cross-project-parser.js'
 import { parseCommandDirectives, stripCommandDirectives } from '../utils/command-executor.js'
 import { parseDirectives, executeDirectives, stripDirectives } from '../utils/directives.js'
+import { parsePipeDirectives, executePipeDirectives, stripPipeDirectives } from '../utils/pipe-executor.js'
 import { createFakeContext } from '../utils/fake-context.js'
 import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
@@ -32,6 +33,7 @@ import { setLastResponse } from './last-response-store.js'
 import { extractDigest, setContext } from './context-digest-store.js'
 import { autoCommitAndPush } from '../utils/auto-commit.js'
 import { env } from '../config/env.js'
+import { startDraft, updateDraft, finalizeDraft, cancelDraft, hasDraft } from './draft-sender.js'
 
 const TIMEOUT_MS = 30 * 60 * 1000
 
@@ -56,6 +58,7 @@ interface ProcessorContext {
   resolved: boolean
   timer: ReturnType<typeof setTimeout>
   done: () => void
+  draftActive: boolean
 }
 
 // --- Extracted result handler ---
@@ -86,58 +89,38 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       promptLength: ctx.item.prompt.length,
     })
 
-    const rawText = ctx.accumulated || result.resultText || ''
+    // Prefer resultText (clean final response from Claude CLI) over accumulated
+    // (which includes intermediate text from ALL turns, including internal thinking)
+    const rawText = result.resultText || ctx.accumulated || ''
 
-    // Parse @cmd directives BEFORE output hooks (e.g. mdfix) run,
+    // Parse directives BEFORE output hooks (e.g. mdfix) run,
     // so filenames with underscores aren't escaped (REMOTE_SUCCESS → REMOTE\_SUCCESS)
     const rawAfterRun = stripRunDirectives(rawText)
     const cmdDirectives = parseCommandDirectives(rawAfterRun)
-    const CMD_TIMEOUT_MS = 60_000
-    for (const cmd of cmdDirectives) {
-      try {
-        const fakeCtx = createFakeContext({
-          chatId: ctx.item.chatId,
-          commandText: cmd.command,
-          telegram: ctx.telegram,
-        })
-        const coreHandler = getCoreCommandHandler(cmd.name)
-        const handler = coreHandler
-          ?? (isPluginCommand(cmd.name) ? (c: BotContext) => dispatchPluginCommand(cmd.name, c) : null)
-
-        if (handler) {
-          await Promise.race([
-            handler(fakeCtx),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error(`@cmd(${cmd.command}) 執行逾時 (${CMD_TIMEOUT_MS / 1000}s)`)), CMD_TIMEOUT_MS)
-            ),
-          ])
-        } else {
-          ctx.telegram.sendMessage(ctx.item.chatId,
-            `⚠️ 未知指令: \`${cmd.command}\``, { parse_mode: 'Markdown' }
-          ).catch(() => {})
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        console.error(`[queue] @cmd(${cmd.command}) failed:`, msg)
-        ctx.telegram.sendMessage(ctx.item.chatId,
-          `⚠️ @cmd(${cmd.command}) 失敗: ${msg}`
-        ).catch(() => {})
-      }
-    }
-
-    // Parse and execute @file, @confirm, @notify directives
     const aiDirectives = parseDirectives(rawAfterRun)
+    const pipeDirectives = parsePipeDirectives(rawAfterRun)
+
+    // Execute @file, @confirm, @notify directives (these produce inline messages)
     if (aiDirectives.length > 0) {
       await executeDirectives(aiDirectives, ctx.item.chatId, ctx.telegram, ctx.item.project.path)
     }
 
-    // Strip all directives (@cmd + @file/@confirm/@notify) before output hooks
+    // Execute @pipe directives (CloudPipe integration)
+    if (pipeDirectives.length > 0) {
+      await executePipeDirectives(pipeDirectives, ctx.item.chatId, ctx.telegram)
+    }
+
+    // Strip all directives (@cmd + @file/@confirm/@notify + @pipe) before output hooks
+    // NOTE: @cmd is stripped here but executed AFTER main text is sent (below)
     const afterCmdStrip = cmdDirectives.length > 0
       ? stripCommandDirectives(rawAfterRun)
       : rawAfterRun
-    const textForHooks = aiDirectives.length > 0
+    const afterAiStrip = aiDirectives.length > 0
       ? stripDirectives(afterCmdStrip)
       : afterCmdStrip
+    const textForHooks = pipeDirectives.length > 0
+      ? stripPipeDirectives(afterAiStrip)
+      : afterAiStrip
 
     const hookResult = await dispatchOutputHooks(textForHooks, {
       projectPath: ctx.item.project.path,
@@ -246,12 +229,45 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       console.error('[queue] cross-project dispatch error:', err)
     }
 
-    if (!responseText) {
-      ctx.done()
-      return
+    if (responseText) {
+      await sendResponseChunks(ctx, responseText)
     }
 
-    await sendResponseChunks(ctx, responseText)
+    // Execute @cmd directives AFTER main text is sent,
+    // so restart confirmations etc. appear BELOW the response
+    const CMD_TIMEOUT_MS = 60_000
+    for (const cmd of cmdDirectives) {
+      try {
+        const fakeCtx = createFakeContext({
+          chatId: ctx.item.chatId,
+          commandText: cmd.command,
+          telegram: ctx.telegram,
+        })
+        const coreHandler = getCoreCommandHandler(cmd.name)
+        const handler = coreHandler
+          ?? (isPluginCommand(cmd.name) ? (c: BotContext) => dispatchPluginCommand(cmd.name, c) : null)
+
+        if (handler) {
+          await Promise.race([
+            handler(fakeCtx),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`@cmd(${cmd.command}) 執行逾時 (${CMD_TIMEOUT_MS / 1000}s)`)), CMD_TIMEOUT_MS)
+            ),
+          ])
+        } else {
+          ctx.telegram.sendMessage(ctx.item.chatId,
+            `⚠️ 未知指令: \`${cmd.command}\``, { parse_mode: 'Markdown' }
+          ).catch(() => {})
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`[queue] @cmd(${cmd.command}) failed:`, msg)
+        ctx.telegram.sendMessage(ctx.item.chatId,
+          `⚠️ @cmd(${cmd.command}) 失敗: ${msg}`
+        ).catch(() => {})
+      }
+    }
+
     ctx.done()
   } catch (err) {
     console.error('[queue] onResult error:', err)
@@ -280,15 +296,37 @@ async function sendResponseChunks(ctx: ProcessorContext, responseText: string): 
   }
 
   const cleaned = cleanMarkdown(responseText)
-  const chunks = splitText(cleaned, 4096)
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i]
-    const isLast = i === chunks.length - 1
-    const extra = isLast && replyButtons ? { ...replyButtons } : {}
-    try {
-      await ctx.telegram.sendMessage(ctx.item.chatId, chunk, { parse_mode: 'Markdown', ...extra })
-    } catch {
-      await ctx.telegram.sendMessage(ctx.item.chatId, chunk, Object.keys(extra).length > 0 ? extra : undefined)
+
+  // If draft was active, finalize it (this sends the final message)
+  const hadDraft = ctx.draftActive
+  if (hadDraft) {
+    await finalizeDraft(ctx.telegram, ctx.item.chatId, cleaned)
+    ctx.draftActive = false
+
+    // If there are choice buttons, send them separately
+    if (replyButtons) {
+      try {
+        await ctx.telegram.sendMessage(
+          ctx.item.chatId,
+          '請選擇：',
+          { ...replyButtons }
+        )
+      } catch {
+        // Ignore button send error
+      }
+    }
+  } else {
+    // No draft: send message chunks as usual
+    const chunks = splitText(cleaned, 4096)
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]
+      const isLast = i === chunks.length - 1
+      const extra = isLast && replyButtons ? { ...replyButtons } : {}
+      try {
+        await ctx.telegram.sendMessage(ctx.item.chatId, chunk, { parse_mode: 'Markdown', ...extra })
+      } catch {
+        await ctx.telegram.sendMessage(ctx.item.chatId, chunk, Object.keys(extra).length > 0 ? extra : undefined)
+      }
     }
   }
 
@@ -412,6 +450,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         resolved: false,
         timer: undefined as unknown as ReturnType<typeof setTimeout>,
         done: undefined as unknown as () => void,
+        draftActive: false,
       }
 
       ctx.done = () => {
@@ -426,6 +465,10 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
           for (const msgId of tidbitMsgIds) {
             telegram.deleteMessage(item.chatId, msgId).catch(() => {})
           }
+        }
+        // Cancel any active draft
+        if (ctx.draftActive) {
+          cancelDraft(item.chatId)
         }
         cleanupImages()
         resolve()
@@ -528,10 +571,24 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         imagePaths: item.imagePaths,
         chatId: item.chatId,
         maxTurns: item.maxTurns,
-        onTextDelta: (delta, acc) => {
+        onTextDelta: async (delta, acc) => {
           ctx.accumulated = acc
           if (dashCmdId) {
             emitResponseChunk(dashCmdId, delta, acc)
+          }
+
+          // Stream to Telegram draft (private chat only)
+          if (!isDashboard) {
+            if (!ctx.draftActive) {
+              // First chunk: start draft
+              const draftId = await startDraft(telegram, item.chatId, acc)
+              if (draftId !== null) {
+                ctx.draftActive = true
+              }
+            } else {
+              // Subsequent chunks: update draft
+              await updateDraft(telegram, item.chatId, acc)
+            }
           }
         },
         onToolUse: (toolName) => {

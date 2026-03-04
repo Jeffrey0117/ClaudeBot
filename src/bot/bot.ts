@@ -33,6 +33,7 @@ import { storeCommand } from './commands/store.js'
 import { installCommand } from './commands/install.js'
 import { uninstallCommand } from './commands/uninstall.js'
 import { deployCommand } from './commands/deploy.js'
+import { syncCommand } from './commands/sync.js'
 import { pairCommand, unpairCommand } from './commands/pair.js'
 import { rpairCommand } from './commands/rpair.js'
 import { grabCommand } from './commands/grab.js'
@@ -64,6 +65,7 @@ import { startHeartbeat } from '../dashboard/heartbeat-writer.js'
 import { startCommandReader } from '../dashboard/command-reader.js'
 import { setAvailableCommands } from '../utils/system-prompt.js'
 import { scheduleRestartNotifications } from './restart-notifier.js'
+import { onPairingConnect, onPairingDisconnect } from '../remote/pairing-store.js'
 
 let botInstance: Telegraf<BotContext> | null = null
 
@@ -101,6 +103,7 @@ export const CORE_COMMANDS = [
   { command: 'context', description: '上下文管理 (pin/list/clear)' },
   { command: 'restart', description: '重啟 Bot (all=全部)' },
   { command: 'deploy', description: '部署專案 (commit + push)' },
+  { command: 'sync', description: '同步所有 worktree' },
   { command: 'pair', description: '配對遠端電腦 (code@ip:port)' },
   { command: 'unpair', description: '斷開遠端配對' },
   { command: 'rpair', description: '重啟遠端 agent' },
@@ -187,6 +190,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['context', contextCommand],
     ['reload', reloadCommand],
     ['deploy', deployCommand],
+    ['sync', syncCommand],
     ['pair', pairCommand],
     ['unpair', unpairCommand],
     ['rpair', rpairCommand],
@@ -303,6 +307,21 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
 
   // After restart, notify users who had active projects with a "Continue?" button
   scheduleRestartNotifications(bot)
+
+  // Notify Telegram when remote pairing connects/disconnects
+  onPairingConnect((session, label) => {
+    bot.telegram.sendMessage(
+      session.chatId,
+      `🔗 *遠端已連線* — ${label}\n_可以開始操作遠端電腦了_`,
+      { parse_mode: 'Markdown' },
+    ).catch(() => {})
+  })
+  onPairingDisconnect((session) => {
+    bot.telegram.sendMessage(
+      session.chatId,
+      '🔌 遠端已斷開連線',
+    ).catch(() => {})
+  })
 
   return bot
 }

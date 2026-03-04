@@ -8,10 +8,28 @@
 import { randomBytes } from 'node:crypto'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
+import { env } from '../config/env.js'
 import { sessionKey } from '../bot/state.js'
+
+/** BOT_ID prefix isolates pairings per bot instance */
+const BOT_ID = env.BOT_TOKEN.slice(-6)
 
 const PAIRING_TTL_MS = 5 * 60 * 1000 // 5 minutes
 const STORE_PATH = path.resolve('data', 'pairings.json')
+
+type PairingEventFn = (session: PairingSession, label: string) => void
+let onConnectFn: PairingEventFn = () => {}
+let onDisconnectFn: PairingEventFn = () => {}
+
+/** Set callback when a remote agent connects. */
+export function onPairingConnect(fn: PairingEventFn): void {
+  onConnectFn = fn
+}
+
+/** Set callback when a remote agent disconnects. */
+export function onPairingDisconnect(fn: PairingEventFn): void {
+  onDisconnectFn = fn
+}
 
 export interface PairingSession {
   readonly code: string
@@ -22,10 +40,15 @@ export interface PairingSession {
   readonly connected: boolean
 }
 
+/** Build a bot-scoped pairing key so each bot instance has its own pairings. */
+function pairingKey(chatId: number, threadId: number | undefined): string {
+  return `${BOT_ID}:${sessionKey(chatId, threadId)}`
+}
+
 interface StoreData {
-  /** Key: sessionKey(chatId, threadId) → PairingSession */
+  /** Key: BOT_ID:sessionKey → PairingSession */
   readonly pairings: Record<string, PairingSession>
-  /** Reverse lookup: code → sessionKey */
+  /** Reverse lookup: code → pairingKey */
   readonly codeIndex: Record<string, string>
 }
 
@@ -56,7 +79,7 @@ export function createPairingCode(
   chatId: number,
   threadId: number | undefined,
 ): string {
-  const key = sessionKey(chatId, threadId)
+  const key = pairingKey(chatId, threadId)
   const store = readStore()
   const pairings = { ...store.pairings }
   const codeIndex = { ...store.codeIndex }
@@ -89,7 +112,7 @@ export function getPairing(
   chatId: number,
   threadId: number | undefined,
 ): PairingSession | null {
-  const key = sessionKey(chatId, threadId)
+  const key = pairingKey(chatId, threadId)
   const store = readStore()
   const session = store.pairings[key]
   if (!session) return null
@@ -128,8 +151,10 @@ export function markConnected(code: string, label: string): boolean {
   if (!key) return false
   const session = store.pairings[key]
   if (!session) return false
-  const pairings = { ...store.pairings, [key]: { ...session, connected: true, label } }
+  const updated = { ...session, connected: true, label }
+  const pairings = { ...store.pairings, [key]: updated }
   writeStore({ pairings, codeIndex: store.codeIndex })
+  onConnectFn(updated, label)
   return true
 }
 
@@ -141,13 +166,14 @@ export function markDisconnected(code: string): void {
   if (!session) return
   const pairings = { ...store.pairings, [key]: { ...session, connected: false } }
   writeStore({ pairings, codeIndex: store.codeIndex })
+  onDisconnectFn(session, session.label)
 }
 
 export function removePairing(
   chatId: number,
   threadId: number | undefined,
 ): boolean {
-  const key = sessionKey(chatId, threadId)
+  const key = pairingKey(chatId, threadId)
   const store = readStore()
   const session = store.pairings[key]
   if (!session) return false
@@ -164,7 +190,7 @@ export function getCodeForChat(
   threadId: number | undefined,
 ): string | null {
   const store = readStore()
-  const session = store.pairings[sessionKey(chatId, threadId)]
+  const session = store.pairings[pairingKey(chatId, threadId)]
   return session?.code ?? null
 }
 
