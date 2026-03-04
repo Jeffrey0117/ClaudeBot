@@ -22,6 +22,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Telegraf } from 'telegraf'
 import type { BotContext } from '../types/context.js'
+import { splitText } from './text-splitter.js'
 
 // --- Types ---
 
@@ -209,8 +210,16 @@ const services: Record<string, ServiceHandler> = {
       case 'call': {
         if (!param) return '❌ 需要提供 tool 名稱'
         const result = await pipeRequest('POST', `${base}/call`, { tool: param }, token)
-        if (!result.ok) return `Tool 呼叫失敗: ${JSON.stringify(result.data)}`
-        return `🔧 ${param} 結果:\n${JSON.stringify(result.data, null, 2)}`
+        if (!result.ok) {
+          const errData = result.data as { error?: string } | string
+          const errMsg = typeof errData === 'string' ? errData : errData?.error ?? JSON.stringify(errData)
+          if (result.status === 404 || /not found/i.test(errMsg)) {
+            return `❌ Tool \`${param}\` 不存在\n💡 用 \`@pipe(gateway.tools)\` 查看可用的 tools`
+          }
+          return `❌ Tool 呼叫失敗 (${result.status}): ${errMsg}`
+        }
+        const formatted = JSON.stringify(result.data, null, 2)
+        return `🔧 ${param} 結果:\n${formatted}`
       }
       case 'pipelines': {
         const result = await pipeRequest('GET', `${base}/pipelines`, undefined, token)
@@ -315,6 +324,20 @@ function formatPipelines(data: PipelineListResponse): string {
   return lines.join('\n')
 }
 
+// --- Send helper (Markdown → fallback plain text) ---
+
+async function sendSafe(
+  telegram: Telegraf<BotContext>['telegram'],
+  chatId: number,
+  text: string,
+): Promise<void> {
+  try {
+    await telegram.sendMessage(chatId, text, { parse_mode: 'Markdown' })
+  } catch {
+    await telegram.sendMessage(chatId, text)
+  }
+}
+
 // --- Executor ---
 
 export async function executePipeDirectives(
@@ -343,7 +366,10 @@ export async function executePipeDirectives(
       }
 
       const result = await handler(d.action, d.param, config)
-      await telegram.sendMessage(chatId, result, { parse_mode: 'Markdown' })
+      const chunks = splitText(result)
+      for (const chunk of chunks) {
+        await sendSafe(telegram, chatId, chunk)
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       console.error(`[pipe] @pipe(${d.service}.${d.action}) failed:`, msg)
