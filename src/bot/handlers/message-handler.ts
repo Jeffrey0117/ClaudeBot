@@ -1,4 +1,5 @@
 import type { BotContext } from '../../types/context.js'
+import { env } from '../../config/env.js'
 import { getUserState, setUserProject } from '../state.js'
 import { resolveBackend, formatAILabel } from '../../ai/types.js'
 import { getAISessionId } from '../../ai/session-store.js'
@@ -152,7 +153,7 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
   }
 
   // Remote pairing active — bypass project selection, use CWD as project
-  const pairing = getPairing(chatId, threadId)
+  const pairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId) : null
   if (!state.selectedProject && pairing?.connected) {
     const remoteProject = { name: 'remote', path: process.cwd() }
     const sessionId = getAISessionId(resolveBackend(state.ai.backend), remoteProject.path)
