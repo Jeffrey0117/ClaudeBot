@@ -42,6 +42,7 @@ import { rlogCommand } from './commands/rlog.js'
 import { parallelCommand } from './commands/parallel.js'
 import { ctxCommand } from './commands/ctx.js'
 import { deepCommand } from './commands/deep.js'
+import { pipeCommand } from './commands/pipe.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
@@ -111,6 +112,7 @@ export const CORE_COMMANDS = [
   { command: 'parallel', description: '平行執行多個任務' },
   { command: 'ctx', description: '查看/管理上下文摘要' },
   { command: 'deep', description: '深度分析 (opus + subagent)' },
+  { command: 'pipe', description: 'CloudPipe 工具呼叫 (list/tool)' },
   { command: 'help', description: '顯示說明' },
 ] as const
 
@@ -197,6 +199,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['parallel', parallelCommand],
     ['ctx', ctxCommand],
     ['deep', deepCommand],
+    ['pipe', pipeCommand],
   ]
   for (const [name, handler] of coreEntries) {
     bot.command(name, handler)

@@ -33,6 +33,50 @@ export interface PipelineResult {
   readonly error?: string
 }
 
+// --- Cache ---
+
+interface CacheEntry {
+  readonly result: ToolCallResult
+  readonly timestamp: number
+}
+
+const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
+const cache = new Map<string, CacheEntry>()
+
+function getCacheKey(tool: string, params?: Record<string, unknown>): string {
+  return `${tool}:${JSON.stringify(params || {})}`
+}
+
+function getCachedResult(tool: string, params?: Record<string, unknown>): ToolCallResult | null {
+  const key = getCacheKey(tool, params)
+  const entry = cache.get(key)
+
+  if (!entry) return null
+
+  const age = Date.now() - entry.timestamp
+  if (age > CACHE_TTL_MS) {
+    cache.delete(key)
+    return null
+  }
+
+  return entry.result
+}
+
+function setCachedResult(tool: string, params: Record<string, unknown> | undefined, result: ToolCallResult): void {
+  const key = getCacheKey(tool, params)
+  cache.set(key, { result, timestamp: Date.now() })
+}
+
+// Clean up old cache entries periodically
+setInterval(() => {
+  const now = Date.now()
+  for (const [key, entry] of cache.entries()) {
+    if (now - entry.timestamp > CACHE_TTL_MS) {
+      cache.delete(key)
+    }
+  }
+}, 60 * 1000) // Every minute
+
 // --- API Client ---
 
 class CloudPipeClient {
@@ -77,24 +121,56 @@ class CloudPipeClient {
   }
 
   /**
-   * Call a gateway tool by name
+   * Call a gateway tool by name with retry support
    */
-  async callTool(tool: string, params?: Record<string, unknown>): Promise<ToolCallResult> {
-    const url = new URL('/api/gateway/call', this.baseUrl)
+  async callTool(
+    tool: string,
+    params?: Record<string, unknown>,
+    options?: { retries?: number; retryDelay?: number }
+  ): Promise<ToolCallResult> {
+    const maxRetries = options?.retries ?? 2
+    const retryDelay = options?.retryDelay ?? 1000
 
-    const res = await fetch(url.toString(), {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({ tool, params: params || {} }),
-    })
+    let lastError: string | undefined
 
-    const json = (await res.json()) as ToolCallResult
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const url = new URL('/api/gateway/call', this.baseUrl)
+
+        const res = await fetch(url.toString(), {
+          method: 'POST',
+          headers: this.getHeaders(),
+          body: JSON.stringify({ tool, params: params || {} }),
+        })
+
+        const json = (await res.json()) as ToolCallResult
+
+        const result = {
+          ok: json.ok,
+          status: res.status,
+          data: json.data,
+          error: json.error,
+        }
+
+        // Only retry on network errors or 5xx server errors
+        if (result.ok || (result.status && result.status < 500)) {
+          return result
+        }
+
+        lastError = result.error || `HTTP ${result.status}`
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err)
+      }
+
+      // Wait before retrying (except on last attempt)
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)))
+      }
+    }
 
     return {
-      ok: json.ok,
-      status: res.status,
-      data: json.data,
-      error: json.error,
+      ok: false,
+      error: `Failed after ${maxRetries + 1} attempts: ${lastError}`,
     }
   }
 
@@ -160,11 +236,12 @@ export function getCloudPipeClient(): CloudPipeClient | null {
 }
 
 /**
- * Quick helper: call a tool
+ * Quick helper: call a tool with caching and retry
  */
 export async function callCloudPipeTool(
   tool: string,
   params?: Record<string, unknown>,
+  options?: { useCache?: boolean; retries?: number }
 ): Promise<ToolCallResult> {
   const client = getCloudPipeClient()
   if (!client) {
@@ -174,7 +251,23 @@ export async function callCloudPipeTool(
     }
   }
 
-  return client.callTool(tool, params)
+  // Check cache first (default: enabled)
+  if (options?.useCache !== false) {
+    const cached = getCachedResult(tool, params)
+    if (cached) {
+      return cached
+    }
+  }
+
+  // Call with retry
+  const result = await client.callTool(tool, params, { retries: options?.retries })
+
+  // Cache successful results
+  if (result.ok && options?.useCache !== false) {
+    setCachedResult(tool, params, result)
+  }
+
+  return result
 }
 
 /**

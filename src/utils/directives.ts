@@ -52,7 +52,13 @@ export interface PipeDirective {
   readonly raw: string
 }
 
-export type Directive = FileDirective | ConfirmDirective | NotifyDirective | PipeDirective
+export interface PipelineDirective {
+  readonly type: 'pipeline'
+  readonly steps: ReadonlyArray<{ tool: string; params: Record<string, unknown> }>
+  readonly raw: string
+}
+
+export type Directive = FileDirective | ConfirmDirective | NotifyDirective | PipeDirective | PipelineDirective
 
 // --- Patterns ---
 
@@ -61,6 +67,7 @@ const FILE_PATTERN = /^[ \t]*`?@file[（(]([^)）]+)[)）]`?\s*$/gm
 const CONFIRM_PATTERN = /^[ \t]*`?@confirm[（(]([^)）]+)[)）]`?\s*$/gm
 const NOTIFY_PATTERN = /^[ \t]*`?@notify[（(]([^)）]+)[)）]`?\s*$/gm
 const PIPE_PATTERN = /^[ \t]*`?@pipe[（(]([^)）]+)[)）]`?\s*$/gm
+const PIPELINE_PATTERN = /^[ \t]*`?@pipeline[（(]([^)）]+)[)）]`?\s*$/gm
 
 function withoutCodeBlocks(text: string): string {
   return text.replace(CODE_BLOCK_RE, '')
@@ -107,6 +114,16 @@ export function parseDirectives(text: string): readonly Directive[] {
     }
   }
 
+  // @pipeline(tool1|tool2|tool3, key=value)
+  PIPELINE_PATTERN.lastIndex = 0
+  while ((match = PIPELINE_PATTERN.exec(clean)) !== null) {
+    const content = match[1].trim()
+    const parsed = parsePipelineArgs(content)
+    if (parsed) {
+      results.push({ type: 'pipeline', steps: parsed, raw: match[0] })
+    }
+  }
+
   return results
 }
 
@@ -142,9 +159,46 @@ function parsePipeArgs(content: string): { tool: string; params: Record<string, 
   return { tool, params }
 }
 
+/**
+ * Parse @pipeline arguments: "tool1|tool2|tool3, key=value"
+ * Examples:
+ *   @pipeline(repic_remove_background|repic_upscale, url=https://...)
+ *   @pipeline(step1|step2|step3)
+ */
+function parsePipelineArgs(content: string): Array<{ tool: string; params: Record<string, unknown> }> | null {
+  // Split by first comma to separate tools from params
+  const commaIdx = content.indexOf(',')
+  const toolsPart = commaIdx === -1 ? content : content.slice(0, commaIdx)
+  const paramsPart = commaIdx === -1 ? '' : content.slice(commaIdx + 1)
+
+  const tools = toolsPart.split('|').map(s => s.trim()).filter(Boolean)
+  if (tools.length === 0) return null
+
+  // Parse common params
+  const params: Record<string, unknown> = {}
+  if (paramsPart) {
+    const pairs = paramsPart.split(',').map(s => s.trim())
+    for (const pair of pairs) {
+      const kv = pair.split('=')
+      if (kv.length === 2) {
+        const key = kv[0].trim()
+        const value = kv[1].trim()
+        try {
+          params[key] = JSON.parse(value)
+        } catch {
+          params[key] = value
+        }
+      }
+    }
+  }
+
+  // Build steps with params
+  return tools.map(tool => ({ tool, params }))
+}
+
 // --- Strip ---
 
-const ALL_DIRECTIVE_PATTERN = /^[ \t]*`?@(?:file|confirm|notify|pipe)[（(]([^)）]+)[)）]`?\s*$/gm
+const ALL_DIRECTIVE_PATTERN = /^[ \t]*`?@(?:file|confirm|notify|pipe|pipeline)[（(]([^)）]+)[)）]`?\s*$/gm
 
 export function stripDirectives(text: string): string {
   return text
@@ -175,6 +229,9 @@ export async function executeDirectives(
           break
         case 'pipe':
           await executePipe(d, chatId, telegram)
+          break
+        case 'pipeline':
+          await executePipeline(d, chatId, telegram)
           break
       }
     } catch (err) {
@@ -314,4 +371,114 @@ function extractUrl(data: unknown): string | null {
   if (typeof data !== 'object' || data === null) return null
   const obj = data as Record<string, unknown>
   return typeof obj.url === 'string' ? obj.url : null
+}
+
+async function executePipeline(
+  d: PipelineDirective,
+  chatId: number,
+  telegram: Telegraf<BotContext>['telegram'],
+): Promise<void> {
+  // Send initial message
+  const statusMsg = await telegram.sendMessage(
+    chatId,
+    `🔄 Pipeline: ${d.steps.map(s => s.tool).join(' → ')}\n\n⏳ 執行中...`,
+    { parse_mode: 'Markdown' }
+  )
+
+  let currentData: unknown = null
+  const results: Array<{ tool: string; ok: boolean; data?: unknown; error?: string }> = []
+
+  // Execute steps sequentially
+  for (let i = 0; i < d.steps.length; i++) {
+    const step = d.steps[i]
+    const isFirst = i === 0
+    const isLast = i === d.steps.length - 1
+
+    // Merge previous output into params (if not first step)
+    const params = isFirst
+      ? step.params
+      : { ...step.params, input: currentData }
+
+    // Update status
+    await telegram.editMessageText(
+      chatId,
+      statusMsg.message_id,
+      undefined,
+      `🔄 Pipeline: ${d.steps.map((s, idx) => idx === i ? `**${s.tool}**` : s.tool).join(' → ')}\n\n⏳ 執行中... (${i + 1}/${d.steps.length})`,
+      { parse_mode: 'Markdown' }
+    )
+
+    // Call tool
+    const result = await callCloudPipeTool(step.tool, params, { useCache: false })
+
+    results.push({
+      tool: step.tool,
+      ok: result.ok,
+      data: result.data,
+      error: result.error,
+    })
+
+    if (!result.ok) {
+      // Pipeline failed
+      const summary = results.map((r, idx) => {
+        if (r.ok) return `✅ ${r.tool}`
+        return `❌ ${r.tool}: ${r.error}`
+      }).join('\n')
+
+      await telegram.editMessageText(
+        chatId,
+        statusMsg.message_id,
+        undefined,
+        `❌ Pipeline 失敗於步驟 ${i + 1}/${d.steps.length}\n\n${summary}`,
+        { parse_mode: 'Markdown' }
+      )
+      return
+    }
+
+    // Update current data for next step
+    currentData = result.data
+  }
+
+  // Success — send final result
+  const summary = results.map(r => `✅ ${r.tool}`).join('\n')
+
+  // Handle final result based on type
+  if (isImageResult(currentData)) {
+    const base64Data = extractBase64(currentData)
+    if (base64Data) {
+      const buffer = Buffer.from(base64Data, 'base64')
+      await telegram.sendPhoto(chatId, { source: buffer }, { caption: `✅ Pipeline 完成\n\n${summary}` })
+      await telegram.deleteMessage(chatId, statusMsg.message_id).catch(() => {})
+      return
+    }
+  }
+
+  if (isUrlResult(currentData)) {
+    const url = extractUrl(currentData)
+    if (url) {
+      await telegram.editMessageText(
+        chatId,
+        statusMsg.message_id,
+        undefined,
+        `✅ Pipeline 完成\n\n${summary}\n\n${url}`
+      )
+      return
+    }
+  }
+
+  // Fallback: JSON result
+  const formatted = JSON.stringify(currentData, null, 2)
+  let output = `✅ Pipeline 完成\n\n${summary}\n\n\`\`\`json\n${formatted}\n\`\`\``
+
+  if (output.length > 4000) {
+    output = output.slice(0, 3900) + '\n\n...(已截斷)'
+  }
+
+  await telegram.editMessageText(
+    chatId,
+    statusMsg.message_id,
+    undefined,
+    output,
+    { parse_mode: 'Markdown' }
+  )
 }

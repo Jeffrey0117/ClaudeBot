@@ -66,10 +66,12 @@ Remote mode fallback: `state.selectedProject ?? (getPairing(...)?.connected ? re
 
 ### CloudPipe integration
 `@pipe(tool, params)` directive calls CloudPipe gateway API.
-- `src/utils/cloudpipe.ts` — Gateway client (GET /api/gateway/tools, POST /api/gateway/call)
-- `src/utils/directives.ts` — Parses `@pipe` and auto-executes CloudPipe tools
+- `src/utils/cloudpipe.ts` — Gateway client with cache + retry (5min TTL, 2 retries)
+- `src/utils/directives.ts` — Parses `@pipe` / `@pipeline` and auto-executes
 - `.env`: `CLOUDPIPE_URL`, `CLOUDPIPE_SERVICE_TOKEN` (optional)
-- Example: `@pipe(repic_remove_background, url=https://...)` → returns processed image
+- `/pipe` — Manual tool invocation (list/call)
+- `@pipe(tool, key=value)` — Single tool call
+- `@pipeline(tool1|tool2|tool3, key=value)` — Sequential tool chain (output → input)
 
 ## Coding rules
 
@@ -87,7 +89,7 @@ Remote mode fallback: `state.selectedProject ?? (getPairing(...)?.connected ? re
 /todo, /todos, /idea, /ideas, /run, /chat, /newbot,
 /store, /install, /uninstall, /reload, /asr, /context,
 /restart, /deploy, /pair, /unpair, /rpair, /grab,
-/claudemd, /rstatus, /rlog, /help
+/claudemd, /rstatus, /rlog, /pipe, /help
 
 ### Plugins
 browse, calc, cost, dice, github, map, mcp, mdfix,
