@@ -254,16 +254,17 @@ function spawnBot(envFile: string): void {
     }, RESPAWN_DELAY_MS)
   })
 
-  // If this is a respawn (not first launch), notify success after a short delay
-  if (hasLaunchedOnce.has(envFile)) {
-    setTimeout(() => {
-      // Verify child is still alive after 5s
-      if (children.get(envFile) === child && !child.killed) {
-        notifyAdmin(`✅ <b>[${label}]</b> respawned successfully (PID ${child.pid})`)
-      }
-    }, 5000)
-  }
+  // Notify admin when bot starts (both first launch and respawn)
+  const isRespawn = hasLaunchedOnce.has(envFile)
   hasLaunchedOnce.add(envFile)
+  setTimeout(() => {
+    // Verify child is still alive after 5s
+    if (children.get(envFile) === child && !child.killed) {
+      const icon = isRespawn ? '✅' : '🟢'
+      const verb = isRespawn ? 'respawned' : 'started'
+      notifyAdmin(`${icon} <b>[${label}]</b> ${verb} successfully (PID ${child.pid})`)
+    }
+  }, 5000)
 
   children.set(envFile, child)
 }
