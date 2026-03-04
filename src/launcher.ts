@@ -321,8 +321,20 @@ function startRestartAllWatcher(): void {
       unlinkSync(RESTART_ALL_SIGNAL)
       console.log('[launcher] restart-all signal received — restarting all bots')
       notifyAdmin('🔄 <b>Restart ALL</b> — restarting all bot instances...')
+      // Kill all running bots
       for (const [, child] of children) {
         child.kill('SIGTERM')
+      }
+      // Also respawn any bots that were in crash-loop (not in children Map)
+      // Clear crash history so they get a fresh start
+      crashHistory.clear()
+      for (const envFile of filesToLaunch) {
+        if (!children.has(envFile)) {
+          console.log(`[launcher] reviving dead bot: ${envFile}`)
+          setTimeout(() => {
+            if (!shuttingDown && !children.has(envFile)) spawnBot(envFile)
+          }, RESPAWN_DELAY_MS)
+        }
       }
     } catch {
       // File doesn't exist or read error — normal, no signal pending

@@ -132,6 +132,17 @@ export async function updateDraft(
 }
 
 /**
+ * Check if a Telegram API error is "message is not modified"
+ * (happens when the new text is identical to the current text — treat as success)
+ */
+function isNotModifiedError(err: unknown): boolean {
+  if (err instanceof Error) {
+    return err.message.includes('message is not modified')
+  }
+  return String(err).includes('message is not modified')
+}
+
+/**
  * Finalize a draft by sending the complete message
  * (this replaces the draft with a real message)
  */
@@ -150,15 +161,30 @@ export async function finalizeDraft(
       finalText,
       { parse_mode: 'Markdown' },
     )
-  } catch {
-    // Fallback: edit without Markdown
-    try {
-      await telegram.editMessageText(chatId, state.messageId, undefined, finalText)
-    } catch {
-      // Edit failed — delete dirty draft so CTX/partial text doesn't linger
-      await telegram.deleteMessage(chatId, state.messageId).catch(() => {})
-      // Send clean text as new message
-      await telegram.sendMessage(chatId, finalText).catch(() => {})
+  } catch (err) {
+    // "message is not modified" = draft already has correct text → success
+    if (isNotModifiedError(err)) {
+      // Draft already shows the right content — nothing to do
+    } else {
+      // Fallback: edit without Markdown
+      try {
+        await telegram.editMessageText(chatId, state.messageId, undefined, finalText)
+      } catch (err2) {
+        if (isNotModifiedError(err2)) {
+          // Already correct — success
+        } else {
+          // Edit truly failed — delete dirty draft and send new message
+          // Use await (not .catch) so we only send new if delete succeeds
+          try {
+            await telegram.deleteMessage(chatId, state.messageId)
+          } catch {
+            // Delete failed — draft message still exists, do NOT send another
+            // (would cause duplicate). Leave the draft as-is.
+            return
+          }
+          await telegram.sendMessage(chatId, finalText).catch(() => {})
+        }
+      }
     }
   } finally {
     activeDrafts.delete(chatId)
