@@ -161,35 +161,16 @@ Messages arrive at the bot out of order (network latency, voice transcription de
 
 ### Plugin Ecosystem
 
-19+ built-in plugins, all at **zero AI cost** (no tokens consumed):
+20+ built-in plugins, all at **zero AI cost** (no tokens consumed) — browse, calc, clip, cost, dice, github, map, mcp, remote, reminder, scheduler, search, screenshot, stats, sysinfo, task, vault, write, and more.
 
-| Plugin | Command | What It Does |
-|--------|---------|-------------|
-| Browse | `/browse` | Browser automation via Chrome DevTools Protocol |
-| Calc | `/calc` | Math, date math, unit conversion |
-| Clip | `/save` `/recall` | Unified memory router (bookmark/pin/AI memory) |
-| Cost | `/cost` `/usage` | API spend tracking per model and project |
-| Dice | `/dice` `/coin` | Random numbers and coin flips |
-| GitHub | `/star` `/follow` | Star repos, follow users, search |
-| Map | `/map` | Location lookup → Google Maps link |
-| MCP | `/mcp` | Connect to MCP servers, list & call external tools |
-| Mdfix | `/mdfix` | Fix Telegram Markdown rendering issues |
-| Remote | `/pair` `/grab` | Remote machine pairing & file transfer |
-| Reminder | `/remind` | One-off timers (`5m`, `14:30`) |
-| Scheduler | `/schedule` | Recurring daily tasks (e.g. Bitcoin price at 09:00) |
-| Search | `/search` | Web search via SearXNG |
-| Stats | `/stats` | Usage analytics — messages, models, projects, time series |
-| Sysinfo | `/sysinfo` | CPU, memory, disk, network info |
-| Task | `/task` | Daily task planner with time slots |
-| Vault | `/vault` | Message indexing, search, context recall, summary |
-| Write | `/write` | Quick note writing |
+**[Full plugin list & documentation →](https://github.com/Jeffrey0117/claudebot-plugins)**
 
-**Plugin Store** — browse and install community plugins from Telegram:
+**Plugin Store** — browse and install community plugins directly from Telegram:
 ```
-/store          ← browse available plugins
-/install name   ← install from GitHub registry
-/uninstall name ← remove
-/reload         ← hot-reload without restart
+/store          — browse available plugins
+/install name   — install from registry
+/uninstall name — remove
+/reload         — hot-reload without restart
 ```
 
 ### Productivity Tools
