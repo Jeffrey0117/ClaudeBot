@@ -465,6 +465,9 @@ async function statsCommand(ctx: BotContext): Promise<void> {
   const raw = (ctx.message && 'text' in ctx.message) ? ctx.message.text : ''
   const sub = raw.replace(/^\/stats(@\S+)?\s*/, '').trim().toLowerCase()
 
+  // Show loading indicator — git scanning can be slow with many projects
+  const loadingMsg = await ctx.reply('📊 正在統計中...').catch(() => null)
+
   try {
     let result: string
 
@@ -522,8 +525,15 @@ async function statsCommand(ctx: BotContext): Promise<void> {
       }
     }
 
+    // Delete loading message, then send result
+    if (loadingMsg) {
+      ctx.telegram.deleteMessage(ctx.chat!.id, loadingMsg.message_id).catch(() => {})
+    }
     await ctx.reply(result, { parse_mode: 'Markdown' })
   } catch (error) {
+    if (loadingMsg) {
+      ctx.telegram.deleteMessage(ctx.chat!.id, loadingMsg.message_id).catch(() => {})
+    }
     const msg = error instanceof Error ? error.message : String(error)
     await ctx.reply(`❌ Stats 載入失敗: ${msg}`)
   }

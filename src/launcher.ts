@@ -267,6 +267,7 @@ function spawnBot(envFile: string): void {
   }, 5000)
 
   children.set(envFile, child)
+  spawnTimestamps.set(envFile, Date.now())
 }
 
 for (const envFile of filesToLaunch) {
@@ -277,7 +278,11 @@ for (const envFile of filesToLaunch) {
 
 const WATCHDOG_INTERVAL_MS = 10_000
 const HEARTBEAT_STALE_MS = 30_000
+const STARTUP_GRACE_MS = 60_000  // Don't check heartbeat until bot has had time to start
 const heartbeatDir = path.join(root, 'data', 'heartbeat')
+
+// Track when each bot was spawned — watchdog skips bots still in startup grace period
+const spawnTimestamps = new Map<string, number>()
 
 function startHealthCheck(): void {
   setInterval(() => {
@@ -285,6 +290,11 @@ function startHealthCheck(): void {
 
     for (const [envFile, child] of children) {
       const botId = envFileToBotId(envFile)
+
+      // Skip bots still in startup grace period (worktree sync, 409 retries, ASR init, etc.)
+      const spawnedAt = spawnTimestamps.get(envFile) ?? 0
+      if (Date.now() - spawnedAt < STARTUP_GRACE_MS) continue
+
       const hbPath = path.join(heartbeatDir, `${botId}.json`)
 
       try {
@@ -321,9 +331,25 @@ function startRestartAllWatcher(): void {
       unlinkSync(RESTART_ALL_SIGNAL)
       console.log('[launcher] restart-all signal received — restarting all bots')
       notifyAdmin('🔄 <b>Restart ALL</b> — restarting all bot instances...')
+      // Kill all running bots — close handlers will respawn them after RESPAWN_DELAY_MS
       for (const [, child] of children) {
         child.kill('SIGTERM')
       }
+      // Clear crash history so all bots get a fresh start
+      crashHistory.clear()
+      // Deferred safety net: after close handlers + respawns have settled,
+      // revive any bot still missing (crash-looped or failed to respawn).
+      // 5s = enough for SIGTERM exit (~100ms) + RESPAWN_DELAY (2s) + startup (~2s)
+      const REVIVE_DELAY_MS = 5000
+      setTimeout(() => {
+        if (shuttingDown) return
+        for (const envFile of filesToLaunch) {
+          if (!children.has(envFile)) {
+            console.log(`[launcher] reviving bot not in children: ${envFile}`)
+            spawnBot(envFile)
+          }
+        }
+      }, REVIVE_DELAY_MS)
     } catch {
       // File doesn't exist or read error — normal, no signal pending
     }

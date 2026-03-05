@@ -16,7 +16,7 @@ import { createFakeContext } from '../utils/fake-context.js'
 import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
-import { getAISessionId } from '../ai/session-store.js'
+import { getAISessionId, shouldRotateSession, rotateSession } from '../ai/session-store.js'
 import { detectChoices } from '../utils/choice-detector.js'
 import { cleanMarkdown } from '../utils/markdown-cleaner.js'
 import { generateSuggestions } from '../utils/suggestion-generator.js'
@@ -34,8 +34,12 @@ import { extractDigest, setContext } from './context-digest-store.js'
 import { autoCommitAndPush } from '../utils/auto-commit.js'
 import { env } from '../config/env.js'
 import { startDraft, updateDraft, finalizeDraft, cancelDraft, hasDraft } from './draft-sender.js'
+import path from 'node:path'
 
 const TIMEOUT_MS = 30 * 60 * 1000
+
+// Track projects already warned about missing CLAUDE.md (once per bot lifetime)
+const claudeMdWarned = new Set<string>()
 
 function deriveBotId(): string {
   const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
@@ -59,6 +63,7 @@ interface ProcessorContext {
   timer: ReturnType<typeof setTimeout>
   done: () => void
   draftActive: boolean
+  draftStartPromise: Promise<number | null> | null
 }
 
 // --- Extracted result handler ---
@@ -276,6 +281,17 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
 }
 
 async function sendResponseChunks(ctx: ProcessorContext, responseText: string): Promise<void> {
+  // Wait for any pending startDraft to resolve before checking draftActive.
+  // Without this, fast responses cause a race: onResult fires before startDraft
+  // resolves, so draftActive is still false → sends a duplicate message.
+  if (ctx.draftStartPromise) {
+    const draftId = await ctx.draftStartPromise
+    if (draftId !== null) {
+      ctx.draftActive = true
+    }
+    ctx.draftStartPromise = null
+  }
+
   const choiceResult = detectChoices(responseText)
   let replyButtons: ReturnType<typeof Markup.inlineKeyboard> | undefined
 
@@ -419,6 +435,19 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
           { parse_mode: 'Markdown' }
         )
 
+    // One-time warning if project has no CLAUDE.md (slows down Claude significantly)
+    if (!isDashboard && !claudeMdWarned.has(item.project.path)) {
+      claudeMdWarned.add(item.project.path)
+      const hasClaude = existsSync(path.join(item.project.path, 'CLAUDE.md'))
+      if (!hasClaude) {
+        telegram.sendMessage(
+          item.chatId,
+          `\u{1F4A1} *[${tag}]* \u{6B64}\u{5C08}\u{6848}\u{6C92}\u{6709} CLAUDE.md\u{FF0C}\u{53EF}\u{80FD}\u{6703}\u{8B93} Claude \u{8655}\u{7406}\u{8F03}\u{6162}\u{3002}\u{5EFA}\u{8B70}\u{7528} /claudemd \u{751F}\u{6210}\u{3002}`,
+          { parse_mode: 'Markdown', disable_notification: true },
+        ).catch(() => {})
+      }
+    }
+
     return new Promise<void>((resolve) => {
       const toolNames: string[] = []
       const startTime = Date.now()
@@ -451,6 +480,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         timer: undefined as unknown as ReturnType<typeof setTimeout>,
         done: undefined as unknown as () => void,
         draftActive: false,
+        draftStartPromise: null,
       }
 
       ctx.done = () => {
@@ -558,9 +588,22 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         lastTool: null,
       })
 
+      // Auto-rotate bloated sessions — CTX digest preserves context continuity
+      const resolvedBackend = resolveBackend(resolvedAI.backend)
+      if (shouldRotateSession(resolvedBackend, item.project.path)) {
+        const count = rotateSession(resolvedBackend, item.project.path)
+        if (!isDashboard) {
+          telegram.sendMessage(
+            item.chatId,
+            `\u{1F504} *[${tag}]* Session \u{5DF2}\u{81EA}\u{52D5}\u{5237}\u{65B0} (${count} \u{6B21}\u{5C0D}\u{8A71}\u{5F8C})\u{FF0C}\u{4FDD}\u{6301}\u{56DE}\u{61C9}\u{901F}\u{5EA6}`,
+            { parse_mode: 'Markdown', disable_notification: true },
+          ).catch(() => {})
+        }
+      }
+
       // Re-fetch session ID at execution time (not the stale one from enqueue time)
       // This ensures we use the latest session after previous tasks complete.
-      const freshSessionId = getAISessionId(resolveBackend(resolvedAI.backend), item.project.path)
+      const freshSessionId = getAISessionId(resolvedBackend, item.project.path)
 
       const runner = getRunner(backend)
       runner.run({
@@ -579,13 +622,15 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
 
           // Stream to Telegram draft (private chat only)
           if (!isDashboard) {
-            if (!ctx.draftActive) {
-              // First chunk: start draft
-              const draftId = await startDraft(telegram, item.chatId, acc)
+            if (!ctx.draftActive && !ctx.draftStartPromise) {
+              // First chunk: start draft (track promise to prevent race with onResult)
+              ctx.draftStartPromise = startDraft(telegram, item.chatId, acc)
+              const draftId = await ctx.draftStartPromise
               if (draftId !== null) {
                 ctx.draftActive = true
               }
-            } else {
+              ctx.draftStartPromise = null
+            } else if (ctx.draftActive) {
               // Subsequent chunks: update draft
               await updateDraft(telegram, item.chatId, acc)
             }

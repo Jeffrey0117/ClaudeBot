@@ -154,7 +154,10 @@ export function markConnected(code: string, label: string): boolean {
   const updated = { ...session, connected: true, label }
   const pairings = { ...store.pairings, [key]: updated }
   writeStore({ pairings, codeIndex: store.codeIndex })
-  onConnectFn(updated, label)
+  // Only fire callback if this pairing belongs to the current bot instance
+  if (key.startsWith(`${BOT_ID}:`)) {
+    onConnectFn(updated, label)
+  }
   return true
 }
 
@@ -166,7 +169,9 @@ export function markDisconnected(code: string): void {
   if (!session) return
   const pairings = { ...store.pairings, [key]: { ...session, connected: false } }
   writeStore({ pairings, codeIndex: store.codeIndex })
-  onDisconnectFn(session, session.label)
+  if (key.startsWith(`${BOT_ID}:`)) {
+    onDisconnectFn(session, session.label)
+  }
 }
 
 export function removePairing(
@@ -198,4 +203,20 @@ export function getCodeForChat(
 export function getAllConnectedPairings(): readonly PairingSession[] {
   const store = readStore()
   return Object.values(store.pairings).filter((s) => s.connected)
+}
+
+/** Reset all connected flags on startup — stale flags from a crashed relay are lies.
+ *  Agents will reconnect and markConnected() sets them back to true. */
+export function resetAllConnectedFlags(): number {
+  const store = readStore()
+  const connectedKeys = Object.entries(store.pairings)
+    .filter(([, s]) => s.connected)
+    .map(([k]) => k)
+  if (connectedKeys.length === 0) return 0
+  const pairings = { ...store.pairings }
+  for (const key of connectedKeys) {
+    pairings[key] = { ...pairings[key], connected: false }
+  }
+  writeStore({ ...store, pairings })
+  return connectedKeys.length
 }

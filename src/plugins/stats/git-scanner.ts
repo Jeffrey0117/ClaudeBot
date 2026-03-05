@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, statSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { scanProjects } from '../../config/projects.js'
 
 export interface CommitInfo {
@@ -40,19 +40,33 @@ function runGit(cwd: string, args: string): string {
 let gitCache: { key: string; data: GitSummary; ts: number } | null = null
 const GIT_CACHE_TTL_MS = 3_000
 
-/** Directories already confirmed as git repos (persists per process) */
-const gitRepoCache = new Map<string, boolean>()
+/**
+ * Get the canonical git dir for a project path.
+ * Worktrees share the same git dir as the main repo, so this deduplicates them.
+ */
+function getGitDir(dirPath: string): string | null {
+  // Check if .git exists
+  const dotGit = join(dirPath, '.git')
+  if (!existsSync(dotGit)) return null
 
-function isGitRepo(dirPath: string): boolean {
-  const cached = gitRepoCache.get(dirPath)
-  if (cached !== undefined) return cached
-  const isRepo = existsSync(join(dirPath, '.git'))
-  gitRepoCache.set(dirPath, isRepo)
-  return isRepo
+  try {
+    const stat = statSync(dotGit)
+    if (stat.isDirectory()) {
+      // Normal repo — .git is a directory
+      return resolve(dotGit)
+    }
+    // Worktree — .git is a file containing "gitdir: /path/to/main/.git/worktrees/xxx"
+    // Use git rev-parse to get the common dir
+    const commonDir = runGit(dirPath, 'rev-parse --git-common-dir')
+    return commonDir ? resolve(dirPath, commonDir) : null
+  } catch {
+    return null
+  }
 }
 
 /**
  * Scan git logs across all projects for a given time range.
+ * Deduplicates worktrees (same repo scanned once) and commits (by hash).
  */
 export function scanGitActivity(sinceDate: string, untilDate?: string): GitSummary {
   const cacheKey = `${sinceDate}|${untilDate ?? ''}`
@@ -62,6 +76,8 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
 
   const projects = scanProjects()
   const allCommits: CommitInfo[] = []
+  const seenGitDirs = new Set<string>()
+  const seenHashes = new Set<string>()
 
   const untilArg = untilDate ? ` --until="${untilDate}"` : ''
 
@@ -69,13 +85,17 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
   const seenCommits = new Set<string>()
 
   for (const project of projects) {
-    // Skip non-git directories to avoid wasted execSync calls
-    if (!isGitRepo(project.path)) continue
+    const gitDir = getGitDir(project.path)
+    if (!gitDir) continue
 
-    // Get commit log with stats
+    // Skip if we already scanned this git repo (worktree dedup)
+    if (seenGitDirs.has(gitDir)) continue
+    seenGitDirs.add(gitDir)
+
+    // Use HEAD only (no --all) to avoid counting branch+merge commits twice
     const log = runGit(
       project.path,
-      `log --all --since="${sinceDate}" ${untilArg} --pretty=format:"%H|%aI|%s" --shortstat`
+      `log --since="${sinceDate}" ${untilArg} --pretty=format:"%H|%aI|%s" --shortstat`
     )
 
     if (!log) continue
@@ -114,15 +134,19 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
         if (insMatch || delMatch) i++ // skip stat line
       }
 
-      allCommits.push({
-        hash,
-        date,
-        timestamp,
-        message,
-        insertions,
-        deletions,
-        project: project.name,
-      })
+      // Dedup by commit hash (prevents counting same commit from forks/mirrors)
+      if (!seenHashes.has(hash)) {
+        seenHashes.add(hash)
+        allCommits.push({
+          hash,
+          date,
+          timestamp,
+          message,
+          insertions,
+          deletions,
+          project: project.name,
+        })
+      }
 
       i++
     }

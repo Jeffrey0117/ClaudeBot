@@ -42,6 +42,7 @@ export interface StreamResult {
   readonly num_turns: number
   readonly result?: string
   readonly error?: string
+  readonly errors?: readonly string[]
 }
 
 export interface StreamAssistantMessage {
