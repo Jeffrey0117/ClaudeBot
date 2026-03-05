@@ -2,7 +2,7 @@ import { spawn, execSync, type ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import type { ClaudeModel, ClaudeResult } from '../types/index.js'
 import type { StreamEvent, StreamResult, StreamContentBlockDelta, StreamAssistantMessage } from '../types/claude-stream.js'
-import { setAISessionId } from '../ai/session-store.js'
+import { setAISessionId, clearAISession } from '../ai/session-store.js'
 import { validateProjectPath } from '../utils/path-validator.js'
 import { getTodos } from '../bot/todo-store.js'
 import { formatPinsForPrompt } from '../bot/context-pin-store.js'
@@ -259,6 +259,18 @@ export function runClaude(options: RunOptions): void {
   let buffer = ''
   let resultReceived = false
 
+  // Auto-retry: if session is stale, clear it and re-run without --resume
+  const onErrorWithRetry = (error: string) => {
+    if (sessionId && error.includes('No conversation found')) {
+      console.log('[claude-runner] stale session detected, clearing and retrying without --resume')
+      clearAISession('claude', validatedPath)
+      activeProcesses.delete(validatedPath)
+      runClaude({ ...options, sessionId: null })
+      return
+    }
+    onError(error)
+  }
+
   proc.stdout?.on('data', (chunk: Buffer) => {
     console.log('[claude-runner] stdout chunk:', chunk.length, 'bytes')
     buffer += chunk.toString()
@@ -273,6 +285,7 @@ export function runClaude(options: RunOptions): void {
         const event = JSON.parse(trimmed) as StreamEvent
         console.log('[claude-runner] event type:', event.type, 'subtype' in event ? (event as any).subtype : '')
         handleStreamEvent(event, {
+          onNewTurn: () => { accumulated = '' },
           onTextDelta: (text) => {
             accumulated += text
             if (accumulated.length > MAX_ACCUMULATED_LENGTH) {
@@ -290,7 +303,7 @@ export function runClaude(options: RunOptions): void {
             }
             onResult(result)
           },
-          onError,
+          onError: onErrorWithRetry,
         })
       } catch {
         // skip non-JSON lines
@@ -314,6 +327,7 @@ export function runClaude(options: RunOptions): void {
       try {
         const event = JSON.parse(buffer.trim()) as StreamEvent
         handleStreamEvent(event, {
+          onNewTurn: () => { accumulated = '' },
           onTextDelta: (text) => {
             accumulated += text
             if (accumulated.length > MAX_ACCUMULATED_LENGTH) {
@@ -331,14 +345,14 @@ export function runClaude(options: RunOptions): void {
             }
             onResult(result)
           },
-          onError,
+          onError: onErrorWithRetry,
         })
       } catch {
         // ignore
       }
     }
     if (!resultReceived && code !== 0 && code !== null) {
-      onError(`Claude process exited with code ${code}`)
+      onErrorWithRetry(`Claude process exited with code ${code}`)
     }
   })
 
@@ -360,11 +374,15 @@ interface EventHandlers {
   readonly onToolUse: OnToolUse
   readonly onResult: OnResult
   readonly onError: OnError
+  readonly onNewTurn?: () => void
 }
 
 function handleStreamEvent(event: StreamEvent, handlers: EventHandlers): void {
   switch (event.type) {
     case 'assistant': {
+      // New assistant turn — reset accumulated to avoid leaking
+      // intermediate thinking text from previous turns
+      handlers.onNewTurn?.()
       const msg = (event as StreamAssistantMessage).message
       if (msg?.content) {
         for (const block of msg.content) {
@@ -394,7 +412,8 @@ function handleStreamEvent(event: StreamEvent, handlers: EventHandlers): void {
       const result = event as StreamResult
       console.log('[claude-runner] result.result length:', result.result?.length ?? 0, 'preview:', result.result?.slice(0, 100) ?? '(empty)')
       if (result.is_error) {
-        handlers.onError(result.error ?? 'Unknown Claude error')
+        const errorMsg = result.errors?.[0] ?? result.error ?? 'Unknown Claude error'
+        handlers.onError(errorMsg)
       } else {
         handlers.onResult({
           sessionId: result.session_id,

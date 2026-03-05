@@ -1,68 +1,44 @@
 # ClaudeBot
 
-Telegram bot that wraps Claude Code CLI into a mobile command center.
-Not a pipe to Claude — a platform with plugins, queue, multi-project, and interactive UI.
+Telegram bot → Claude Code CLI → mobile command center.
+Platform with plugins, queue, multi-project, multi-AI, and interactive UI.
 
 ## Stack
-- **Runtime**: Node.js + TypeScript (strict)
-- **Bot framework**: Telegraf v4
-- **Validation**: zod
-- **Auth**: bcrypt (dual: plain password or hash)
-- **Entry**: `src/launcher.ts` → spawns 1–N bot instances from `.env`, `.env.bot2`, etc.
+- Node.js + TypeScript (strict), Telegraf v4, zod, bcrypt
+- Entry: `src/launcher.ts` → spawns 1–N bot instances from `.env`, `.env.bot2`, etc.
 
-## Architecture at a glance
+## Directory structure
 
 ```
 src/
-  launcher.ts          ← Multi-bot launcher
-  bot/                 ← Core: commands, handlers, middleware, queue, data stores
-  claude/              ← Claude CLI runner + session store + file lock
-  ai/                  ← Multi-backend AI (Claude, Gemini) + session store
-  plugins/             ← Plugin system (hot-reloadable)
-  remote/              ← Remote pairing: relay server, agent, protocol, tools
-  git/                 ← Git worktree management (multi-bot parallel dev)
-  asr/                 ← Sherpa-ONNX voice recognition
-  config/              ← env, projects scanner
-  telegram/            ← Telegram helpers (message splitting, etc.)
-  utils/               ← System prompt, choice detector, path validator
-  dashboard/           ← Web dashboard (heartbeat, command reader)
-  mcp/                 ← MCP server integration
-  types/               ← Shared TypeScript types
+  launcher.ts     ← Multi-bot launcher
+  bot/            ← Core: commands, handlers, queue, data stores (see bot/CLAUDE.md)
+  claude/         ← Claude CLI runner + session store + file lock
+  ai/             ← Multi-backend AI (Claude, Gemini) + session store + router
+  plugins/        ← Plugin system, hot-reloadable (see plugins/CLAUDE.md)
+  remote/         ← Remote pairing via WebSocket + MCP (see remote/CLAUDE.md)
+  git/            ← Git worktree management (multi-bot parallel dev)
+  asr/            ← Sherpa-ONNX voice recognition
+  config/         ← env, projects scanner
+  utils/          ← Directives, choice detector, pipe executor
+  dashboard/      ← Web dashboard (heartbeat, runner tracker)
+  mcp/            ← MCP server integration
+  types/          ← Shared TypeScript types
 ```
 
-## Key patterns
+## Key concepts (details in subdirectory CLAUDE.md files)
 
-### Queue + Session
-- One Claude CLI process per bot at a time (`src/claude/queue.ts`)
-- `--resume <session_id>` keeps conversation context
-- Session IDs in `.sessions.json`, keyed by `${BOT_ID}:${projectPath}`
-- BOT_ID = last 6 chars of bot token → per-instance isolation
-
-### Multi-backend AI
-`/model` → auto/claude:sonnet/claude:opus/gemini:flash. `src/ai/registry.ts` routes.
-
-### Context preservation
-- Short replies (≤15 chars) or affirmative (≤80 chars, 好/OK/嗯…) auto-inject `[前次回覆參考]`
-- Prevents amnesia after context compression
-
-### Voice pipeline
-OGG → ffmpeg 16kHz WAV → Sherpa ASR → biaodian punctuation → optional Gemini refinement (⚡).
-
-### Stream output
-`--output-format stream-json` parsed line-by-line. Telegram edited with 1s debounce, 4096 char limit.
-
-### Plugin system
-`src/plugins/<name>/index.ts`, `PLUGINS=` env var, hot-reload via `/reload`, Plugin Store (`/store`).
-
-### Multi-bot + Worktree
-`src/launcher.ts` spawns per `.env.botN`. `WORKTREE_BRANCH=bot1` → git worktree isolation.
-
-### Remote pairing
-```
-Telegram → Bot (A-side) → relay-server.ts → WS → agent.ts (N-side) → tool-handlers.ts (10 tools)
-```
-`/pair`, `/unpair`, `/rpair`, `/grab`. Doc push: send file to bot while paired.
-Remote mode fallback: `state.selectedProject ?? (getPairing(...)?.connected ? remote : null)`.
+- **Queue + Session**: One CLI process per bot. `--resume` keeps context. Session keyed by `${BOT_ID}:${projectPath}`
+- **AI Directives**: `@cmd` `@file` `@confirm` `@notify` `@pipe` `@run` — see `src/bot/CLAUDE.md`
+- **4-Layer Memory**: Bookmarks, Context Pins, AI Memory, Vault — see `src/bot/CLAUDE.md`
+- **Multi-bot + Worktree**: `WORKTREE_BRANCH=bot1` → git worktree isolation per bot instance
+- **Voice**: OGG → ffmpeg → Sherpa ASR → biaodian → optional Gemini refinement
+- **Stream**: `stream-json` parsed line-by-line. New `assistant` event resets accumulated (prevents thinking leak)
+- **Draft streaming**: Real-time message edits via `draft-sender.ts` (300ms throttle, strips [CTX] blocks)
+- **/deep mode**: Opus model + 2x MAX_TURNS + subagent analysis (`data/subagent-spec.md`)
+- **/ctx command**: View/clear stored digest, `/ctx reload` hot-reloads ctx-spec + subagent-spec
+- **/parallel**: Concurrent worktree execution with parallel Claude CLI processes
+- **Launcher**: `notifyAdmin()` to ADMIN_CHAT_ID on all events; kill with `taskkill //F //T //PID`
 
 ## Coding rules
 
@@ -71,35 +47,4 @@ Remote mode fallback: `state.selectedProject ?? (getPairing(...)?.connected ? re
 - **Functions**: <50 lines, clear names
 - **Errors**: Always handle with try/catch, user-friendly messages
 - **Security**: `shell: false` on spawn, validate all user input with zod
-- **No console.log in production** (use console.error for actual errors only)
-
-## Commands overview
-
-### Core
-/projects, /select, /model, /status, /cancel, /new, /fav,
-/todo, /todos, /idea, /ideas, /run, /chat, /newbot,
-/store, /install, /uninstall, /reload, /asr, /context,
-/restart, /deploy, /pair, /unpair, /rpair, /grab,
-/claudemd, /rstatus, /rlog, /help
-
-### Plugins
-browse, calc, cost, dice, github, map, mcp, mdfix,
-reminder, remote, scheduler, screenshot, search, stats,
-sysinfo, task, write
-
-## Adding a new plugin
-
-Create `src/plugins/<name>/index.ts`, export default `Plugin` object:
-
-```typescript
-import type { Plugin } from '../../types/plugin.js'
-const plugin: Plugin = {
-  name: '<name>',
-  description: '簡短描述',
-  commands: [{ name: '<cmd>', description: '指令說明', handler: myCommand }],
-}
-export default plugin
-```
-
-1. Add to `PLUGINS=` in `.env` → `/reload` or restart
-2. Publish to Plugin Store: `Jeffrey0117/claudebot-plugins` (upload source + update `registry.json`)
+- **No console.log** (use console.error for actual errors only)

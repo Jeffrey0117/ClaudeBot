@@ -22,3 +22,6 @@ data/
 src/dashboard/web/node_modules/
 src/dashboard/web/dist/
 claudebot-plugins/
+.backups/
+tmp-*
+test-*

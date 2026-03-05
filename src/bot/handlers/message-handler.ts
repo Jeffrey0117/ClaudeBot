@@ -1,5 +1,7 @@
 import type { BotContext } from '../../types/context.js'
+import { env } from '../../config/env.js'
 import { getUserState, setUserProject } from '../state.js'
+import { recordUserMessage } from '../last-message-store.js'
 import { resolveBackend, formatAILabel } from '../../ai/types.js'
 import { getAISessionId } from '../../ai/session-store.js'
 import { enqueue, isProcessing } from '../../claude/queue.js'
@@ -128,6 +130,9 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
     return
   }
 
+  // Record for /last re-send
+  recordUserMessage(chatId, text)
+
   const messageId = ctx.message?.message_id ?? 0
   const threadId = ctx.message?.message_thread_id
   const state = getUserState(chatId, threadId)
@@ -152,7 +157,7 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
   }
 
   // Remote pairing active — bypass project selection, use CWD as project
-  const pairing = getPairing(chatId, threadId)
+  const pairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId) : null
   if (!state.selectedProject && pairing?.connected) {
     const remoteProject = { name: 'remote', path: process.cwd() }
     const sessionId = getAISessionId(resolveBackend(state.ai.backend), remoteProject.path)

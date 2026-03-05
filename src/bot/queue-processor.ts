@@ -11,11 +11,12 @@ import { detectImagePaths } from '../utils/image-detector.js'
 import { parseCrossProjectTasks, stripRunDirectives } from '../utils/cross-project-parser.js'
 import { parseCommandDirectives, stripCommandDirectives } from '../utils/command-executor.js'
 import { parseDirectives, executeDirectives, stripDirectives } from '../utils/directives.js'
+import { parsePipeDirectives, executePipeDirectives, stripPipeDirectives } from '../utils/pipe-executor.js'
 import { createFakeContext } from '../utils/fake-context.js'
 import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
-import { getAISessionId } from '../ai/session-store.js'
+import { getAISessionId, shouldRotateSession, rotateSession } from '../ai/session-store.js'
 import { detectChoices } from '../utils/choice-detector.js'
 import { cleanMarkdown } from '../utils/markdown-cleaner.js'
 import { generateSuggestions } from '../utils/suggestion-generator.js'
@@ -32,8 +33,13 @@ import { setLastResponse } from './last-response-store.js'
 import { extractDigest, setContext } from './context-digest-store.js'
 import { autoCommitAndPush } from '../utils/auto-commit.js'
 import { env } from '../config/env.js'
+import { startDraft, updateDraft, finalizeDraft, cancelDraft, hasDraft } from './draft-sender.js'
+import path from 'node:path'
 
 const TIMEOUT_MS = 30 * 60 * 1000
+
+// Track projects already warned about missing CLAUDE.md (once per bot lifetime)
+const claudeMdWarned = new Set<string>()
 
 function deriveBotId(): string {
   const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
@@ -56,6 +62,8 @@ interface ProcessorContext {
   resolved: boolean
   timer: ReturnType<typeof setTimeout>
   done: () => void
+  draftActive: boolean
+  draftStartPromise: Promise<number | null> | null
 }
 
 // --- Extracted result handler ---
@@ -86,58 +94,38 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       promptLength: ctx.item.prompt.length,
     })
 
-    const rawText = ctx.accumulated || result.resultText || ''
+    // Prefer resultText (clean final response from Claude CLI) over accumulated
+    // (which includes intermediate text from ALL turns, including internal thinking)
+    const rawText = result.resultText || ctx.accumulated || ''
 
-    // Parse @cmd directives BEFORE output hooks (e.g. mdfix) run,
+    // Parse directives BEFORE output hooks (e.g. mdfix) run,
     // so filenames with underscores aren't escaped (REMOTE_SUCCESS → REMOTE\_SUCCESS)
     const rawAfterRun = stripRunDirectives(rawText)
     const cmdDirectives = parseCommandDirectives(rawAfterRun)
-    const CMD_TIMEOUT_MS = 60_000
-    for (const cmd of cmdDirectives) {
-      try {
-        const fakeCtx = createFakeContext({
-          chatId: ctx.item.chatId,
-          commandText: cmd.command,
-          telegram: ctx.telegram,
-        })
-        const coreHandler = getCoreCommandHandler(cmd.name)
-        const handler = coreHandler
-          ?? (isPluginCommand(cmd.name) ? (c: BotContext) => dispatchPluginCommand(cmd.name, c) : null)
-
-        if (handler) {
-          await Promise.race([
-            handler(fakeCtx),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error(`@cmd(${cmd.command}) 執行逾時 (${CMD_TIMEOUT_MS / 1000}s)`)), CMD_TIMEOUT_MS)
-            ),
-          ])
-        } else {
-          ctx.telegram.sendMessage(ctx.item.chatId,
-            `⚠️ 未知指令: \`${cmd.command}\``, { parse_mode: 'Markdown' }
-          ).catch(() => {})
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        console.error(`[queue] @cmd(${cmd.command}) failed:`, msg)
-        ctx.telegram.sendMessage(ctx.item.chatId,
-          `⚠️ @cmd(${cmd.command}) 失敗: ${msg}`
-        ).catch(() => {})
-      }
-    }
-
-    // Parse and execute @file, @confirm, @notify directives
     const aiDirectives = parseDirectives(rawAfterRun)
+    const pipeDirectives = parsePipeDirectives(rawAfterRun)
+
+    // Execute @file, @confirm, @notify directives (these produce inline messages)
     if (aiDirectives.length > 0) {
       await executeDirectives(aiDirectives, ctx.item.chatId, ctx.telegram, ctx.item.project.path)
     }
 
-    // Strip all directives (@cmd + @file/@confirm/@notify) before output hooks
+    // Execute @pipe directives (CloudPipe integration)
+    if (pipeDirectives.length > 0) {
+      await executePipeDirectives(pipeDirectives, ctx.item.chatId, ctx.telegram)
+    }
+
+    // Strip all directives (@cmd + @file/@confirm/@notify + @pipe) before output hooks
+    // NOTE: @cmd is stripped here but executed AFTER main text is sent (below)
     const afterCmdStrip = cmdDirectives.length > 0
       ? stripCommandDirectives(rawAfterRun)
       : rawAfterRun
-    const textForHooks = aiDirectives.length > 0
+    const afterAiStrip = aiDirectives.length > 0
       ? stripDirectives(afterCmdStrip)
       : afterCmdStrip
+    const textForHooks = pipeDirectives.length > 0
+      ? stripPipeDirectives(afterAiStrip)
+      : afterAiStrip
 
     const hookResult = await dispatchOutputHooks(textForHooks, {
       projectPath: ctx.item.project.path,
@@ -246,12 +234,45 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       console.error('[queue] cross-project dispatch error:', err)
     }
 
-    if (!responseText) {
-      ctx.done()
-      return
+    if (responseText) {
+      await sendResponseChunks(ctx, responseText)
     }
 
-    await sendResponseChunks(ctx, responseText)
+    // Execute @cmd directives AFTER main text is sent,
+    // so restart confirmations etc. appear BELOW the response
+    const CMD_TIMEOUT_MS = 60_000
+    for (const cmd of cmdDirectives) {
+      try {
+        const fakeCtx = createFakeContext({
+          chatId: ctx.item.chatId,
+          commandText: cmd.command,
+          telegram: ctx.telegram,
+        })
+        const coreHandler = getCoreCommandHandler(cmd.name)
+        const handler = coreHandler
+          ?? (isPluginCommand(cmd.name) ? (c: BotContext) => dispatchPluginCommand(cmd.name, c) : null)
+
+        if (handler) {
+          await Promise.race([
+            handler(fakeCtx),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`@cmd(${cmd.command}) 執行逾時 (${CMD_TIMEOUT_MS / 1000}s)`)), CMD_TIMEOUT_MS)
+            ),
+          ])
+        } else {
+          ctx.telegram.sendMessage(ctx.item.chatId,
+            `⚠️ 未知指令: \`${cmd.command}\``, { parse_mode: 'Markdown' }
+          ).catch(() => {})
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`[queue] @cmd(${cmd.command}) failed:`, msg)
+        ctx.telegram.sendMessage(ctx.item.chatId,
+          `⚠️ @cmd(${cmd.command}) 失敗: ${msg}`
+        ).catch(() => {})
+      }
+    }
+
     ctx.done()
   } catch (err) {
     console.error('[queue] onResult error:', err)
@@ -260,6 +281,17 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
 }
 
 async function sendResponseChunks(ctx: ProcessorContext, responseText: string): Promise<void> {
+  // Wait for any pending startDraft to resolve before checking draftActive.
+  // Without this, fast responses cause a race: onResult fires before startDraft
+  // resolves, so draftActive is still false → sends a duplicate message.
+  if (ctx.draftStartPromise) {
+    const draftId = await ctx.draftStartPromise
+    if (draftId !== null) {
+      ctx.draftActive = true
+    }
+    ctx.draftStartPromise = null
+  }
+
   const choiceResult = detectChoices(responseText)
   let replyButtons: ReturnType<typeof Markup.inlineKeyboard> | undefined
 
@@ -280,15 +312,37 @@ async function sendResponseChunks(ctx: ProcessorContext, responseText: string): 
   }
 
   const cleaned = cleanMarkdown(responseText)
-  const chunks = splitText(cleaned, 4096)
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i]
-    const isLast = i === chunks.length - 1
-    const extra = isLast && replyButtons ? { ...replyButtons } : {}
-    try {
-      await ctx.telegram.sendMessage(ctx.item.chatId, chunk, { parse_mode: 'Markdown', ...extra })
-    } catch {
-      await ctx.telegram.sendMessage(ctx.item.chatId, chunk, Object.keys(extra).length > 0 ? extra : undefined)
+
+  // If draft was active, finalize it (this sends the final message)
+  const hadDraft = ctx.draftActive
+  if (hadDraft) {
+    await finalizeDraft(ctx.telegram, ctx.item.chatId, cleaned)
+    ctx.draftActive = false
+
+    // If there are choice buttons, send them separately
+    if (replyButtons) {
+      try {
+        await ctx.telegram.sendMessage(
+          ctx.item.chatId,
+          '請選擇：',
+          { ...replyButtons }
+        )
+      } catch {
+        // Ignore button send error
+      }
+    }
+  } else {
+    // No draft: send message chunks as usual
+    const chunks = splitText(cleaned, 4096)
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]
+      const isLast = i === chunks.length - 1
+      const extra = isLast && replyButtons ? { ...replyButtons } : {}
+      try {
+        await ctx.telegram.sendMessage(ctx.item.chatId, chunk, { parse_mode: 'Markdown', ...extra })
+      } catch {
+        await ctx.telegram.sendMessage(ctx.item.chatId, chunk, Object.keys(extra).length > 0 ? extra : undefined)
+      }
     }
   }
 
@@ -381,6 +435,19 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
           { parse_mode: 'Markdown' }
         )
 
+    // One-time warning if project has no CLAUDE.md (slows down Claude significantly)
+    if (!isDashboard && !claudeMdWarned.has(item.project.path)) {
+      claudeMdWarned.add(item.project.path)
+      const hasClaude = existsSync(path.join(item.project.path, 'CLAUDE.md'))
+      if (!hasClaude) {
+        telegram.sendMessage(
+          item.chatId,
+          `\u{1F4A1} *[${tag}]* \u{6B64}\u{5C08}\u{6848}\u{6C92}\u{6709} CLAUDE.md\u{FF0C}\u{53EF}\u{80FD}\u{6703}\u{8B93} Claude \u{8655}\u{7406}\u{8F03}\u{6162}\u{3002}\u{5EFA}\u{8B70}\u{7528} /claudemd \u{751F}\u{6210}\u{3002}`,
+          { parse_mode: 'Markdown', disable_notification: true },
+        ).catch(() => {})
+      }
+    }
+
     return new Promise<void>((resolve) => {
       const toolNames: string[] = []
       const startTime = Date.now()
@@ -412,6 +479,8 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         resolved: false,
         timer: undefined as unknown as ReturnType<typeof setTimeout>,
         done: undefined as unknown as () => void,
+        draftActive: false,
+        draftStartPromise: null,
       }
 
       ctx.done = () => {
@@ -426,6 +495,10 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
           for (const msgId of tidbitMsgIds) {
             telegram.deleteMessage(item.chatId, msgId).catch(() => {})
           }
+        }
+        // Cancel any active draft
+        if (ctx.draftActive) {
+          cancelDraft(item.chatId)
         }
         cleanupImages()
         resolve()
@@ -515,9 +588,22 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         lastTool: null,
       })
 
+      // Auto-rotate bloated sessions — CTX digest preserves context continuity
+      const resolvedBackend = resolveBackend(resolvedAI.backend)
+      if (shouldRotateSession(resolvedBackend, item.project.path)) {
+        const count = rotateSession(resolvedBackend, item.project.path)
+        if (!isDashboard) {
+          telegram.sendMessage(
+            item.chatId,
+            `\u{1F504} *[${tag}]* Session \u{5DF2}\u{81EA}\u{52D5}\u{5237}\u{65B0} (${count} \u{6B21}\u{5C0D}\u{8A71}\u{5F8C})\u{FF0C}\u{4FDD}\u{6301}\u{56DE}\u{61C9}\u{901F}\u{5EA6}`,
+            { parse_mode: 'Markdown', disable_notification: true },
+          ).catch(() => {})
+        }
+      }
+
       // Re-fetch session ID at execution time (not the stale one from enqueue time)
       // This ensures we use the latest session after previous tasks complete.
-      const freshSessionId = getAISessionId(resolveBackend(resolvedAI.backend), item.project.path)
+      const freshSessionId = getAISessionId(resolvedBackend, item.project.path)
 
       const runner = getRunner(backend)
       runner.run({
@@ -528,10 +614,26 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         imagePaths: item.imagePaths,
         chatId: item.chatId,
         maxTurns: item.maxTurns,
-        onTextDelta: (delta, acc) => {
+        onTextDelta: async (delta, acc) => {
           ctx.accumulated = acc
           if (dashCmdId) {
             emitResponseChunk(dashCmdId, delta, acc)
+          }
+
+          // Stream to Telegram draft (private chat only)
+          if (!isDashboard) {
+            if (!ctx.draftActive && !ctx.draftStartPromise) {
+              // First chunk: start draft (track promise to prevent race with onResult)
+              ctx.draftStartPromise = startDraft(telegram, item.chatId, acc)
+              const draftId = await ctx.draftStartPromise
+              if (draftId !== null) {
+                ctx.draftActive = true
+              }
+              ctx.draftStartPromise = null
+            } else if (ctx.draftActive) {
+              // Subsequent chunks: update draft
+              await updateDraft(telegram, item.chatId, acc)
+            }
           }
         },
         onToolUse: (toolName) => {

@@ -13,6 +13,7 @@ import {
   findByCode,
   markConnected,
   markDisconnected,
+  resetAllConnectedFlags,
 } from './pairing-store.js'
 import type {
   RelayInbound,
@@ -93,11 +94,10 @@ function handleAgentRegister(ws: WebSocket, code: string, ip: string): void {
 
   agents.set(code, { ws, code, connectedAt: Date.now() })
 
-  const remoteAddr = ip
-  markConnected(code, remoteAddr)
+  markConnected(code, 'remote agent')
 
   send(ws, { type: 'agent_registered' })
-  console.log(`[relay] Agent registered: code=${code} from=${remoteAddr}`)
+  console.log(`[relay] Agent registered: code=${code} from=${ip}`)
 }
 
 function handleProxyConnect(ws: WebSocket, code: string): void {
@@ -159,7 +159,27 @@ function handleAgentMessage(_ws: WebSocket, code: string, msg: RelayInbound): vo
 
 export function startRelayServer(port: number): void {
   relayPort = port
+
+  // Clear stale connected flags from previous run — process may have
+  // been killed without graceful close, leaving pairings.json lying.
+  // Agents will reconnect and markConnected() restores them.
+  const cleared = resetAllConnectedFlags()
+  if (cleared > 0) {
+    console.log(`[relay] Cleared ${cleared} stale connected flag(s) from previous run`)
+  }
+
   const wss = new WebSocketServer({ port })
+
+  // Ping all connected agents every 25s to keep WebSocket alive
+  // (Cloudflare Tunnel, NAT routers, and proxies drop idle connections)
+  const PING_INTERVAL_MS = 25_000
+  setInterval(() => {
+    for (const [, agent] of agents) {
+      if (agent.ws.readyState === agent.ws.OPEN) {
+        agent.ws.ping()
+      }
+    }
+  }, PING_INTERVAL_MS)
 
   wss.on('connection', (ws, req) => {
     let role: 'unknown' | 'agent' | 'proxy' = 'unknown'

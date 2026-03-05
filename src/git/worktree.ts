@@ -23,9 +23,12 @@ interface WorktreeInfo {
   readonly head: string
 }
 
+type MergeStrategy = 'clean' | 'smart' | 'conflict' | 'typecheck-fail'
+
 interface MergeResult {
   readonly success: boolean
   readonly message: string
+  readonly strategy?: MergeStrategy
   readonly conflicts?: readonly string[]
 }
 
@@ -169,33 +172,79 @@ export function currentBranch(worktreeDir: string): string {
 }
 
 /**
- * Sync worktree branch with the main branch (rebase or merge).
- * Pulls latest from main into the worktree branch.
+ * Smart Auto-Merge: sync worktree branch with the main branch.
+ *
+ * Flow:
+ * 1. Dry-run check — is there anything to merge?
+ * 2. git merge --no-commit — try merge without committing
+ *    - No conflicts → proceed to step 3
+ *    - Conflicts → abort + report
+ * 3. TypeScript check (tsc --noEmit) — catch semantic conflicts
+ *    - Pass → commit the merge
+ *    - Fail → rollback + report
  */
 export function syncFromMain(
   worktreeDir: string,
   mainBranch = 'master',
 ): MergeResult {
+  // Step 0: Check if there's anything to merge
   try {
-    const result = git(['merge', mainBranch, '--no-edit'], worktreeDir)
-    return { success: true, message: result || 'Already up to date' }
+    const mergeBase = git(['merge-base', 'HEAD', mainBranch], worktreeDir)
+    const mainHead = git(['rev-parse', mainBranch], worktreeDir)
+    if (mergeBase === mainHead) {
+      return { success: true, message: 'Already up to date', strategy: 'clean' }
+    }
+  } catch {
+    // Can't determine merge-base, proceed anyway
+  }
+
+  // Step 1: Try merge --no-commit (dry run that stages the result)
+  try {
+    git(['merge', mainBranch, '--no-commit', '--no-ff'], worktreeDir)
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
 
-    // Check for merge conflicts
     if (msg.includes('CONFLICT') || msg.includes('Automatic merge failed')) {
       const conflictFiles = parseConflictFiles(worktreeDir)
-      // Abort the failed merge
-      try {
-        git(['merge', '--abort'], worktreeDir)
-      } catch { /* ignore */ }
+      try { git(['merge', '--abort'], worktreeDir) } catch { /* ignore */ }
       return {
         success: false,
-        message: '合併衝突，已自動取消 merge',
+        message: `合併衝突 (${conflictFiles.length} 個檔案)`,
+        strategy: 'conflict',
         conflicts: conflictFiles,
       }
     }
 
+    // Unknown error — abort if merge in progress
+    try { git(['merge', '--abort'], worktreeDir) } catch { /* ignore */ }
+    return { success: false, message: msg }
+  }
+
+  // Step 2: Merge succeeded without conflicts — run tsc check
+  const tscResult = runTypeCheck(worktreeDir)
+
+  if (!tscResult.pass) {
+    // TypeScript failed — rollback the merge
+    try { git(['merge', '--abort'], worktreeDir) } catch { /* ignore */ }
+    return {
+      success: false,
+      message: `tsc 語意衝突:\n${tscResult.errors.slice(0, 3).join('\n')}`,
+      strategy: 'typecheck-fail',
+    }
+  }
+
+  // Step 3: All good — commit the merge
+  try {
+    git(['commit', '--no-edit'], worktreeDir)
+    return {
+      success: true,
+      message: 'smart-merged + tsc ✓',
+      strategy: 'smart',
+    }
+  } catch (error) {
+    // Commit failed (shouldn't happen, but be safe)
+    try { git(['merge', '--abort'], worktreeDir) } catch { /* ignore */ }
+    const msg = error instanceof Error ? error.message : String(error)
     return { success: false, message: msg }
   }
 }
@@ -295,6 +344,99 @@ export function mainRepoPath(worktreeDir: string): string | null {
   } catch {
     return null
   }
+}
+
+// --- TypeScript check ---
+
+interface TscResult {
+  readonly pass: boolean
+  readonly errors: readonly string[]
+}
+
+function runTypeCheck(cwd: string): TscResult {
+  try {
+    // Find the tsconfig by walking up from worktree to find the main repo's config
+    const mainDir = mainRepoPath(cwd) ?? cwd
+    const tsconfigPath = join(mainDir, 'tsconfig.json')
+
+    if (!existsSync(tsconfigPath)) {
+      // No tsconfig → skip type check, assume pass
+      return { pass: true, errors: [] }
+    }
+
+    // Run tsc --noEmit from the worktree dir
+    // Use the main repo's node_modules/.bin/tsc
+    const tscBin = join(mainDir, 'node_modules', '.bin', 'tsc')
+    const tscCmd = existsSync(tscBin) || existsSync(tscBin + '.cmd') ? tscBin : 'npx tsc'
+
+    execFileSync(
+      tscCmd.includes('npx') ? 'npx' : tscBin,
+      tscCmd.includes('npx') ? ['tsc', '--noEmit', '-p', tsconfigPath] : ['--noEmit', '-p', tsconfigPath],
+      {
+        cwd,
+        encoding: 'utf-8',
+        timeout: 60_000,
+        windowsHide: true,
+        shell: true,
+      },
+    )
+    return { pass: true, errors: [] }
+  } catch (error) {
+    const output = error instanceof Error
+      ? (error as Error & { stdout?: string; stderr?: string }).stdout ?? (error as Error & { stderr?: string }).stderr ?? error.message
+      : String(error)
+
+    // Extract TS error lines (e.g. "src/foo.ts(10,5): error TS2345: ...")
+    const errorLines = output.split('\n')
+      .filter((line: string) => line.includes('error TS'))
+      .map((line: string) => line.trim())
+
+    return { pass: false, errors: errorLines.length > 0 ? errorLines : [output.slice(0, 300)] }
+  }
+}
+
+// --- Sync all worktrees ---
+
+export interface WorktreeSyncResult {
+  readonly branch: string
+  readonly success: boolean
+  readonly message: string
+  readonly strategy?: MergeStrategy
+}
+
+/**
+ * Sync ALL worktrees with master.
+ * Skips the master worktree and the source branch (the one that just deployed).
+ * Returns a summary of each sync result.
+ */
+export function syncAllWorktrees(
+  projectPath: string,
+  mainBranch = 'master',
+  skipBranch?: string,
+): readonly WorktreeSyncResult[] {
+  const trees = listWorktrees(projectPath)
+  const results: WorktreeSyncResult[] = []
+
+  for (const tree of trees) {
+    // Skip master and the branch that just deployed
+    if (tree.branch === mainBranch) continue
+    if (skipBranch && tree.branch === skipBranch) continue
+    if (!existsSync(tree.worktreePath)) continue
+
+    const result = syncFromMain(tree.worktreePath, mainBranch)
+    results.push({
+      branch: tree.branch,
+      success: result.success,
+      strategy: result.strategy,
+      message: result.success
+        ? result.strategy === 'clean' ? 'up to date' : 'smart-merged'
+        : result.conflicts?.length
+          ? `conflict: ${result.conflicts.join(', ')}`
+          : result.message,
+    })
+  }
+
+  return results
 }
 
 // --- Internal helpers ---

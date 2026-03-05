@@ -15,6 +15,12 @@ const SESSION_TTL_MS = 4 * 60 * 60 * 1000
 /** Track last activity time per session key (in-memory only) */
 const lastActivity = new Map<string, number>()
 
+/** Track prompt count per session key (in-memory only) */
+const promptCounts = new Map<string, number>()
+
+/** Auto-rotate session after this many prompts to prevent context bloat */
+const MAX_PROMPTS_PER_SESSION = 20
+
 /** In-memory cache of THIS bot's sessions only */
 const mySessions = new Map<string, string>()
 
@@ -161,6 +167,7 @@ export function setAISessionId(backend: AIBackend, projectPath: string, sessionI
   const key = makeKey(backend, projectPath)
   mySessions.set(key, sessionId)
   lastActivity.set(key, Date.now())
+  promptCounts.set(key, (promptCounts.get(key) ?? 0) + 1)
   saveSessions()
 }
 
@@ -173,5 +180,28 @@ export function clearAISession(backend: AIBackend, projectPath: string): boolean
 
 export function clearAllAISessions(): void {
   mySessions.clear()
+  promptCounts.clear()
   saveSessions()
+}
+
+/** Get the number of prompts processed in the current session. */
+export function getSessionPromptCount(backend: AIBackend, projectPath: string): number {
+  return promptCounts.get(makeKey(backend, projectPath)) ?? 0
+}
+
+/** Check if session should be rotated (too many prompts). */
+export function shouldRotateSession(backend: AIBackend, projectPath: string): boolean {
+  return getSessionPromptCount(backend, projectPath) >= MAX_PROMPTS_PER_SESSION
+}
+
+/** Rotate session: clear session + prompt count so next run starts fresh.
+ *  CTX digest injection handles context continuity automatically. */
+export function rotateSession(backend: AIBackend, projectPath: string): number {
+  const key = makeKey(backend, projectPath)
+  const count = promptCounts.get(key) ?? 0
+  mySessions.delete(key)
+  promptCounts.delete(key)
+  lastActivity.delete(key)
+  saveSessions()
+  return count
 }

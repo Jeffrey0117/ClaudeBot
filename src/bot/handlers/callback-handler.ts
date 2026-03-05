@@ -11,6 +11,7 @@ import { getAISessionId } from '../../ai/session-store.js'
 import { handleParallelCallback, createParallelJobFromSuggestion } from '../commands/parallel.js'
 import { consumeParallelSuggestion } from './message-handler.js'
 import { addText } from '../ordered-message-buffer.js'
+import { pendingResends } from '../commands/last.js'
 import { Markup } from 'telegraf'
 import type { AIModelSelection, ProjectInfo } from '../../types/index.js'
 import { formatAILabel, resolveBackend } from '../../ai/types.js'
@@ -54,6 +55,12 @@ export async function callbackHandler(ctx: BotContext): Promise<void> {
     await handleParallelSuggest(ctx, chatId, false)
   } else if (data.startsWith('parallel:')) {
     await handleParallelCallback(ctx, chatId, data)
+  } else if (data.startsWith('last_resend:')) {
+    await handleLastResend(ctx, chatId)
+  } else if (data.startsWith('last_cancel:')) {
+    pendingResends.delete(chatId)
+    await ctx.answerCbQuery('已取消')
+    await ctx.editMessageText('❌ 已取消重送')
   } else if (data === 'bookmark:add') {
     await handleBookmarkAdd(ctx, chatId)
   } else if (data.startsWith('bookmark:remove:')) {
@@ -304,6 +311,25 @@ async function handleBookmarkRemove(ctx: BotContext, chatId: number, slot: numbe
     { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) }
   )
   await ctx.answerCbQuery()
+}
+
+async function handleLastResend(ctx: BotContext, chatId: number): Promise<void> {
+  const text = pendingResends.get(chatId)
+  pendingResends.delete(chatId)
+
+  if (!text) {
+    await ctx.answerCbQuery('已過期')
+    await ctx.editMessageText('❌ 訊息已過期，請重新使用 /last')
+    return
+  }
+
+  await ctx.answerCbQuery('重新發送！')
+  await ctx.editMessageText('🔄 重新發送中...')
+
+  const msg = ctx.callbackQuery?.message
+  const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
+  // Feed into the normal message buffer as if user typed it
+  addText(chatId, Date.now(), threadId, text, '')
 }
 
 async function handleParallelSuggest(ctx: BotContext, chatId: number, useParallel: boolean): Promise<void> {

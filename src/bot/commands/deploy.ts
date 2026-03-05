@@ -5,7 +5,7 @@ import path from 'path'
 import fs from 'fs'
 import { getPairing } from '../../remote/pairing-store.js'
 import { remoteToolCall } from '../../remote/relay-client.js'
-import { isWorktree, mainRepoPath, mergeToMain } from '../../git/worktree.js'
+import { isWorktree, mainRepoPath, mergeToMain, syncAllWorktrees } from '../../git/worktree.js'
 
 export async function deployCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -151,6 +151,24 @@ export async function deployCommand(ctx: BotContext): Promise<void> {
       `🌿 Branch: ${pushBranch}${mergeNote}`,
       { parse_mode: 'Markdown' }
     )
+
+    // Auto-sync all other worktrees
+    const mainDir = inWorktree ? mainRepoPath(projectDir) : projectDir
+    if (mainDir) {
+      const syncResults = syncAllWorktrees(mainDir, 'master', branch)
+      if (syncResults.length > 0) {
+        const lines = syncResults.map((r) => {
+          if (r.success) {
+            const icon = r.strategy === 'clean' ? '⏭️' : '✅'
+            const label = r.strategy === 'clean' ? 'up to date' : 'smart-merged'
+            return `${icon} ${r.branch}: ${label}`
+          }
+          const icon = r.strategy === 'typecheck-fail' ? '⚠️' : '❌'
+          return `${icon} ${r.branch}: ${r.message}`
+        })
+        await ctx.reply(`🔄 Smart Sync:\n${lines.join('\n')}`)
+      }
+    }
 
     // Auto-sync to paired remote if connected
     await syncToRemote(ctx, chatId, threadId, project.name)
