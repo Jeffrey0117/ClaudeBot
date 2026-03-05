@@ -170,6 +170,17 @@ export function startRelayServer(port: number): void {
 
   const wss = new WebSocketServer({ port })
 
+  // Ping all connected agents every 25s to keep WebSocket alive
+  // (Cloudflare Tunnel, NAT routers, and proxies drop idle connections)
+  const PING_INTERVAL_MS = 25_000
+  setInterval(() => {
+    for (const [, agent] of agents) {
+      if (agent.ws.readyState === agent.ws.OPEN) {
+        agent.ws.ping()
+      }
+    }
+  }, PING_INTERVAL_MS)
+
   wss.on('connection', (ws, req) => {
     let role: 'unknown' | 'agent' | 'proxy' = 'unknown'
     let assignedCode = ''
