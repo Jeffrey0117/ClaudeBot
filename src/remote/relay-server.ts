@@ -13,6 +13,7 @@ import {
   findByCode,
   markConnected,
   markDisconnected,
+  resetAllConnectedFlags,
 } from './pairing-store.js'
 import type {
   RelayInbound,
@@ -158,6 +159,15 @@ function handleAgentMessage(_ws: WebSocket, code: string, msg: RelayInbound): vo
 
 export function startRelayServer(port: number): void {
   relayPort = port
+
+  // Clear stale connected flags from previous run — process may have
+  // been killed without graceful close, leaving pairings.json lying.
+  // Agents will reconnect and markConnected() restores them.
+  const cleared = resetAllConnectedFlags()
+  if (cleared > 0) {
+    console.log(`[relay] Cleared ${cleared} stale connected flag(s) from previous run`)
+  }
+
   const wss = new WebSocketServer({ port })
 
   wss.on('connection', (ws, req) => {

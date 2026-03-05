@@ -321,21 +321,25 @@ function startRestartAllWatcher(): void {
       unlinkSync(RESTART_ALL_SIGNAL)
       console.log('[launcher] restart-all signal received — restarting all bots')
       notifyAdmin('🔄 <b>Restart ALL</b> — restarting all bot instances...')
-      // Kill all running bots
+      // Kill all running bots — close handlers will respawn them after RESPAWN_DELAY_MS
       for (const [, child] of children) {
         child.kill('SIGTERM')
       }
-      // Also respawn any bots that were in crash-loop (not in children Map)
-      // Clear crash history so they get a fresh start
+      // Clear crash history so all bots get a fresh start
       crashHistory.clear()
-      for (const envFile of filesToLaunch) {
-        if (!children.has(envFile)) {
-          console.log(`[launcher] reviving dead bot: ${envFile}`)
-          setTimeout(() => {
-            if (!shuttingDown && !children.has(envFile)) spawnBot(envFile)
-          }, RESPAWN_DELAY_MS)
+      // Deferred safety net: after close handlers + respawns have settled,
+      // revive any bot still missing (crash-looped or failed to respawn).
+      // 5s = enough for SIGTERM exit (~100ms) + RESPAWN_DELAY (2s) + startup (~2s)
+      const REVIVE_DELAY_MS = 5000
+      setTimeout(() => {
+        if (shuttingDown) return
+        for (const envFile of filesToLaunch) {
+          if (!children.has(envFile)) {
+            console.log(`[launcher] reviving bot not in children: ${envFile}`)
+            spawnBot(envFile)
+          }
         }
-      }
+      }, REVIVE_DELAY_MS)
     } catch {
       // File doesn't exist or read error — normal, no signal pending
     }

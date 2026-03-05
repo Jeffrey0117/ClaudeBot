@@ -59,6 +59,7 @@ interface ProcessorContext {
   timer: ReturnType<typeof setTimeout>
   done: () => void
   draftActive: boolean
+  draftStartPromise: Promise<number | null> | null
 }
 
 // --- Extracted result handler ---
@@ -276,6 +277,17 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
 }
 
 async function sendResponseChunks(ctx: ProcessorContext, responseText: string): Promise<void> {
+  // Wait for any pending startDraft to resolve before checking draftActive.
+  // Without this, fast responses cause a race: onResult fires before startDraft
+  // resolves, so draftActive is still false → sends a duplicate message.
+  if (ctx.draftStartPromise) {
+    const draftId = await ctx.draftStartPromise
+    if (draftId !== null) {
+      ctx.draftActive = true
+    }
+    ctx.draftStartPromise = null
+  }
+
   const choiceResult = detectChoices(responseText)
   let replyButtons: ReturnType<typeof Markup.inlineKeyboard> | undefined
 
@@ -451,6 +463,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         timer: undefined as unknown as ReturnType<typeof setTimeout>,
         done: undefined as unknown as () => void,
         draftActive: false,
+        draftStartPromise: null,
       }
 
       ctx.done = () => {
@@ -579,13 +592,15 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
 
           // Stream to Telegram draft (private chat only)
           if (!isDashboard) {
-            if (!ctx.draftActive) {
-              // First chunk: start draft
-              const draftId = await startDraft(telegram, item.chatId, acc)
+            if (!ctx.draftActive && !ctx.draftStartPromise) {
+              // First chunk: start draft (track promise to prevent race with onResult)
+              ctx.draftStartPromise = startDraft(telegram, item.chatId, acc)
+              const draftId = await ctx.draftStartPromise
               if (draftId !== null) {
                 ctx.draftActive = true
               }
-            } else {
+              ctx.draftStartPromise = null
+            } else if (ctx.draftActive) {
               // Subsequent chunks: update draft
               await updateDraft(telegram, item.chatId, acc)
             }
