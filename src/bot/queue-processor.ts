@@ -16,7 +16,7 @@ import { createFakeContext } from '../utils/fake-context.js'
 import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
-import { getAISessionId } from '../ai/session-store.js'
+import { getAISessionId, shouldRotateSession, rotateSession } from '../ai/session-store.js'
 import { detectChoices } from '../utils/choice-detector.js'
 import { cleanMarkdown } from '../utils/markdown-cleaner.js'
 import { generateSuggestions } from '../utils/suggestion-generator.js'
@@ -588,9 +588,22 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         lastTool: null,
       })
 
+      // Auto-rotate bloated sessions — CTX digest preserves context continuity
+      const resolvedBackend = resolveBackend(resolvedAI.backend)
+      if (shouldRotateSession(resolvedBackend, item.project.path)) {
+        const count = rotateSession(resolvedBackend, item.project.path)
+        if (!isDashboard) {
+          telegram.sendMessage(
+            item.chatId,
+            `\u{1F504} *[${tag}]* Session \u{5DF2}\u{81EA}\u{52D5}\u{5237}\u{65B0} (${count} \u{6B21}\u{5C0D}\u{8A71}\u{5F8C})\u{FF0C}\u{4FDD}\u{6301}\u{56DE}\u{61C9}\u{901F}\u{5EA6}`,
+            { parse_mode: 'Markdown', disable_notification: true },
+          ).catch(() => {})
+        }
+      }
+
       // Re-fetch session ID at execution time (not the stale one from enqueue time)
       // This ensures we use the latest session after previous tasks complete.
-      const freshSessionId = getAISessionId(resolveBackend(resolvedAI.backend), item.project.path)
+      const freshSessionId = getAISessionId(resolvedBackend, item.project.path)
 
       const runner = getRunner(backend)
       runner.run({
