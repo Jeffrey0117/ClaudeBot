@@ -6,7 +6,13 @@
  * a short or affirmative reply ("對", "好", "OK").
  *
  * Falls back to raw response tail when no digest is available.
+ *
+ * Persisted to data/context-digest.json so context survives bot restarts.
  */
+
+import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { env } from '../config/env.js'
 
 export interface ContextDigest {
   readonly status: 'proposal' | 'question' | 'options' | 'done' | 'error' | 'info'
@@ -21,7 +27,51 @@ interface StoredContext {
   readonly rawTail: string
 }
 
-const store = new Map<string, StoredContext>()
+const BOT_ID = env.BOT_TOKEN.slice(-6)
+const STORE_FILE = join(process.cwd(), 'data', 'context-digest.json')
+
+type PersistedData = Record<string, StoredContext>
+
+function loadAll(): PersistedData {
+  try {
+    return JSON.parse(readFileSync(STORE_FILE, 'utf-8'))
+  } catch {
+    return {}
+  }
+}
+
+function loadStore(): Map<string, StoredContext> {
+  const all = loadAll()
+  const prefix = `${BOT_ID}:`
+  const map = new Map<string, StoredContext>()
+  for (const [key, ctx] of Object.entries(all)) {
+    if (key.startsWith(prefix)) {
+      map.set(key.slice(prefix.length), ctx)
+    }
+  }
+  return map
+}
+
+function persistStore(): void {
+  const all = loadAll()
+  const prefix = `${BOT_ID}:`
+  for (const key of Object.keys(all)) {
+    if (key.startsWith(prefix)) delete all[key]
+  }
+  for (const [key, ctx] of store) {
+    all[`${prefix}${key}`] = ctx
+  }
+  try {
+    mkdirSync(dirname(STORE_FILE), { recursive: true })
+    const tmp = `${STORE_FILE}.tmp`
+    writeFileSync(tmp, JSON.stringify(all, null, 2))
+    renameSync(tmp, STORE_FILE)
+  } catch (err) {
+    console.error('[context-digest] failed to persist:', err)
+  }
+}
+
+const store = loadStore()
 
 const MAX_RAW_LENGTH = 1500
 // Match [CTX]...[/CTX] or CTX.../CTX (Claude sometimes drops brackets)
@@ -71,6 +121,7 @@ export function setContext(projectPath: string, fullText: string, digest: Contex
     digest,
     rawTail: fullText.slice(-MAX_RAW_LENGTH),
   })
+  persistStore()
 }
 
 /** Get stored context for a project path. */
@@ -81,6 +132,7 @@ export function getContext(projectPath: string): StoredContext | null {
 /** Clear stored context. */
 export function clearContext(projectPath: string): void {
   store.delete(projectPath)
+  persistStore()
 }
 
 /**

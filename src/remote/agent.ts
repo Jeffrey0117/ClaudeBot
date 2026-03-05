@@ -41,11 +41,29 @@ const toolDispatcher = createToolDispatcher(BASE_DIR)
 let ws: WebSocket | null = null
 let shouldReconnect = true
 
+const PING_TIMEOUT_MS = 60_000  // If no ping from relay for 60s, assume dead
+
 function connect(): void {
   console.log(`Connecting to ${RELAY_URL}...`)
   const socket = new WebSocket(RELAY_URL)
+  let lastPing = Date.now()
+
+  // Monitor relay liveness — if no ping received for 60s, connection is likely dead
+  // (zombie TCP from tunnel/NAT drop). Force close to trigger reconnect.
+  const livenessCheck = setInterval(() => {
+    if (Date.now() - lastPing > PING_TIMEOUT_MS) {
+      console.log('⚠️ No ping from relay for 60s — forcing reconnect')
+      clearInterval(livenessCheck)
+      socket.terminate()
+    }
+  }, 10_000)
+
+  socket.on('ping', () => {
+    lastPing = Date.now()
+  })
 
   socket.on('open', () => {
+    lastPing = Date.now()
     const msg: AgentRegister = { type: 'agent_register', code: PAIRING_CODE }
     socket.send(JSON.stringify(msg))
   })
@@ -96,6 +114,7 @@ function connect(): void {
 
   socket.on('close', () => {
     ws = null
+    clearInterval(livenessCheck)
     if (shouldReconnect) {
       console.log(`🔌 Disconnected. Reconnecting in ${RECONNECT_DELAY_MS / 1000}s...`)
       setTimeout(connect, RECONNECT_DELAY_MS)

@@ -25,7 +25,7 @@ export function scheduleRestartNotifications(bot: Telegraf<BotContext>): void {
     const label = deriveBotLabel()
     const notifiedChats = new Set<number>()
 
-    // 1) Notify users with an active local project
+    // 1) Notify users with an active local project (with context)
     const states = getActiveUserStates()
     for (const [key, state] of states) {
       if (!state.selectedProject) continue
@@ -61,6 +61,21 @@ export function scheduleRestartNotifications(bot: Telegraf<BotContext>): void {
           console.error(`[restart-notify] Failed to notify pairing ${pairing.chatId}:`, err.message)
         })
       }
+    }
+
+    // 3) Always notify all ALLOWED_CHAT_IDS that haven't been notified yet
+    //    Ensures new bots, chat-mode users, and pair-mode users all get notified
+    for (const chatId of env.ALLOWED_CHAT_IDS) {
+      if (notifiedChats.has(chatId)) continue
+      notifiedChats.add(chatId)
+
+      bot.telegram.sendMessage(
+        chatId,
+        `🔄 ${label} 已重啟，待命中`,
+        { parse_mode: 'Markdown' },
+      ).catch((err) => {
+        console.error(`[restart-notify] Failed to notify ${chatId}:`, err.message)
+      })
     }
   }, NOTIFY_DELAY_MS)
 }
