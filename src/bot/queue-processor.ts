@@ -58,6 +58,8 @@ interface ProcessorContext {
   readonly startTime: number
   readonly telegram: Telegraf<BotContext>['telegram']
   accumulated: string
+  /** Accumulates ALL text deltas across turns (never resets) for draft streaming */
+  draftText: string
   toolCount: number
   resolved: boolean
   timer: ReturnType<typeof setTimeout>
@@ -475,6 +477,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         item, tag, isDashboard, dashCmdId, resolvedAI, aiLabel,
         statusMsg, startTime, telegram,
         accumulated: '',
+        draftText: '',
         toolCount: 0,
         resolved: false,
         timer: undefined as unknown as ReturnType<typeof setTimeout>,
@@ -616,23 +619,23 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         maxTurns: item.maxTurns,
         onTextDelta: async (delta, acc) => {
           ctx.accumulated = acc
+          ctx.draftText += delta
           if (dashCmdId) {
             emitResponseChunk(dashCmdId, delta, acc)
           }
 
           // Stream to Telegram draft (private chat only)
+          // Uses draftText (never resets) so text grows across tool-use turns
           if (!isDashboard) {
             if (!ctx.draftActive && !ctx.draftStartPromise) {
-              // First chunk: start draft (track promise to prevent race with onResult)
-              ctx.draftStartPromise = startDraft(telegram, item.chatId, acc)
+              ctx.draftStartPromise = startDraft(telegram, item.chatId, ctx.draftText)
               const draftId = await ctx.draftStartPromise
               if (draftId !== null) {
                 ctx.draftActive = true
               }
               ctx.draftStartPromise = null
             } else if (ctx.draftActive) {
-              // Subsequent chunks: update draft
-              await updateDraft(telegram, item.chatId, acc)
+              await updateDraft(telegram, item.chatId, ctx.draftText)
             }
           }
         },
