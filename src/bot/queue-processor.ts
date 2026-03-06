@@ -325,10 +325,16 @@ async function sendResponseChunks(ctx: ProcessorContext, responseText: string): 
 
   const cleaned = cleanMarkdown(responseText)
 
-  // If draft was active, finalize it (this sends the final message)
+  // If draft was active, finalize with full accumulated text (not just last turn)
   const hadDraft = ctx.draftActive
   if (hadDraft) {
-    await finalizeDraft(ctx.telegram, ctx.item.chatId, cleaned)
+    // draftText has ALL turns — strip directives + CTX so user sees full process
+    const draftStripped = stripPipeDirectives(
+      stripDirectives(stripCommandDirectives(stripRunDirectives(ctx.draftText))),
+    )
+    const { cleaned: draftDigestCleaned } = extractDigest(draftStripped)
+    const draftCleaned = cleanMarkdown(draftDigestCleaned || draftStripped)
+    await finalizeDraft(ctx.telegram, ctx.item.chatId, draftCleaned || cleaned)
     ctx.draftActive = false
 
     // If there are choice buttons, send them separately
