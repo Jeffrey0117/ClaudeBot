@@ -13,7 +13,7 @@ import { parseCommandDirectives, stripCommandDirectives } from '../utils/command
 import { parseDirectives, executeDirectives, stripDirectives } from '../utils/directives.js'
 import { parsePipeDirectives, executePipeDirectives, stripPipeDirectives } from '../utils/pipe-executor.js'
 import { createFakeContext } from '../utils/fake-context.js'
-import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand } from '../plugins/loader.js'
+import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand, getPluginModule } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
 import { getAISessionId, shouldRotateSession, rotateSession } from '../ai/session-store.js'
@@ -58,6 +58,8 @@ interface ProcessorContext {
   readonly startTime: number
   readonly telegram: Telegraf<BotContext>['telegram']
   accumulated: string
+  /** Accumulates ALL text deltas across turns (never resets) for draft streaming */
+  draftText: string
   toolCount: number
   resolved: boolean
   timer: ReturnType<typeof setTimeout>
@@ -93,6 +95,16 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       toolCount: ctx.toolCount,
       promptLength: ctx.item.prompt.length,
     })
+
+    // Allot: settle remote quota (replace pre-reserve with actual turns)
+    if (ctx.item.project.name === 'remote') {
+      const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
+      if (allotMod?.settle) {
+        (allotMod.settle as (c: number, t: number | undefined, turns: number) => void)(
+          ctx.item.chatId, ctx.item.threadId, ctx.toolCount + 1,
+        )
+      }
+    }
 
     // Prefer resultText (clean final response from Claude CLI) over accumulated
     // (which includes intermediate text from ALL turns, including internal thinking)
@@ -313,10 +325,16 @@ async function sendResponseChunks(ctx: ProcessorContext, responseText: string): 
 
   const cleaned = cleanMarkdown(responseText)
 
-  // If draft was active, finalize it (this sends the final message)
+  // If draft was active, finalize with full accumulated text (not just last turn)
   const hadDraft = ctx.draftActive
   if (hadDraft) {
-    await finalizeDraft(ctx.telegram, ctx.item.chatId, cleaned)
+    // draftText has ALL turns — strip directives + CTX so user sees full process
+    const draftStripped = stripPipeDirectives(
+      stripDirectives(stripCommandDirectives(stripRunDirectives(ctx.draftText))),
+    )
+    const { cleaned: draftDigestCleaned } = extractDigest(draftStripped)
+    const draftCleaned = cleanMarkdown(draftDigestCleaned || draftStripped)
+    await finalizeDraft(ctx.telegram, ctx.item.chatId, draftCleaned || cleaned)
     ctx.draftActive = false
 
     // If there are choice buttons, send them separately
@@ -375,6 +393,25 @@ async function sendResponseChunks(ctx: ProcessorContext, responseText: string): 
 function handleRunnerError(ctx: ProcessorContext, error: string): void {
   if (ctx.resolved) return
   clearTimeout(ctx.timer)
+
+  // Allot: 429 detection — trigger adaptive budget decrease
+  if (error.includes('429') || error.toLowerCase().includes('rate limit')) {
+    const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
+    if (allotMod?.on429Detected) {
+      (allotMod.on429Detected as () => void)()
+    }
+  }
+
+  // Allot: release pre-reserve on error (0 actual turns)
+  if (ctx.item.project.name === 'remote') {
+    const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
+    if (allotMod?.settle) {
+      (allotMod.settle as (c: number, t: number | undefined, turns: number) => void)(
+        ctx.item.chatId, ctx.item.threadId, 0,
+      )
+    }
+  }
+
   if (ctx.dashCmdId) {
     emitResponseError(ctx.dashCmdId, error)
   }
@@ -475,6 +512,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         item, tag, isDashboard, dashCmdId, resolvedAI, aiLabel,
         statusMsg, startTime, telegram,
         accumulated: '',
+        draftText: '',
         toolCount: 0,
         resolved: false,
         timer: undefined as unknown as ReturnType<typeof setTimeout>,
@@ -616,23 +654,23 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         maxTurns: item.maxTurns,
         onTextDelta: async (delta, acc) => {
           ctx.accumulated = acc
+          ctx.draftText += delta
           if (dashCmdId) {
             emitResponseChunk(dashCmdId, delta, acc)
           }
 
           // Stream to Telegram draft (private chat only)
+          // Uses draftText (never resets) so text grows across tool-use turns
           if (!isDashboard) {
             if (!ctx.draftActive && !ctx.draftStartPromise) {
-              // First chunk: start draft (track promise to prevent race with onResult)
-              ctx.draftStartPromise = startDraft(telegram, item.chatId, acc)
+              ctx.draftStartPromise = startDraft(telegram, item.chatId, ctx.draftText)
               const draftId = await ctx.draftStartPromise
               if (draftId !== null) {
                 ctx.draftActive = true
               }
               ctx.draftStartPromise = null
             } else if (ctx.draftActive) {
-              // Subsequent chunks: update draft
-              await updateDraft(telegram, item.chatId, acc)
+              await updateDraft(telegram, item.chatId, ctx.draftText)
             }
           }
         },

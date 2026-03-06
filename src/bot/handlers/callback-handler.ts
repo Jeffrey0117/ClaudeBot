@@ -44,6 +44,8 @@ export async function callbackHandler(ctx: BotContext): Promise<void> {
     await handleSuggestion(ctx, chatId, data)
   } else if (data.startsWith('project:')) {
     await handleProjectSelect(ctx, chatId, data.slice('project:'.length))
+  } else if (data.startsWith('rproject:')) {
+    await handleRemoteProjectSelect(ctx, chatId, data.slice('rproject:'.length))
   } else if (data.startsWith('ai:')) {
     await handleAISelect(ctx, chatId, data.slice('ai:'.length))
   } else if (data.startsWith('model:')) {
@@ -98,6 +100,22 @@ async function handleProjectSelect(ctx: BotContext, chatId: number, name: string
 
   await updateBotBio(project)
   await pinProjectStatus(chatId, project, formatAILabel(state.ai))
+}
+
+async function handleRemoteProjectSelect(ctx: BotContext, chatId: number, name: string): Promise<void> {
+  const threadId = getThreadId(ctx)
+
+  // Remote project: name is the folder name under agent's base-dir
+  // Use name as both project name and path identifier
+  const project: ProjectInfo = { name, path: `remote:${name}` }
+  setUserProject(chatId, project, threadId)
+  const state = getUserState(chatId, threadId)
+
+  await ctx.editMessageText(
+    `\u{2705} \u{5DF2}\u{9078}\u{64C7}: *${name}*\n\u{6A21}\u{578B}: ${formatAILabel(state.ai)}\n\n\u{50B3}\u{9001}\u{8A0A}\u{606F}\u{958B}\u{59CB}\u{5C0D}\u{8A71}\u{3002}`,
+    { parse_mode: 'Markdown' },
+  )
+  await ctx.answerCbQuery()
 }
 
 async function handleAISelect(ctx: BotContext, chatId: number, payload: string): Promise<void> {
