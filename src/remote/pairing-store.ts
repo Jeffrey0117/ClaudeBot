@@ -205,6 +205,14 @@ export function getAllConnectedPairings(): readonly PairingSession[] {
   return Object.values(store.pairings).filter((s) => s.connected)
 }
 
+/** Return connected pairings scoped to the current bot instance. */
+export function getBotConnectedPairings(): readonly PairingSession[] {
+  const store = readStore()
+  return Object.entries(store.pairings)
+    .filter(([key, s]) => key.startsWith(`${BOT_ID}:`) && s.connected)
+    .map(([, s]) => s)
+}
+
 /** Reset all connected flags on startup — stale flags from a crashed relay are lies.
  *  Agents will reconnect and markConnected() sets them back to true. */
 export function resetAllConnectedFlags(): number {

@@ -48,6 +48,7 @@ import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
 import { voiceHandler } from './handlers/voice-handler.js'
+import { setAllotRejectNotify } from './ordered-message-buffer.js'
 import { warmupSherpa, addHotwords, isSherpaAvailable } from '../asr/sherpa-client.js'
 import { scanProjects } from '../config/projects.js'
 import { setupQueueProcessor } from './queue-processor.js'
@@ -241,6 +242,11 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   wireReminderSendFn(bot)
   wireSchedulerSendFn(bot)
   wireTaskSendFn(bot)
+
+  // Wire allot reject notification (ordered-message-buffer → Telegram)
+  setAllotRejectNotify((chatId, text) => {
+    bot.telegram.sendMessage(chatId, text).catch(() => {})
+  })
 
   // Plugin interceptor — dynamic command dispatch + message handlers
   // Catches plugin commands installed after startup (e.g., via /install)

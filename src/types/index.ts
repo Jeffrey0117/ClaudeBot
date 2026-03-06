@@ -19,6 +19,7 @@ export interface UserSession {
 
 export interface QueueItem {
   readonly chatId: number
+  readonly threadId?: number
   readonly prompt: string
   readonly project: ProjectInfo
   readonly ai: AIModelSelection

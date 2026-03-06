@@ -13,7 +13,7 @@ import { parseCommandDirectives, stripCommandDirectives } from '../utils/command
 import { parseDirectives, executeDirectives, stripDirectives } from '../utils/directives.js'
 import { parsePipeDirectives, executePipeDirectives, stripPipeDirectives } from '../utils/pipe-executor.js'
 import { createFakeContext } from '../utils/fake-context.js'
-import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand } from '../plugins/loader.js'
+import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand, getPluginModule } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
 import { getAISessionId, shouldRotateSession, rotateSession } from '../ai/session-store.js'
@@ -95,6 +95,16 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       toolCount: ctx.toolCount,
       promptLength: ctx.item.prompt.length,
     })
+
+    // Allot: settle remote quota (replace pre-reserve with actual turns)
+    if (ctx.item.project.name === 'remote') {
+      const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
+      if (allotMod?.settle) {
+        (allotMod.settle as (c: number, t: number | undefined, turns: number) => void)(
+          ctx.item.chatId, ctx.item.threadId, ctx.toolCount + 1,
+        )
+      }
+    }
 
     // Prefer resultText (clean final response from Claude CLI) over accumulated
     // (which includes intermediate text from ALL turns, including internal thinking)
@@ -377,6 +387,25 @@ async function sendResponseChunks(ctx: ProcessorContext, responseText: string): 
 function handleRunnerError(ctx: ProcessorContext, error: string): void {
   if (ctx.resolved) return
   clearTimeout(ctx.timer)
+
+  // Allot: 429 detection — trigger adaptive budget decrease
+  if (error.includes('429') || error.toLowerCase().includes('rate limit')) {
+    const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
+    if (allotMod?.on429Detected) {
+      (allotMod.on429Detected as () => void)()
+    }
+  }
+
+  // Allot: release pre-reserve on error (0 actual turns)
+  if (ctx.item.project.name === 'remote') {
+    const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
+    if (allotMod?.settle) {
+      (allotMod.settle as (c: number, t: number | undefined, turns: number) => void)(
+        ctx.item.chatId, ctx.item.threadId, 0,
+      )
+    }
+  }
+
   if (ctx.dashCmdId) {
     emitResponseError(ctx.dashCmdId, error)
   }
