@@ -4,7 +4,7 @@ import { env } from '../config/env.js'
 const authenticatedChats = new Set<number>()
 
 export async function login(chatId: number, password: string): Promise<boolean> {
-  if (!env.ALLOWED_CHAT_IDS.includes(chatId)) {
+  if (!isChatAllowed(chatId)) {
     return false
   }
 
@@ -21,7 +21,7 @@ export async function login(chatId: number, password: string): Promise<boolean> 
 }
 
 export function autoAuth(chatId: number): boolean {
-  if (!env.ALLOWED_CHAT_IDS.includes(chatId)) return false
+  if (!isChatAllowed(chatId)) return false
   authenticatedChats.add(chatId)
   return true
 }
@@ -35,5 +35,10 @@ export function isAuthenticated(chatId: number): boolean {
 }
 
 export function isChatAllowed(chatId: number): boolean {
-  return env.ALLOWED_CHAT_IDS.includes(chatId)
+  return env.ALLOWED_CHAT_IDS.includes(chatId) || env.REMOTE_CHAT_IDS.includes(chatId)
+}
+
+/** Remote-only users: can only use pairing, blocked from local projects/admin commands */
+export function isRemoteOnly(chatId: number): boolean {
+  return env.REMOTE_CHAT_IDS.includes(chatId) && !env.ALLOWED_CHAT_IDS.includes(chatId)
 }

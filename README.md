@@ -128,16 +128,20 @@ Pair any machine to your bot. The AI operates on the remote filesystem via WebSo
 
 ```
 Telegram → Bot (your PC) → WebSocket → Agent (remote machine)
-                                          └── 10 MCP tools:
+                                          └── 11 MCP tools:
                                               read, write, list, search,
                                               grep, execute, system info,
-                                              project overview, fetch, push
+                                              project overview, fetch, push,
+                                              list projects
 ```
 
 - `/pair code@192.168.1.50:3100` — connect
+- `/projects` — list project folders on the remote machine
 - `/grab /path/to/file` — download from remote
 - `/rstatus` — check remote system health
 - **Doc push** — send any file to the bot while paired → it lands on the remote machine
+- **Remote-only users** — set `REMOTE_CHAT_IDS` to grant users access only through remote pairing (blocked from local commands)
+- **Quota management** — `allot` plugin manages per-remote rate limits and weekly budgets (admin only)
 
 ### Voice Pipeline
 
@@ -161,7 +165,7 @@ Messages arrive at the bot out of order (network latency, voice transcription de
 
 ### Plugin Ecosystem
 
-20+ built-in plugins, all at **zero AI cost** (no tokens consumed) — browse, calc, clip, cost, dice, github, map, mcp, remote, reminder, scheduler, search, screenshot, stats, sysinfo, task, vault, write, and more.
+20+ built-in plugins, all at **zero AI cost** (no tokens consumed) — allot, browse, calc, clip, cost, dice, github, map, mcp, remote, reminder, scheduler, search, screenshot, stats, sysinfo, task, vault, write, and more.
 
 **[Full plugin list & documentation →](https://github.com/Jeffrey0117/claudebot-plugins)**
 

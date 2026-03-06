@@ -38,6 +38,8 @@ src/
 - **/deep mode**: Opus model + 2x MAX_TURNS + subagent analysis (`data/subagent-spec.md`)
 - **/ctx command**: View/clear stored digest, `/ctx reload` hot-reloads ctx-spec + subagent-spec
 - **/parallel**: Concurrent worktree execution with parallel Claude CLI processes
+- **Remote-only users**: `REMOTE_CHAT_IDS` env var → users can only access bot through remote pairing
+- **Allot plugin**: Remote quota management — rate limit (5min window) + weekly budget, shared across all bots via `mainRepoPath()`, admin-only
 - **Launcher**: `notifyAdmin()` to ADMIN_CHAT_ID on all events; kill with `taskkill //F //T //PID`
 
 ## Coding rules
