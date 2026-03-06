@@ -83,6 +83,10 @@ const envSchema = z.object({
     .default('')
     .transform((val) => val.split(',').map((s) => s.trim()).filter(Boolean)),
   MAX_PARALLEL: z.coerce.number().int().min(2).max(10).default(3),
+  REMOTE_CHAT_IDS: z
+    .string()
+    .default('')
+    .transform((val) => val.split(',').map((id) => parseInt(id.trim(), 10)).filter((n) => !isNaN(n) && n > 0)),
 })
 
 export type Env = z.infer<typeof envSchema>

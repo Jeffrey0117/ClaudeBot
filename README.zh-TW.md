@@ -126,16 +126,20 @@ ProjectName--bot2/     ← bot2 的 worktree
 
 ```
 Telegram → Bot (你的電腦) → WebSocket → Agent (遠端電腦)
-                                          └── 10 個 MCP 工具：
+                                          └── 11 個 MCP 工具：
                                               讀、寫、列目錄、搜尋、
                                               grep、執行、系統資訊、
-                                              專案總覽、下載、上傳
+                                              專案總覽、下載、上傳、
+                                              列出專案
 ```
 
 - `/pair code@192.168.1.50:3100` — 連線
+- `/projects` — 列出遠端電腦上的專案資料夾
 - `/grab /path/to/file` — 從遠端下載
 - `/rstatus` — 檢查遠端系統狀態
 - **文件推送** — 配對時傳任何檔案給 bot → 自動傳到遠端電腦
+- **遠端專屬使用者** — 設定 `REMOTE_CHAT_IDS` 讓使用者只能透過遠端配對使用（擋掉本機指令）
+- **額度管理** — `allot` 插件管理每台遠端的速率限制與每週預算（僅管理員）
 
 ### 語音管線
 
@@ -159,10 +163,11 @@ Telegram 語音 → OGG → ffmpeg 16kHz WAV → Sherpa-ONNX (本地)
 
 ### 插件生態系
 
-19+ 內建插件，全部**零 AI 成本**（不消耗 token）：
+20+ 內建插件，全部**零 AI 成本**（不消耗 token）：
 
 | 插件 | 指令 | 功能 |
 |------|------|------|
+| Allot | `/allot` | 遠端額度管理（速率限制 + 每週預算，僅管理員） |
 | Browse | `/browse` | Chrome DevTools Protocol 瀏覽器自動化 |
 | Calc | `/calc` | 數學運算、日期計算、單位換算 |
 | Clip | `/save` `/recall` | 統一記憶路由（書籤/釘選/AI 記憶） |

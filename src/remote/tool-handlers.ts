@@ -379,6 +379,17 @@ export interface ToolDispatcher {
   dispatch(tool: string, args: Record<string, unknown>): Promise<string>
 }
 
+async function handleListProjects(baseDir: string): Promise<string> {
+  const entries = await readdir(baseDir, { withFileTypes: true })
+  const projects: string[] = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (entry.name.startsWith('.') || entry.name === 'node_modules') continue
+    projects.push(entry.name)
+  }
+  return JSON.stringify(projects)
+}
+
 export function createToolDispatcher(baseDir: string): ToolDispatcher {
   const validatePath = createPathValidator(baseDir)
 
@@ -395,6 +406,7 @@ export function createToolDispatcher(baseDir: string): ToolDispatcher {
         case 'remote_project_overview': return handleProjectOverview(args, validatePath, baseDir)
         case 'remote_fetch_file': return handleFetchFile(args, validatePath)
         case 'remote_push_file': return handlePushFile(args, validatePath)
+        case 'remote_list_projects': return handleListProjects(baseDir)
         default: throw new Error(`Unknown tool: ${tool}`)
       }
     },

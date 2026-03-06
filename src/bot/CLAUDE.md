@@ -43,6 +43,11 @@ Claude response → parse all directives
 3. **AI Memory** (`/save` → 🧠) — claude-mem external tool
 4. **Vault** (`/vault`) — message indexer (`../plugins/vault/`)
 
+## Allot Integration (remote quota)
+- `message-handler.ts` + `ordered-message-buffer.ts` — pre-enqueue gate via `getPluginModule('allot')?.tryReserve()`
+- `queue-processor.ts` — post-completion settle via `settle()`, 429 detection via `on429Detected()`
+- Only applies when `project.name === 'remote'` — local requests always pass
+
 ## Key Data Stores
 - `state.ts` — selected project, AI model, pairing per chat
 - `choice-store.ts` — inline button callback mapping
