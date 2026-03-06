@@ -42,8 +42,8 @@ const THROTTLE_MS = 300
 /** Minimum text change required to trigger update (chars) */
 const MIN_DELTA = 20
 
-/** Prefix shown during streaming to indicate the bot is replying */
-const DRAFT_PREFIX = '\u{270D}\u{FE0F} '
+/** Prefix shown during streaming to indicate the bot is thinking */
+const DRAFT_PREFIX = '\u{1F4AD} '
 
 /**
  * Check if a chat is private (DM) or group/channel

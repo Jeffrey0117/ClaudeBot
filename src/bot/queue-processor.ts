@@ -346,7 +346,8 @@ async function sendResponseChunks(
     )
     const { cleaned: draftDigestCleaned } = extractDigest(draftStripped)
     const draftCleaned = cleanMarkdown(draftDigestCleaned || draftStripped)
-    await finalizeDraft(ctx.telegram, ctx.item.chatId, draftCleaned || cleaned)
+    const botLabel = `[${deriveBotId()}]\n`
+    await finalizeDraft(ctx.telegram, ctx.item.chatId, botLabel + (draftCleaned || cleaned))
     ctx.draftActive = false
 
     // If there are choice buttons, send them separately
@@ -363,7 +364,8 @@ async function sendResponseChunks(
     }
   } else {
     // No draft: send message chunks as usual
-    const chunks = splitText(cleaned, 4096)
+    const botLabel = `[${deriveBotId()}]\n`
+    const chunks = splitText(botLabel + cleaned, 4096)
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]
       const isLast = i === chunks.length - 1
