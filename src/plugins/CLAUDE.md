@@ -22,7 +22,7 @@ export default plugin
 ```
 
 ## Current plugins
-browse, calc, clip, cost, dice, github, map, mcp, mdfix,
+allot, browse, calc, clip, cost, dice, github, map, mcp, mdfix,
 reminder, remote, scheduler, screenshot, search, stats,
 sysinfo, task, vault, write
 
@@ -41,6 +41,11 @@ Unified memory router — shows 3 inline buttons (📌 bookmark, 📎 pin, 🧠 
 ### vault (`/vault`)
 Silent message indexer. `index-store.ts` (metadata JSON), `message-indexer.ts` (onMessage hook).
 Features: search, inject (context recall), fwd, summary, tag, stats.
+
+### allot (`/allot`)
+Remote quota management — admin only. Dual-layer: rate limit (turns/5min sliding window) + weekly budget (turns/7day).
+Shared across all bot instances via `mainRepoPath()`. Auto-adaptive: +2 on clean windows, -10 on 429.
+Hooks into `message-handler.ts` (pre-enqueue gate) and `queue-processor.ts` (settle + 429 detection).
 
 ### stats (`/stats`)
 Git scanner across all projects + activity logger. Deduplicates worktrees by git common dir.

@@ -12,6 +12,7 @@ import { updateBotBio, pinProjectStatus } from '../bio-updater.js'
 import { recordActivity } from '../../plugins/stats/activity-logger.js'
 import { addText, clearBuffer } from '../ordered-message-buffer.js'
 import { getPairing } from '../../remote/pairing-store.js'
+import { getPluginModule } from '../../plugins/loader.js'
 import { detectParallelCandidate } from '../../utils/parallel-detector.js'
 import { getActiveJob } from '../parallel-store.js'
 import { isGitRepo } from '../../git/worktree.js'
@@ -159,10 +160,29 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
   // Remote pairing active — bypass project selection, use CWD as project
   const pairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId) : null
   if (!state.selectedProject && pairing?.connected) {
+    // Allot gate: check quota before enqueue (plugin may not be loaded)
+    const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
+    if (allotMod?.tryReserve) {
+      const check = (allotMod.tryReserve as (c: number, t: number | undefined) => { allowed: boolean; reason?: string; warningLevel?: number })(chatId, threadId)
+      if (!check.allowed) {
+        await ctx.reply(check.reason ?? '\u{23F3} \u{984D}\u{5EA6}\u{5DF2}\u{7528}\u{5B8C}')
+        return
+      }
+      if (check.warningLevel) {
+        const warnMsg = check.warningLevel >= 95
+          ? '\u{1F534} \u{672C}\u{9031}\u{984D}\u{5EA6}\u{5373}\u{5C07}\u{7528}\u{5B8C} (95%)'
+          : check.warningLevel >= 85
+            ? '\u{1F7E1} \u{672C}\u{9031}\u{984D}\u{5EA6}\u{4F7F}\u{7528}\u{5DF2}\u{9054} 85%'
+            : '\u{1F4CA} \u{672C}\u{9031}\u{984D}\u{5EA6}\u{4F7F}\u{7528}\u{5DF2}\u{9054} 70%'
+        ctx.reply(warnMsg).catch(() => {})
+      }
+    }
+
     const remoteProject = { name: 'remote', path: process.cwd() }
     const sessionId = getAISessionId(resolveBackend(state.ai.backend), remoteProject.path)
     enqueue({
       chatId,
+      threadId,
       prompt: replyQuote + text,
       project: remoteProject,
       ai: state.ai,

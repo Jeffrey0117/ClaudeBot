@@ -146,6 +146,9 @@ function handleProxyConnect(ws: WebSocket, code: string): void {
 function handleAgentMessage(_ws: WebSocket, code: string, msg: RelayInbound): void {
   // Route tool_result / tool_error to the ORIGINATING proxy only
   if (msg.type === 'tool_result' || msg.type === 'tool_error') {
+    // Check if this is a bot-initiated call first
+    if (tryRouteBotResult(msg as ToolCallResult | ToolCallError)) return
+
     const origins = requestOrigins.get(code)
     if (origins) {
       const originProxy = origins.get(msg.id)
@@ -155,6 +158,55 @@ function handleAgentMessage(_ws: WebSocket, code: string, msg: RelayInbound): vo
       }
     }
   }
+}
+
+/** Next request ID for bot-initiated tool calls */
+let nextBotRequestId = 900_000
+
+/** Pending bot-initiated tool call resolvers: requestId → resolve */
+const botPendingCalls = new Map<number, { resolve: (result: string) => void; timer: ReturnType<typeof setTimeout> }>()
+
+/**
+ * Call a tool on a remote agent directly from the bot (not via MCP proxy).
+ * Used for /projects, /chat, etc. on remote-only users.
+ */
+export function callAgentTool(
+  code: string,
+  tool: string,
+  args: Record<string, unknown>,
+  timeoutMs = 10_000,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const agent = agents.get(code)
+    if (!agent || agent.ws.readyState !== agent.ws.OPEN) {
+      reject(new Error('Agent not connected'))
+      return
+    }
+
+    const id = nextBotRequestId++
+    const timer = setTimeout(() => {
+      botPendingCalls.delete(id)
+      reject(new Error('Agent tool call timeout'))
+    }, timeoutMs)
+
+    botPendingCalls.set(id, { resolve, timer })
+
+    send(agent.ws, { type: 'tool_call', id, tool, args })
+  })
+}
+
+/** Route bot-initiated tool results (called from handleAgentMessage) */
+function tryRouteBotResult(msg: ToolCallResult | ToolCallError): boolean {
+  const pending = botPendingCalls.get(msg.id)
+  if (!pending) return false
+  clearTimeout(pending.timer)
+  botPendingCalls.delete(msg.id)
+  if (msg.type === 'tool_result') {
+    pending.resolve(msg.result)
+  } else {
+    pending.resolve(`Error: ${msg.error}`)
+  }
+  return true
 }
 
 export function startRelayServer(port: number): void {
