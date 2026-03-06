@@ -39,6 +39,9 @@ const THROTTLE_MS = 300
 /** Minimum text change required to trigger update (chars) */
 const MIN_DELTA = 20
 
+/** Prefix shown during streaming to indicate the bot is replying */
+const DRAFT_PREFIX = '\u{270D}\u{FE0F} '
+
 /**
  * Check if a chat is private (DM) or group/channel
  */
@@ -72,7 +75,7 @@ export async function startDraft(
     }
 
     // Send initial message that will be edited as content streams in
-    const displayText = stripCtxForDisplay(initialText) || '...'
+    const displayText = DRAFT_PREFIX + (stripCtxForDisplay(initialText) || '...')
     const result = await telegram.sendMessage(chatId, displayText, {
       parse_mode: 'Markdown',
     })
@@ -111,7 +114,7 @@ export async function updateDraft(
     return
   }
 
-  const displayText = stripCtxForDisplay(newText) || '...'
+  const displayText = DRAFT_PREFIX + (stripCtxForDisplay(newText) || '...')
 
   // Skip update if display text hasn't meaningfully changed after stripping
   if (displayText === state.lastText) return
