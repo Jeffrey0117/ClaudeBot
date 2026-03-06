@@ -23,6 +23,7 @@ export interface AllotConfig {
   readonly mode: 'auto' | 'manual'
   readonly rateBudget: number // turns per 5-min window (start: 10)
   readonly weeklyBudget: number // turns per week (start: 1500)
+  readonly ratioPercent: number // % of total budget allocated to ALL remotes (default: 50)
   readonly marginPercent: number // safety margin 0-50 (default: 10)
   readonly reserveAmount: number // turns to pre-reserve per request (default: 3)
   readonly consecutiveClean: number // consecutive clean windows (no 429)
@@ -57,6 +58,7 @@ export const DEFAULT_CONFIG: AllotConfig = {
   mode: 'auto',
   rateBudget: 10,
   weeklyBudget: 1500,
+  ratioPercent: 50,
   marginPercent: 10,
   reserveAmount: 3,
   consecutiveClean: 0,

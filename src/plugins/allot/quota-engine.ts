@@ -102,15 +102,17 @@ function formatRecovery(ms: number): string {
 /** Per-remote rate budget (turns per 5-min window) */
 export function perRemoteRateBudget(config: AllotConfig): number {
   const remoteCount = Math.max(1, countConnectedRemotes())
+  const ratio = (config.ratioPercent ?? 50) / 100
   const margin = 1 - config.marginPercent / 100
-  return Math.max(1, Math.floor((config.rateBudget / remoteCount) * margin))
+  return Math.max(1, Math.floor((config.rateBudget * ratio / remoteCount) * margin))
 }
 
 /** Per-remote weekly budget (turns per week) */
 export function perRemoteWeeklyBudget(config: AllotConfig): number {
   const remoteCount = Math.max(1, countConnectedRemotes())
+  const ratio = (config.ratioPercent ?? 50) / 100
   const margin = 1 - config.marginPercent / 100
-  return Math.max(1, Math.floor((config.weeklyBudget / remoteCount) * margin))
+  return Math.max(1, Math.floor((config.weeklyBudget * ratio / remoteCount) * margin))
 }
 
 /** Weekly usage percentage for a remote */

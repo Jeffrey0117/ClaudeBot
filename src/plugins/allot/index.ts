@@ -94,6 +94,17 @@ async function allotCommand(ctx: BotContext): Promise<void> {
       break
     }
 
+    case 'ratio': {
+      const r = parseInt(parts[1], 10)
+      if (isNaN(r) || r < 5 || r > 95) {
+        await ctx.reply('\u{26A0}\u{FE0F} \u{7528}\u{6CD5}: /allot ratio <5-95>')
+        break
+      }
+      updateConfig({ ratioPercent: r })
+      await ctx.reply(`\u{1F4B0} \u{9060}\u{7AEF}\u{4F54}\u{6BD4}\u{5DF2}\u{8A2D}\u{70BA} ${r}%\u{FF08}\u{672C}\u{6A5F} ${100 - r}%\u{FF09}`)
+      break
+    }
+
     case 'margin': {
       const m = parseInt(parts[1], 10)
       if (isNaN(m) || m < 0 || m > 50) {
@@ -129,6 +140,7 @@ async function allotCommand(ctx: BotContext): Promise<void> {
         + '`/allot` \u{2014} \u{6253}\u{958B}\u{9762}\u{677F}\n'
         + '`/allot on|off` \u{2014} \u{555F}\u{7528}/\u{505C}\u{7528}\n'
         + '`/allot auto` \u{2014} \u{81EA}\u{9069}\u{61C9}\u{6A21}\u{5F0F}\n'
+        + '`/allot ratio <5-95>` \u{2014} \u{9060}\u{7AEF}\u{4F54}\u{6BD4} %\n'
         + '`/allot set <N>` \u{2014} \u{8A2D}\u{5B9A} Rate \u{9810}\u{7B97}\n'
         + '`/allot weekly <N>` \u{2014} \u{8A2D}\u{5B9A}\u{6BCF}\u{9031}\u{9810}\u{7B97}\n'
         + '`/allot margin <0-50>` \u{2014} \u{908A}\u{969B}\u{767E}\u{5206}\u{6BD4}\n'
@@ -165,6 +177,12 @@ async function handleCallback(ctx: BotContext, data: string): Promise<boolean> {
       updateConfig({ mode: mode === 'auto' ? 'manual' : 'auto' })
       break
     }
+    case 'ratio_up':
+      updateConfig({ ratioPercent: Math.min(95, (getStore().load().config.ratioPercent ?? 50) + 10) })
+      break
+    case 'ratio_down':
+      updateConfig({ ratioPercent: Math.max(5, (getStore().load().config.ratioPercent ?? 50) - 10) })
+      break
     case 'rate_up':
       updateConfig({ rateBudget: getStore().load().config.rateBudget + 5 })
       break
