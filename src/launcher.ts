@@ -177,6 +177,9 @@ const crashHistory = new Map<string, number[]>()
 // Track which bots have successfully launched at least once (for respawn notifications)
 const hasLaunchedOnce = new Set<string>()
 
+// Track when each bot was spawned — watchdog skips bots still in startup grace period
+const spawnTimestamps = new Map<string, number>()
+
 function isCrashLooping(envFile: string): boolean {
   const now = Date.now()
   const history = crashHistory.get(envFile) ?? []
@@ -281,9 +284,6 @@ const HEARTBEAT_STALE_MS = 30_000
 const STARTUP_GRACE_MS = 60_000  // Don't check heartbeat until bot has had time to start
 const heartbeatDir = path.join(root, 'data', 'heartbeat')
 
-// Track when each bot was spawned — watchdog skips bots still in startup grace period
-const spawnTimestamps = new Map<string, number>()
-
 function startHealthCheck(): void {
   setInterval(() => {
     if (shuttingDown) return
@@ -300,6 +300,10 @@ function startHealthCheck(): void {
       try {
         const raw = readFileSync(hbPath, 'utf-8')
         const hb = JSON.parse(raw) as { updatedAt: number }
+
+        // Skip if heartbeat predates this spawn (leftover from previous run)
+        if (hb.updatedAt < spawnedAt) continue
+
         const staleMs = Date.now() - hb.updatedAt
 
         if (staleMs > HEARTBEAT_STALE_MS) {

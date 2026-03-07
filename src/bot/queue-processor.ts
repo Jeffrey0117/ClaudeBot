@@ -120,12 +120,10 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
     const pipeDirectives = parsePipeDirectives(rawAfterRun)
     const mcpDirectives = parseMcpDirectives(rawAfterRun)
 
-    // Execute @file, @confirm, @notify directives (these produce inline messages)
-    if (aiDirectives.length > 0) {
-      await executeDirectives(aiDirectives, ctx.item.chatId, ctx.telegram, ctx.item.project.path)
-    }
+    // NOTE: @file/@confirm/@notify are executed AFTER sendResponseChunks (below)
+    // so button messages appear below the response text, not above.
 
-    // Execute @pipe directives (CloudPipe integration)
+    // Execute @pipe directives (CloudPipe integration — before text processing)
     if (pipeDirectives.length > 0) {
       await executePipeDirectives(pipeDirectives, ctx.item.chatId, ctx.telegram)
     }
@@ -257,8 +255,15 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       console.error('[queue] cross-project dispatch error:', err)
     }
 
+    const hasConfirmDirective = aiDirectives.some((d) => d.type === 'confirm')
+
     if (responseText) {
-      await sendResponseChunks(ctx, responseText)
+      await sendResponseChunks(ctx, responseText, hasConfirmDirective)
+    }
+
+    // Execute @file/@confirm/@notify AFTER finalize so buttons appear below response
+    if (aiDirectives.length > 0) {
+      await executeDirectives(aiDirectives, ctx.item.chatId, ctx.telegram, ctx.item.project.path)
     }
 
     // Execute @cmd directives AFTER main text is sent,
@@ -303,7 +308,11 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
   }
 }
 
-async function sendResponseChunks(ctx: ProcessorContext, responseText: string): Promise<void> {
+async function sendResponseChunks(
+  ctx: ProcessorContext,
+  responseText: string,
+  hasConfirmDirective = false,
+): Promise<void> {
   // Wait for any pending startDraft to resolve before checking draftActive.
   // Without this, fast responses cause a race: onResult fires before startDraft
   // resolves, so draftActive is still false → sends a duplicate message.
@@ -315,7 +324,10 @@ async function sendResponseChunks(ctx: ProcessorContext, responseText: string): 
     ctx.draftStartPromise = null
   }
 
-  const choiceResult = detectChoices(responseText)
+  // Skip auto choice detection when @confirm directive exists (avoids duplicate buttons)
+  const choiceResult = hasConfirmDirective
+    ? { type: 'none' as const, choices: [] }
+    : detectChoices(responseText)
   let replyButtons: ReturnType<typeof Markup.inlineKeyboard> | undefined
 
   if (choiceResult.type === 'yesno') {
@@ -345,7 +357,8 @@ async function sendResponseChunks(ctx: ProcessorContext, responseText: string): 
     ))
     const { cleaned: draftDigestCleaned } = extractDigest(draftStripped)
     const draftCleaned = cleanMarkdown(draftDigestCleaned || draftStripped)
-    await finalizeDraft(ctx.telegram, ctx.item.chatId, draftCleaned || cleaned)
+    const botLabel = `[${deriveBotId()}]\n`
+    await finalizeDraft(ctx.telegram, ctx.item.chatId, botLabel + (draftCleaned || cleaned))
     ctx.draftActive = false
 
     // If there are choice buttons, send them separately
@@ -362,7 +375,8 @@ async function sendResponseChunks(ctx: ProcessorContext, responseText: string): 
     }
   } else {
     // No draft: send message chunks as usual
-    const chunks = splitText(cleaned, 4096)
+    const botLabel = `[${deriveBotId()}]\n`
+    const chunks = splitText(botLabel + cleaned, 4096)
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]
       const isLast = i === chunks.length - 1

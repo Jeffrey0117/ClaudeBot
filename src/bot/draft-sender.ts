@@ -2,11 +2,11 @@ import type { Telegraf } from 'telegraf'
 import type { BotContext } from '../types/context.js'
 
 /**
- * Strip [CTX]...[/CTX] blocks from streaming text before displaying in Telegram.
- * Handles both complete blocks and partial (mid-stream) blocks where only
- * the opening tag has arrived but the closing tag hasn't yet.
+ * Strip non-display content from streaming text before showing in Telegram.
+ * - [CTX]...[/CTX] blocks (complete and partial/mid-stream)
+ * - @file/@confirm/@notify directive lines (raw text user shouldn't see)
  */
-function stripCtxForDisplay(text: string): string {
+function stripForDisplay(text: string): string {
   // Strip complete [CTX]...[/CTX] blocks (with or without brackets)
   let result = text.replace(/\n?\[?CTX\]?\s*\n[\s\S]*?\n\s*\[?\/CTX\]?\s*$/g, '')
 
@@ -14,7 +14,10 @@ function stripCtxForDisplay(text: string): string {
   // e.g. "[CTX]\nstatus: working on..." or "CTX\nstatus:..."
   result = result.replace(/\n?\[?CTX\]?\s*\n(?:status:[\s\S]*)$/g, '')
 
-  return result.trimEnd()
+  // Strip @file/@confirm/@notify directive lines so raw text doesn't flash during streaming
+  result = result.replace(/^[ \t]*`?@(?:file|confirm|notify)[（(](.+)[)）]`?\s*$/gm, '')
+
+  return result.replace(/\n{3,}/g, '\n\n').trimEnd()
 }
 
 /**
@@ -38,6 +41,9 @@ const THROTTLE_MS = 300
 
 /** Minimum text change required to trigger update (chars) */
 const MIN_DELTA = 20
+
+/** Prefix shown during streaming to indicate the bot is thinking */
+const DRAFT_PREFIX = '\u{1F4AD} '
 
 /**
  * Check if a chat is private (DM) or group/channel
@@ -72,7 +78,7 @@ export async function startDraft(
     }
 
     // Send initial message that will be edited as content streams in
-    const displayText = stripCtxForDisplay(initialText) || '...'
+    const displayText = DRAFT_PREFIX + (stripForDisplay(initialText) || '...')
     const result = await telegram.sendMessage(chatId, displayText, {
       parse_mode: 'Markdown',
     })
@@ -111,7 +117,7 @@ export async function updateDraft(
     return
   }
 
-  const displayText = stripCtxForDisplay(newText) || '...'
+  const displayText = DRAFT_PREFIX + (stripForDisplay(newText) || '...')
 
   // Skip update if display text hasn't meaningfully changed after stripping
   if (displayText === state.lastText) return
