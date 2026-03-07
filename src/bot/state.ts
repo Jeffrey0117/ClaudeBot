@@ -12,6 +12,8 @@ const STATE_FILE = join(process.cwd(), '.user-states.json')
 interface UserState {
   selectedProject: ProjectInfo | null
   ai: AIModelSelection
+  /** Whether to stream text incrementally (draft mode). Default: false */
+  streamMode?: boolean
 }
 
 type PersistedStates = Record<string, UserState>
@@ -114,6 +116,18 @@ export function setUserAI(chatId: number, ai: AIModelSelection, threadId?: numbe
 /** Return all persisted user states for this bot instance (for restart notifications). */
 export function getActiveUserStates(): ReadonlyMap<string, Readonly<UserState>> {
   return userStates
+}
+
+export function getStreamMode(chatId: number, threadId?: number): boolean {
+  const state = getUserState(chatId, threadId)
+  return state.streamMode ?? false
+}
+
+export function setStreamMode(chatId: number, enabled: boolean, threadId?: number): void {
+  const key = sessionKey(chatId, threadId)
+  const state = getUserState(chatId, threadId)
+  userStates.set(key, { ...state, streamMode: enabled })
+  saveStates()
 }
 
 export function clearUserState(chatId: number, threadId?: number): void {

@@ -44,6 +44,7 @@ import { parallelCommand } from './commands/parallel.js'
 import { ctxCommand } from './commands/ctx.js'
 import { deepCommand } from './commands/deep.js'
 import { lastCommand } from './commands/last.js'
+import { streamCommand } from './commands/stream.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
@@ -210,6 +211,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['last3', lastCommand],
     ['last4', lastCommand],
     ['last5', lastCommand],
+    ['stream', streamCommand],
   ]
   for (const [name, handler] of coreEntries) {
     bot.command(name, handler)

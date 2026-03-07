@@ -35,6 +35,7 @@ import { extractDigest, setContext } from './context-digest-store.js'
 import { autoCommitAndPush } from '../utils/auto-commit.js'
 import { env } from '../config/env.js'
 import { startDraft, updateDraft, finalizeDraft, cancelDraft, hasDraft } from './draft-sender.js'
+import { getStreamMode } from './state.js'
 import path from 'node:path'
 
 const TIMEOUT_MS = 30 * 60 * 1000
@@ -669,9 +670,9 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
             emitResponseChunk(dashCmdId, delta, acc)
           }
 
-          // Stream to Telegram draft (private chat only)
+          // Stream to Telegram draft (private chat only, when stream mode enabled)
           // Uses draftText (never resets) so text grows across tool-use turns
-          if (!isDashboard) {
+          if (!isDashboard && getStreamMode(item.chatId)) {
             if (!ctx.draftActive && !ctx.draftStartPromise) {
               ctx.draftStartPromise = startDraft(telegram, item.chatId, ctx.draftText)
               const draftId = await ctx.draftStartPromise
