@@ -48,9 +48,9 @@ export type Directive = FileDirective | ConfirmDirective | NotifyDirective
 // --- Patterns ---
 
 const CODE_BLOCK_RE = /```[\s\S]*?```/g
-const FILE_PATTERN = /^[ \t]*`?@file[（(]([^)）]+)[)）]`?\s*$/gm
-const CONFIRM_PATTERN = /^[ \t]*`?@confirm[（(]([^)）]+)[)）]`?\s*$/gm
-const NOTIFY_PATTERN = /^[ \t]*`?@notify[（(]([^)）]+)[)）]`?\s*$/gm
+const FILE_PATTERN = /^[ \t]*`?@file[（(](.+)[)）]`?\s*$/gm
+const CONFIRM_PATTERN = /^[ \t]*`?@confirm[（(](.+)[)）]`?\s*$/gm
+const NOTIFY_PATTERN = /^[ \t]*`?@notify[（(](.+)[)）]`?\s*$/gm
 
 function withoutCodeBlocks(text: string): string {
   return text.replace(CODE_BLOCK_RE, '')
@@ -92,7 +92,7 @@ export function parseDirectives(text: string): readonly Directive[] {
 
 // --- Strip ---
 
-const ALL_DIRECTIVE_PATTERN = /^[ \t]*`?@(?:file|confirm|notify)[（(]([^)）]+)[)）]`?\s*$/gm
+const ALL_DIRECTIVE_PATTERN = /^[ \t]*`?@(?:file|confirm|notify)[（(](.+)[)）]`?\s*$/gm
 
 export function stripDirectives(text: string): string {
   return text
