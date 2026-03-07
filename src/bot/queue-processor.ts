@@ -12,6 +12,7 @@ import { parseCrossProjectTasks, stripRunDirectives } from '../utils/cross-proje
 import { parseCommandDirectives, stripCommandDirectives } from '../utils/command-executor.js'
 import { parseDirectives, executeDirectives, stripDirectives } from '../utils/directives.js'
 import { parsePipeDirectives, executePipeDirectives, stripPipeDirectives } from '../utils/pipe-executor.js'
+import { parseMcpDirectives, executeMcpDirectives, stripMcpDirectives } from '../utils/mcp-executor.js'
 import { createFakeContext } from '../utils/fake-context.js'
 import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand, getPluginModule } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
@@ -116,6 +117,7 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
     const cmdDirectives = parseCommandDirectives(rawAfterRun)
     const aiDirectives = parseDirectives(rawAfterRun)
     const pipeDirectives = parsePipeDirectives(rawAfterRun)
+    const mcpDirectives = parseMcpDirectives(rawAfterRun)
 
     // Execute @file, @confirm, @notify directives (these produce inline messages)
     if (aiDirectives.length > 0) {
@@ -127,7 +129,12 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       await executePipeDirectives(pipeDirectives, ctx.item.chatId, ctx.telegram)
     }
 
-    // Strip all directives (@cmd + @file/@confirm/@notify + @pipe) before output hooks
+    // Execute @mcp directives (MCP tool calls)
+    if (mcpDirectives.length > 0) {
+      await executeMcpDirectives(mcpDirectives, ctx.item.chatId, ctx.telegram)
+    }
+
+    // Strip all directives (@cmd + @file/@confirm/@notify + @pipe + @mcp) before output hooks
     // NOTE: @cmd is stripped here but executed AFTER main text is sent (below)
     const afterCmdStrip = cmdDirectives.length > 0
       ? stripCommandDirectives(rawAfterRun)
@@ -135,9 +142,12 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
     const afterAiStrip = aiDirectives.length > 0
       ? stripDirectives(afterCmdStrip)
       : afterCmdStrip
-    const textForHooks = pipeDirectives.length > 0
+    const afterPipeStrip = pipeDirectives.length > 0
       ? stripPipeDirectives(afterAiStrip)
       : afterAiStrip
+    const textForHooks = mcpDirectives.length > 0
+      ? stripMcpDirectives(afterPipeStrip)
+      : afterPipeStrip
 
     const hookResult = await dispatchOutputHooks(textForHooks, {
       projectPath: ctx.item.project.path,
@@ -329,9 +339,9 @@ async function sendResponseChunks(ctx: ProcessorContext, responseText: string): 
   const hadDraft = ctx.draftActive
   if (hadDraft) {
     // draftText has ALL turns — strip directives + CTX so user sees full process
-    const draftStripped = stripPipeDirectives(
+    const draftStripped = stripMcpDirectives(stripPipeDirectives(
       stripDirectives(stripCommandDirectives(stripRunDirectives(ctx.draftText))),
-    )
+    ))
     const { cleaned: draftDigestCleaned } = extractDigest(draftStripped)
     const draftCleaned = cleanMarkdown(draftDigestCleaned || draftStripped)
     await finalizeDraft(ctx.telegram, ctx.item.chatId, draftCleaned || cleaned)

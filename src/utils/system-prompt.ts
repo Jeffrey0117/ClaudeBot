@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { getPluginModule } from '../plugins/loader.js'
 
 const PROMPT_PATH = resolve('data/system-prompt.md')
 const CTX_SPEC_PATH = resolve('data/ctx-spec.md')
@@ -76,7 +77,39 @@ export function getSystemPrompt(): string {
     parts.push(subagent)
   }
 
+  // Inject available MCP tools so Claude knows what @mcp can call
+  const mcpToolList = getMcpToolList()
+  if (mcpToolList) {
+    parts.push(mcpToolList)
+  }
+
   return parts.join('\n\n')
+}
+
+/** Build MCP tool list for system prompt injection. */
+function getMcpToolList(): string {
+  const mcpMod = getPluginModule('mcp') as
+    | { getAllTools?: () => ReadonlyArray<{ name: string; description: string }> }
+    | undefined
+
+  if (!mcpMod?.getAllTools) return ''
+
+  const tools = mcpMod.getAllTools()
+  if (tools.length === 0) return ''
+
+  const lines = [
+    '## MCP Tools（可用 @mcp 指令呼叫）',
+    '',
+    '你可以用 `@mcp(toolName, {"arg": "value"})` 直接呼叫以下工具：',
+    '',
+  ]
+
+  for (const t of tools) {
+    const desc = t.description ? ` — ${t.description.slice(0, 80)}` : ''
+    lines.push(`- \`${t.name}\`${desc}`)
+  }
+
+  return lines.join('\n')
 }
 
 /** Reload both system prompt and CTX spec from disk. */

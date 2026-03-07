@@ -210,6 +210,42 @@ async function cleanup(): Promise<void> {
   servers.clear()
 }
 
+// --- Public API (for @mcp directive via getPluginModule) ---
+
+export { ensureConnected, findTool }
+
+export function getAllTools(): readonly McpTool[] {
+  return [...servers.values()].flatMap((s) => s.tools)
+}
+
+export async function callTool(
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<string> {
+  await ensureConnected()
+
+  const match = findTool(toolName)
+  if (!match) {
+    const allTools = [...servers.values()]
+      .flatMap((s) => s.tools.map((t) => t.name))
+    throw new Error(
+      `找不到工具 \`${toolName}\`\n可用: ${allTools.join(', ') || '(無)'}`,
+    )
+  }
+
+  const result = await match.server.client.callTool({
+    name: toolName,
+    arguments: args,
+  })
+
+  const content = (result.content as Array<{ type: string; text?: string }>)
+    .filter((c) => c.type === 'text')
+    .map((c) => c.text ?? '')
+    .join('\n')
+
+  return content || '(空結果)'
+}
+
 // --- Plugin export ---
 
 const mcpPlugin: Plugin = {

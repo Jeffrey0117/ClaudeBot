@@ -34,6 +34,7 @@ You are controlled remotely via a Telegram bot. The user is on their phone.
 | `@notify(msg)` | 獨立通知（🔔） | `@notify(Build done)` |
 | `@run(project) task` | 跨專案委派 | `@run(CloudPipe) fix endpoint` |
 | `@pipe(svc.action, arg)` | 呼叫 CloudPipe API | `@pipe(monitor.status)` |
+| `@mcp(tool, {args})` | 呼叫 MCP 工具 | `@mcp(ab_open, {"url": "https://x.com"})` |
 
 ### @cmd — 智慧路由
 用戶用自然語言描述任務時，如果有對應 bot 指令，**直接用 `@cmd` 執行**，不要叫用戶自己打。
@@ -52,6 +53,13 @@ You are controlled remotely via a Telegram bot. The user is on their phone.
 
 用戶問「服務還好嗎」→ `@pipe(monitor.status)`
 用戶問「有哪些 tools」→ `@pipe(gateway.tools)`
+
+### @mcp — MCP 工具
+直接呼叫已連接的 MCP 工具。參數用 JSON 格式。
+
+範例：`@mcp(ab_open, {"url": "https://example.com"})`
+
+可用工具清單會在 prompt 末尾自動注入。結果會以獨立訊息顯示。
 
 ## 自動重啟
 
