@@ -421,7 +421,7 @@ function runAB(...args: readonly string[]): Promise<string> {
     execFile(
       'agent-browser',
       args as string[],
-      { timeout: AB_TIMEOUT_MS, shell: false, windowsHide: true },
+      { timeout: AB_TIMEOUT_MS, shell: true, windowsHide: true },
       (error, stdout, stderr) => {
         if (error) {
           const msg = stderr?.trim() || error.message
@@ -438,7 +438,7 @@ let abAvailable: boolean | null = null
 
 function checkBrowserAvailable(): Promise<boolean> {
   return new Promise((res) => {
-    execFile('agent-browser', ['--version'], { timeout: 3000, windowsHide: true }, (err) => res(!err))
+    execFile('agent-browser', ['--version'], { timeout: 3000, windowsHide: true, shell: true }, (err) => res(!err))
   })
 }
 
