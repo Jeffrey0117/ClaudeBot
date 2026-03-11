@@ -158,7 +158,7 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
   }
 
   // Remote pairing active — takes priority over local project selection
-  const pairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId) : null
+  const pairing = getPairing(chatId, threadId)
   if (pairing?.connected) {
     // Allot gate: check quota before enqueue (plugin may not be loaded)
     const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
