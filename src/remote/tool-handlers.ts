@@ -443,7 +443,9 @@ function checkBrowserAvailable(): Promise<boolean> {
 }
 
 async function ensureBrowserAvailable(): Promise<void> {
-  if (abAvailable === null) abAvailable = await checkBrowserAvailable()
+  // Only cache success — re-check every time if previously unavailable
+  // so that installing via remote_execute_command takes effect immediately
+  if (abAvailable !== true) abAvailable = await checkBrowserAvailable()
   if (!abAvailable) {
     throw new Error(
       'agent-browser is not installed on this machine. ' +
