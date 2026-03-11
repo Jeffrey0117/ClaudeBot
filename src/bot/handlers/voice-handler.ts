@@ -23,6 +23,7 @@ import ffmpegPath from 'ffmpeg-static'
 import { env } from '../../config/env.js'
 import { getAsrMode, consumeAsrMode } from '../asr-store.js'
 import { addVoice, getVoiceActive } from '../ordered-message-buffer.js'
+import { extractReplyQuote } from './reply-quote.js'
 import { telegramFetch } from '../../utils/telegram-fetch.js'
 import { getPairing } from '../../remote/pairing-store.js'
 
@@ -248,13 +249,15 @@ export async function voiceHandler(ctx: BotContext): Promise<void> {
   const state = getUserState(chatId, threadId)
   if (!state.selectedProject && !getPairing(chatId, threadId)?.connected) return
 
+  const replyQuote = await extractReplyQuote(ctx)
+
   const voiceActive = getVoiceActive(chatId, threadId)
   const ackText = voiceActive === 0
     ? '🎙️ 處理中...'
     : `🎙️ 已收到，前面 ${voiceActive} 條語音處理中`
   const ackMsg = await ctx.reply(ackText)
 
-  const resolveVoice = addVoice(chatId, messageId, threadId)
+  const resolveVoice = addVoice(chatId, messageId, threadId, replyQuote)
   const fileId = message.voice.file_id
   const { telegram } = ctx
 

@@ -7,6 +7,7 @@ import { getAISessionId } from '../../ai/session-store.js'
 import { enqueue, isProcessing } from '../../claude/queue.js'
 import { cancelAnyRunning } from '../../ai/registry.js'
 import { transcribeVoiceFile } from './voice-handler.js'
+import { extractReplyQuote } from './reply-quote.js'
 import { scanProjects, resolveWorktreePath } from '../../config/projects.js'
 import { updateBotBio, pinProjectStatus } from '../bio-updater.js'
 import { recordActivity } from '../../plugins/stats/activity-logger.js'
@@ -63,31 +64,7 @@ function extractMentionText(ctx: BotContext, rawText: string): string | null {
   return (before + after).trim()
 }
 
-async function extractReplyQuote(ctx: BotContext): Promise<string> {
-  const reply = ctx.message && 'reply_to_message' in ctx.message
-    ? ctx.message.reply_to_message
-    : undefined
-  if (!reply) return ''
-
-  // Text or caption
-  const replyText = reply && 'text' in reply ? reply.text : ''
-  const caption = reply && 'caption' in reply ? reply.caption : ''
-  const textContent = replyText || caption || ''
-
-  if (textContent) {
-    return `> [引用訊息]\n> ${textContent.split('\n').join('\n> ')}\n\n`
-  }
-
-  // Voice message — transcribe it
-  if ('voice' in reply && reply.voice) {
-    const voiceResult = await transcribeVoiceFile(reply.voice.file_id, ctx.telegram)
-    if (voiceResult.text) {
-      return `> [引用語音]\n> ${voiceResult.text.split('\n').join('\n> ')}\n\n`
-    }
-  }
-
-  return ''
-}
+// extractReplyQuote moved to reply-quote.ts to avoid circular imports
 
 /**
  * Detect if user's message mentions a known project name.

@@ -152,13 +152,14 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
     }
 
     // Extract [CTX] digest and strip from display text
+    // NOTE: setContext() is deferred until AFTER @cmd execution (below),
+    // so @cmd(/ctx) can still read the PREVIOUS digest, not this response's.
     const { digest, cleaned: digestCleaned } = hookedText
       ? extractDigest(hookedText)
       : { digest: null, cleaned: '' }
 
     if (hookedText) {
       setLastResponse(ctx.item.project.path, digestCleaned || hookedText)
-      setContext(ctx.item.project.path, digestCleaned || hookedText, digest)
     }
 
     const responseText = digest !== null ? digestCleaned : hookedText
@@ -288,6 +289,12 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
           `⚠️ @cmd(${cmd.command}) 失敗: ${msg}`
         ).catch(() => {})
       }
+    }
+
+    // Store context digest AFTER @cmd execution, so @cmd(/ctx) reads
+    // the PREVIOUS response's digest instead of the current one
+    if (hookedText) {
+      setContext(ctx.item.project.path, digestCleaned || hookedText, digest)
     }
 
     ctx.done()

@@ -284,6 +284,7 @@ export function addVoice(
   chatId: number,
   messageId: number,
   threadId: number | undefined,
+  replyQuote = '',
 ): (text: string | null) => void {
   const key = bufferKey(chatId, threadId)
   const buf = getOrCreate(key)
@@ -296,7 +297,7 @@ export function addVoice(
     timestamp: Date.now(),
     status: 'pending',
     text: null,
-    replyQuote: '',
+    replyQuote,
   })
 
   return (text: string | null) => {
