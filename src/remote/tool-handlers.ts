@@ -445,7 +445,10 @@ function checkBrowserAvailable(): Promise<boolean> {
 async function ensureBrowserAvailable(): Promise<void> {
   if (abAvailable === null) abAvailable = await checkBrowserAvailable()
   if (!abAvailable) {
-    throw new Error('agent-browser not installed on remote. Install: npm i -g agent-browser')
+    throw new Error(
+      'agent-browser is not installed on this machine. ' +
+      'Use remote_execute_command to install it: npm i -g agent-browser — then retry the browser operation.',
+    )
   }
 }
 

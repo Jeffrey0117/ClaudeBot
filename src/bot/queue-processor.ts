@@ -357,12 +357,12 @@ async function sendResponseChunks(
     await finalizeDraft(ctx.telegram, ctx.item.chatId, botLabel + (draftCleaned || cleaned))
     ctx.draftActive = false
 
-    // If there are choice buttons, send them separately
+    // If there are choice buttons, send them separately (draft can't attach buttons)
     if (replyButtons) {
       try {
         await ctx.telegram.sendMessage(
           ctx.item.chatId,
-          '請選擇：',
+          '\u200B', // invisible character — question is already in the response above
           { ...replyButtons }
         )
       } catch {
