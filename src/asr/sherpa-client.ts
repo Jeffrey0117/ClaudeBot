@@ -17,6 +17,43 @@ import { env } from '../config/env.js'
 
 const TIMEOUT_MS = 60_000
 
+/* ── Auto-restart crash loop protection ── */
+const MAX_CRASHES = 3
+const CRASH_WINDOW_MS = 60_000
+const RESTART_DELAY_MS = 2_000
+const crashTimestamps: number[] = []
+let restartTimer: ReturnType<typeof setTimeout> | null = null
+let gavUp = false
+
+function isCrashLooping(): boolean {
+  const now = Date.now()
+  // keep only recent crashes within window
+  while (crashTimestamps.length > 0 && now - crashTimestamps[0] > CRASH_WINDOW_MS) {
+    crashTimestamps.shift()
+  }
+  return crashTimestamps.length >= MAX_CRASHES
+}
+
+function scheduleRestart(reason: string): void {
+  if (restartTimer || gavUp) return
+  crashTimestamps.push(Date.now())
+  if (isCrashLooping()) {
+    gavUp = true
+    console.error(`[sherpa] crash loop detected (${MAX_CRASHES}x in ${CRASH_WINDOW_MS / 1000}s) — giving up auto-restart`)
+    return
+  }
+  console.error(`[sherpa] ${reason}, restarting in ${RESTART_DELAY_MS / 1000}s...`)
+  restartTimer = setTimeout(() => {
+    restartTimer = null
+    try {
+      ensureProcess()
+      console.error('[sherpa] auto-restart successful')
+    } catch (err) {
+      console.error('[sherpa] auto-restart failed:', err instanceof Error ? err.message : err)
+    }
+  }, RESTART_DELAY_MS)
+}
+
 interface SherpaResponse {
   readonly success: boolean
   readonly text?: string
@@ -92,6 +129,7 @@ function ensureProcess(): void {
     for (const queued of commandQueue.splice(0)) {
       queued.reject(new Error(`Sherpa 啟動失敗: ${err.message}`))
     }
+    scheduleRestart(`spawn error: ${err.message}`)
   })
 
   rl = createInterface({ input: proc.stdout! })
@@ -123,7 +161,7 @@ function ensureProcess(): void {
     drainQueue()
   })
 
-  proc.on('exit', () => {
+  proc.on('exit', (code) => {
     proc = null
     rl = null
     if (pending) {
@@ -132,10 +170,10 @@ function ensureProcess(): void {
       clearTimeout(timer)
       reject(new Error('Sherpa process exited unexpectedly'))
     }
-    // Reject all queued commands — process is gone
     for (const queued of commandQueue.splice(0)) {
       queued.reject(new Error('Sherpa process exited unexpectedly'))
     }
+    scheduleRestart(`process exited with code ${code ?? 'unknown'}`)
   })
 }
 
@@ -222,12 +260,29 @@ export function isSherpaAvailable(): boolean {
 export function warmupSherpa(): void {
   try {
     ensureProcess()
-  } catch {
-    // ignore — will retry on first voice message
+    console.error('[sherpa] warmup OK — process spawned')
+  } catch (err) {
+    console.error('[sherpa] warmup FAILED:', err instanceof Error ? err.message : err)
+  }
+}
+
+export function getSherpaStatus(): {
+  readonly running: boolean
+  readonly crashed: boolean
+  readonly recentCrashes: number
+} {
+  return {
+    running: proc !== null,
+    crashed: gavUp,
+    recentCrashes: crashTimestamps.length,
   }
 }
 
 export function shutdownSherpa(): void {
+  if (restartTimer) {
+    clearTimeout(restartTimer)
+    restartTimer = null
+  }
   if (!proc) return
   try {
     proc.stdin!.write(JSON.stringify({ action: 'exit' }) + '\n')
@@ -237,4 +292,11 @@ export function shutdownSherpa(): void {
   proc.kill()
   proc = null
   rl = null
+}
+
+/** Reset crash loop state — allows auto-restart after manual intervention. */
+export function resetSherpa(): void {
+  shutdownSherpa()
+  crashTimestamps.length = 0
+  gavUp = false
 }
