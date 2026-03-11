@@ -339,6 +339,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {},
       },
     },
+    {
+      name: 'ab_connect_browser',
+      description:
+        'Connect agent-browser to the user\'s Chrome (with login state/cookies). ' +
+        'Kills Chrome and restarts it with CDP debugging port. ' +
+        'MUST call this before operating on sites that require login (Gmail, GitHub, etc.). ' +
+        'After this, all ab_* tools will control the user\'s actual Chrome.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
   ],
 }))
 
@@ -349,6 +361,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   // Timeout: browser ops get 45s, execute_command gets custom, others default
   const customTimeout = name === 'remote_execute_command' && a.timeout
     ? Math.min(Number(a.timeout) + 5_000, 305_000) // agent timeout + 5s buffer
+    : name === 'ab_connect_browser' ? 25_000
     : name.startsWith('ab_') ? 45_000
     : undefined
 

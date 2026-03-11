@@ -164,6 +164,7 @@ export function runClaude(options: RunOptions): void {
         `\n` +
         (env.MCP_AGENT_BROWSER
           ? `瀏覽器操作（遠端機器）：\n` +
+            `- ab_connect_browser(): 【重要】連接使用者的 Chrome（帶登入狀態）。操作需要登入的網站前必須先呼叫！\n` +
             `- ab_open(url): 開啟網頁\n` +
             `- ab_snapshot(): 取得頁面元素清單（互動元素 ref）\n` +
             `- ab_click(ref): 點擊元素\n` +
@@ -172,6 +173,11 @@ export function runClaude(options: RunOptions): void {
             `- ab_screenshot(): 截圖\n` +
             `- ab_back(): 回上一頁\n` +
             `- ab_get_url(): 取得當前網址\n` +
+            `\n` +
+            `瀏覽器規則：\n` +
+            `1. 需要登入的網站（Gmail、GitHub 等）→ 先 ab_connect_browser()，再 ab_open()\n` +
+            `2. 不需要登入的網站 → 直接 ab_open()，會用獨立瀏覽器\n` +
+            `3. ab_connect_browser 會關閉再重啟 Chrome，使用者的 Chrome 會暫時關閉\n` +
             `\n`
           : '') +
         `⚠️ 自我修改例外：\n` +

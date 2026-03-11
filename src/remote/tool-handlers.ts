@@ -395,6 +395,18 @@ async function handleListProjects(baseDir: string): Promise<string> {
 // --- Agent-Browser helpers (N-side) ---
 
 const AB_TIMEOUT_MS = 30_000
+const CDP_PORT = 9222
+const CDP_CHECK_URL = `http://localhost:${CDP_PORT}/json/version`
+
+/** Check if Chrome is listening on CDP port */
+async function isCdpAvailable(): Promise<boolean> {
+  try {
+    const res = await fetch(CDP_CHECK_URL, { signal: AbortSignal.timeout(2000) })
+    return res.ok
+  } catch {
+    return false
+  }
+}
 
 const BLOCKED_URL_RE =
   /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|\[::1\]|0\.0\.0\.0)/i
@@ -416,11 +428,15 @@ function validateUrl(url: string): void {
   }
 }
 
-function runAB(...args: readonly string[]): Promise<string> {
+/** Run agent-browser CLI. Auto-prepends --cdp flag when Chrome CDP is available. */
+async function runAB(...args: readonly string[]): Promise<string> {
+  const cdp = await isCdpAvailable()
+  const finalArgs = cdp ? ['--cdp', String(CDP_PORT), ...args] : [...args]
+
   return new Promise((resolve, reject) => {
     execFile(
       'agent-browser',
-      args as string[],
+      finalArgs,
       { timeout: AB_TIMEOUT_MS, shell: true, windowsHide: true },
       (error, stdout, stderr) => {
         if (error) {
@@ -525,6 +541,83 @@ async function handleBrowserGetUrl(): Promise<string> {
   return await runAB('get', 'url')
 }
 
+/**
+ * Kill Chrome and restart with CDP debugging port.
+ * After this, all ab_* tools will auto-connect to user's Chrome (with cookies/login).
+ */
+async function handleBrowserConnect(): Promise<string> {
+  await ensureBrowserAvailable()
+
+  // Already connected?
+  if (await isCdpAvailable()) {
+    return `CDP already available on port ${CDP_PORT}. All ab_* tools will use your Chrome with login state.`
+  }
+
+  // Find Chrome executable path
+  const chromePaths = IS_WIN
+    ? [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        `${homedir()}\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe`,
+      ]
+    : [
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      ]
+
+  let chromePath = ''
+  for (const p of chromePaths) {
+    try {
+      await stat(p)
+      chromePath = p
+      break
+    } catch { /* not found, try next */ }
+  }
+
+  if (!chromePath) {
+    throw new Error('Chrome not found. Searched: ' + chromePaths.join(', '))
+  }
+
+  // Kill existing Chrome
+  if (IS_WIN) {
+    await new Promise<void>((res) => {
+      exec('taskkill /F /IM chrome.exe', { windowsHide: true }, () => res())
+    })
+  } else {
+    await new Promise<void>((res) => {
+      exec('pkill -f chrome', { windowsHide: true }, () => res())
+    })
+  }
+
+  // Wait for profile lock to release
+  await new Promise((res) => setTimeout(res, 1500))
+
+  // Restart Chrome with CDP port
+  const chromeArgs = [`--remote-debugging-port=${CDP_PORT}`]
+  const child = spawn(`"${chromePath}"`, chromeArgs, {
+    detached: true,
+    stdio: 'ignore',
+    shell: true,
+    windowsHide: true,
+  })
+  child.unref()
+
+  // Poll until CDP is ready (max 10s)
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    await new Promise((res) => setTimeout(res, 500))
+    if (await isCdpAvailable()) {
+      return (
+        `Chrome restarted with CDP on port ${CDP_PORT}. ` +
+        `All ab_* tools will now use your Chrome with login state (cookies, sessions).`
+      )
+    }
+  }
+
+  throw new Error(`Chrome started but CDP port ${CDP_PORT} not responding after 10s.`)
+}
+
 export function createToolDispatcher(baseDir: string): ToolDispatcher {
   const validatePath = createPathValidator(baseDir)
 
@@ -550,6 +643,7 @@ export function createToolDispatcher(baseDir: string): ToolDispatcher {
         case 'ab_screenshot': return handleBrowserScreenshot()
         case 'ab_back': return handleBrowserBack()
         case 'ab_get_url': return handleBrowserGetUrl()
+        case 'ab_connect_browser': return handleBrowserConnect()
         default: throw new Error(`Unknown tool: ${tool}`)
       }
     },
