@@ -286,7 +286,9 @@ npx claudebot-app
 One command — downloads, installs, runs setup wizard, starts the bot.
 
 > **Prerequisites:** Node.js 20+, [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) (logged in).
-> Optional: Gemini CLI, ffmpeg (voice), Python 3.11+ (punctuation).
+> Optional: Gemini CLI, Python 3.11+ + [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (voice recognition).
+>
+> ffmpeg is **bundled** — no separate install needed.
 
 <details>
 <summary>Manual install</summary>
@@ -296,7 +298,7 @@ git clone https://github.com/Jeffrey0117/ClaudeBot.git
 cd ClaudeBot
 npm install
 npm run setup    # interactive wizard — creates .env
-npm run dev
+npm run dev      # or double-click start.bat on Windows
 ```
 
 </details>
