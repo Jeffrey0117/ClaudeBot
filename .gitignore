@@ -8,7 +8,6 @@ dist/
 SESSION_SUMMARY.txt
 hotwords.txt
 plan.md
-start.bat
 *.png
 !docs/assets/images/*.png
 gemini-*.txt
