@@ -259,7 +259,9 @@ npx claudebot-app
 一行搞定 — 自動下載、安裝依賴、跑設定精靈、啟動 bot。
 
 > **前置需求：** Node.js 20+、[Claude CLI](https://docs.anthropic.com/en/docs/claude-code)（已登入）。
-> 選裝：Gemini CLI、ffmpeg（語音）、Python 3.11+（標點修正）。
+> 選裝：Gemini CLI、Python 3.11+ + [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（語音辨識）。
+>
+> ffmpeg 已**內建**，不需另外安裝。
 
 <details>
 <summary>手動安裝</summary>
@@ -269,7 +271,7 @@ git clone https://github.com/Jeffrey0117/ClaudeBot.git
 cd ClaudeBot
 npm install
 npm run setup    # 互動式引導 — 自動建立 .env
-npm run dev
+npm run dev      # 或在 Windows 雙擊 start.bat
 ```
 
 </details>
