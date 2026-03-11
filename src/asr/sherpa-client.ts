@@ -10,12 +10,109 @@
  */
 
 import { spawn, execSync, type ChildProcess } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { createInterface, type Interface } from 'node:readline'
 import { join } from 'node:path'
 import { env } from '../config/env.js'
 
 const TIMEOUT_MS = 60_000
+
+/** Try running a command — returns true if it exits successfully. */
+function canRun(cmd: string, args: readonly string[]): boolean {
+  try {
+    execSync(`"${cmd}" ${args.join(' ')}`, { stdio: 'pipe', timeout: 5_000 })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Resolve python executable — works across all install methods and platforms. */
+function resolvePython(): string {
+  // 1. python in PATH (most common case)
+  if (canRun('python', ['--version'])) return 'python'
+
+  // 2. python3 (Linux/Mac where only python3 exists)
+  if (canRun('python3', ['--version'])) return 'python3'
+
+  if (process.platform !== 'win32') return 'python'
+
+  // 3. Windows py launcher (installed by default, usually in PATH)
+  if (canRun('py', ['-3', '--version'])) return 'py'
+
+  // 4. Windows standard install: %LOCALAPPDATA%\Programs\Python\PythonXXX\
+  const localAppData = process.env.LOCALAPPDATA ?? ''
+  if (localAppData) {
+    const pythonDir = join(localAppData, 'Programs', 'Python')
+    if (existsSync(pythonDir)) {
+      const versions = readdirSync(pythonDir)
+        .filter((d: string) => d.startsWith('Python'))
+        .sort()
+        .reverse()
+      for (const ver of versions) {
+        const exe = join(pythonDir, ver, 'python.exe')
+        if (existsSync(exe)) return exe
+      }
+    }
+  }
+
+  // 5. Microsoft Store: %LOCALAPPDATA%\Microsoft\WindowsApps\
+  if (localAppData) {
+    const storePython = join(localAppData, 'Microsoft', 'WindowsApps', 'python.exe')
+    if (existsSync(storePython)) return storePython
+  }
+
+  // 6. Anaconda / Miniconda
+  const home = process.env.USERPROFILE ?? ''
+  if (home) {
+    for (const dir of ['anaconda3', 'miniconda3', 'Anaconda3', 'Miniconda3']) {
+      const exe = join(home, dir, 'python.exe')
+      if (existsSync(exe)) return exe
+    }
+  }
+
+  console.error('[sherpa] WARNING: python not found — voice recognition will fail')
+  return 'python'
+}
+
+export const PYTHON_EXE = resolvePython()
+
+/* ── Auto-restart crash loop protection ── */
+const MAX_CRASHES = 3
+const CRASH_WINDOW_MS = 60_000
+const RESTART_DELAY_MS = 2_000
+const crashTimestamps: number[] = []
+let restartTimer: ReturnType<typeof setTimeout> | null = null
+let gavUp = false
+
+function isCrashLooping(): boolean {
+  const now = Date.now()
+  // keep only recent crashes within window
+  while (crashTimestamps.length > 0 && now - crashTimestamps[0] > CRASH_WINDOW_MS) {
+    crashTimestamps.shift()
+  }
+  return crashTimestamps.length >= MAX_CRASHES
+}
+
+function scheduleRestart(reason: string): void {
+  if (restartTimer || gavUp) return
+  crashTimestamps.push(Date.now())
+  if (isCrashLooping()) {
+    gavUp = true
+    console.error(`[sherpa] crash loop detected (${MAX_CRASHES}x in ${CRASH_WINDOW_MS / 1000}s) — giving up auto-restart`)
+    return
+  }
+  console.error(`[sherpa] ${reason}, restarting in ${RESTART_DELAY_MS / 1000}s...`)
+  restartTimer = setTimeout(() => {
+    restartTimer = null
+    try {
+      ensureProcess()
+      console.error('[sherpa] auto-restart successful')
+    } catch (err) {
+      console.error('[sherpa] auto-restart failed:', err instanceof Error ? err.message : err)
+    }
+  }, RESTART_DELAY_MS)
+}
 
 interface SherpaResponse {
   readonly success: boolean
@@ -73,7 +170,8 @@ function ensureProcess(): void {
   const serverPath = resolveServerPath()
 
   // --speed 2: fast processing, np.interp resampling + Gemini LLM fixes errors
-  proc = spawn('python', [serverPath, '--speed', '2'], {
+  console.error(`[sherpa] spawning: ${PYTHON_EXE} ${serverPath} --speed 2`)
+  proc = spawn(PYTHON_EXE, [serverPath, '--speed', '2'], {
     shell: false,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
@@ -92,6 +190,7 @@ function ensureProcess(): void {
     for (const queued of commandQueue.splice(0)) {
       queued.reject(new Error(`Sherpa failed to start: ${err.message}`))
     }
+    scheduleRestart(`spawn error: ${err.message}`)
   })
 
   rl = createInterface({ input: proc.stdout! })
@@ -123,7 +222,7 @@ function ensureProcess(): void {
     drainQueue()
   })
 
-  proc.on('exit', () => {
+  proc.on('exit', (code) => {
     proc = null
     rl = null
     if (pending) {
@@ -132,10 +231,10 @@ function ensureProcess(): void {
       clearTimeout(timer)
       reject(new Error('Sherpa process exited unexpectedly'))
     }
-    // Reject all queued commands — process is gone
     for (const queued of commandQueue.splice(0)) {
       queued.reject(new Error('Sherpa process exited unexpectedly'))
     }
+    scheduleRestart(`process exited with code ${code ?? 'unknown'}`)
   })
 }
 
@@ -222,12 +321,29 @@ export function isSherpaAvailable(): boolean {
 export function warmupSherpa(): void {
   try {
     ensureProcess()
-  } catch {
-    // ignore — will retry on first voice message
+    console.error('[sherpa] warmup OK — process spawned')
+  } catch (err) {
+    console.error('[sherpa] warmup FAILED:', err instanceof Error ? err.message : err)
+  }
+}
+
+export function getSherpaStatus(): {
+  readonly running: boolean
+  readonly crashed: boolean
+  readonly recentCrashes: number
+} {
+  return {
+    running: proc !== null,
+    crashed: gavUp,
+    recentCrashes: crashTimestamps.length,
   }
 }
 
 export function shutdownSherpa(): void {
+  if (restartTimer) {
+    clearTimeout(restartTimer)
+    restartTimer = null
+  }
   if (!proc) return
   try {
     proc.stdin!.write(JSON.stringify({ action: 'exit' }) + '\n')
@@ -237,4 +353,11 @@ export function shutdownSherpa(): void {
   proc.kill()
   proc = null
   rl = null
+}
+
+/** Reset crash loop state — allows auto-restart after manual intervention. */
+export function resetSherpa(): void {
+  shutdownSherpa()
+  crashTimestamps.length = 0
+  gavUp = false
 }
