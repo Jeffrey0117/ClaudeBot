@@ -17,7 +17,7 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 function deriveBotId(): string {
   const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
-  if (!envArg || envArg === '.env') return 'main'
+  if (!envArg || envArg === '.env') return 'bot1'
   return envArg.replace('.env.', '')
 }
 

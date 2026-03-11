@@ -157,9 +157,9 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
     }
   }
 
-  // Remote pairing active — bypass project selection, use CWD as project
+  // Remote pairing active — takes priority over local project selection
   const pairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId) : null
-  if (!state.selectedProject && pairing?.connected) {
+  if (pairing?.connected) {
     // Allot gate: check quota before enqueue (plugin may not be loaded)
     const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
     if (allotMod?.tryReserve) {

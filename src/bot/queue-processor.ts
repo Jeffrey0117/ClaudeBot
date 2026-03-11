@@ -43,7 +43,7 @@ const claudeMdWarned = new Set<string>()
 
 function deriveBotId(): string {
   const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
-  if (!envArg || envArg === '.env') return 'main'
+  if (!envArg || envArg === '.env') return 'bot1'
   return envArg.replace('.env.', '')
 }
 
@@ -346,7 +346,7 @@ async function sendResponseChunks(
     )
     const { cleaned: draftDigestCleaned } = extractDigest(draftStripped)
     const draftCleaned = cleanMarkdown(draftDigestCleaned || draftStripped)
-    const botLabel = `[${deriveBotId()}]\n`
+    const botLabel = `[${deriveBotId()}] `
     await finalizeDraft(ctx.telegram, ctx.item.chatId, botLabel + (draftCleaned || cleaned))
     ctx.draftActive = false
 
@@ -364,7 +364,7 @@ async function sendResponseChunks(
     }
   } else {
     // No draft: send message chunks as usual
-    const botLabel = `[${deriveBotId()}]\n`
+    const botLabel = `[${deriveBotId()}] `
     const chunks = splitText(botLabel + cleaned, 4096)
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]
