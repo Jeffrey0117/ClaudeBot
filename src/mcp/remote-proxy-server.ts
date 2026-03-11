@@ -361,8 +361,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   // Timeout: browser ops get 45s, execute_command gets custom, others default
   const customTimeout = name === 'remote_execute_command' && a.timeout
     ? Math.min(Number(a.timeout) + 5_000, 305_000) // agent timeout + 5s buffer
-    : name === 'ab_connect_browser' ? 25_000
-    : name.startsWith('ab_') ? 45_000
+    : name === 'ab_connect_browser' ? 30_000
+    : name.startsWith('ab_') ? 75_000 // 60s agent-browser + 15s relay buffer
     : undefined
 
   try {

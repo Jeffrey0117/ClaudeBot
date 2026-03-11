@@ -394,7 +394,7 @@ async function handleListProjects(baseDir: string): Promise<string> {
 
 // --- Agent-Browser helpers (N-side) ---
 
-const AB_TIMEOUT_MS = 30_000
+const AB_TIMEOUT_MS = 60_000 // 60s — heavy pages like Gmail need time to load
 const CDP_PORT = 9222
 const CDP_CHECK_URL = `http://localhost:${CDP_PORT}/json/version`
 
@@ -544,69 +544,45 @@ async function handleBrowserGetUrl(): Promise<string> {
 /**
  * Kill Chrome and restart with CDP debugging port.
  * After this, all ab_* tools will auto-connect to user's Chrome (with cookies/login).
+ *
+ * Steps (each is thorough, no guessing):
+ * 1. Check if CDP already available → skip
+ * 2. Find Chrome executable
+ * 3. Kill ALL Chrome processes + verify they're dead
+ * 4. Delete profile lockfiles (prevents CDP port being ignored)
+ * 5. Start Chrome with --remote-debugging-port
+ * 6. Poll CDP endpoint until confirmed ready
  */
 async function handleBrowserConnect(): Promise<string> {
   await ensureBrowserAvailable()
 
-  // Already connected?
+  // Step 1: Already connected?
   if (await isCdpAvailable()) {
     return `CDP already available on port ${CDP_PORT}. All ab_* tools will use your Chrome with login state.`
   }
 
-  // Find Chrome executable path
-  const chromePaths = IS_WIN
-    ? [
-        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-        `${homedir()}\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe`,
-      ]
-    : [
-        '/usr/bin/google-chrome',
-        '/usr/bin/google-chrome-stable',
-        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      ]
+  // Step 2: Find Chrome
+  const chromePath = await findChromePath()
 
-  let chromePath = ''
-  for (const p of chromePaths) {
-    try {
-      await stat(p)
-      chromePath = p
-      break
-    } catch { /* not found, try next */ }
-  }
+  // Step 3: Kill Chrome completely (verify process death)
+  await killChromeAndWait()
 
-  if (!chromePath) {
-    throw new Error('Chrome not found. Searched: ' + chromePaths.join(', '))
-  }
+  // Step 4: Delete lockfiles so Chrome starts fresh with CDP
+  await deleteLockfiles()
 
-  // Kill existing Chrome
-  if (IS_WIN) {
-    await new Promise<void>((res) => {
-      exec('taskkill /F /IM chrome.exe', { windowsHide: true }, () => res())
-    })
-  } else {
-    await new Promise<void>((res) => {
-      exec('pkill -f chrome', { windowsHide: true }, () => res())
-    })
-  }
-
-  // Wait for profile lock to release
-  await new Promise((res) => setTimeout(res, 1500))
-
-  // Restart Chrome with CDP port
-  const chromeArgs = [`--remote-debugging-port=${CDP_PORT}`]
-  const child = spawn(`"${chromePath}"`, chromeArgs, {
+  // Step 5: Launch Chrome with CDP
+  const child = spawn(chromePath, [`--remote-debugging-port=${CDP_PORT}`], {
     detached: true,
     stdio: 'ignore',
-    shell: true,
+    shell: false,
     windowsHide: true,
   })
   child.unref()
 
-  // Poll until CDP is ready (max 10s)
-  const deadline = Date.now() + 10_000
+  // Step 6: Poll CDP until ready (max 15s — Chrome can be slow)
+  const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {
-    await new Promise((res) => setTimeout(res, 500))
+    await new Promise((res) => setTimeout(res, 800))
     if (await isCdpAvailable()) {
       return (
         `Chrome restarted with CDP on port ${CDP_PORT}. ` +
@@ -615,7 +591,93 @@ async function handleBrowserConnect(): Promise<string> {
     }
   }
 
-  throw new Error(`Chrome started but CDP port ${CDP_PORT} not responding after 10s.`)
+  throw new Error(
+    `Chrome launched but CDP port ${CDP_PORT} not responding after 15s. ` +
+    `Chrome path: ${chromePath}`,
+  )
+}
+
+/** Find Chrome executable. Checks common paths + Windows registry fallback. */
+async function findChromePath(): Promise<string> {
+  const candidates = IS_WIN
+    ? [
+        join(process.env.PROGRAMFILES ?? '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        join(process.env['PROGRAMFILES(X86)'] ?? '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        join(homedir(), 'AppData', 'Local', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      ]
+    : [
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/google-chrome',
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      ]
+
+  for (const p of candidates) {
+    try {
+      await stat(p)
+      return p
+    } catch { /* try next */ }
+  }
+
+  // Windows fallback: ask registry
+  if (IS_WIN) {
+    try {
+      const regResult = await new Promise<string>((res, rej) => {
+        exec(
+          'reg query "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe" /ve',
+          { timeout: 3000, windowsHide: true },
+          (err, stdout) => err ? rej(err) : res(stdout),
+        )
+      })
+      const match = regResult.match(/REG_SZ\s+(.+\.exe)/i)
+      if (match) {
+        await stat(match[1].trim())
+        return match[1].trim()
+      }
+    } catch { /* registry not available */ }
+  }
+
+  throw new Error('Chrome not found. Install Google Chrome or set path manually.')
+}
+
+/** Kill all Chrome processes and poll until none remain. Max 5s. */
+async function killChromeAndWait(): Promise<void> {
+  const killCmd = IS_WIN ? 'taskkill /F /IM chrome.exe' : 'pkill -9 -f chrome'
+  await new Promise<void>((res) => {
+    exec(killCmd, { windowsHide: true }, () => res())
+  })
+
+  // Poll until Chrome processes are actually gone (max 5s)
+  const checkCmd = IS_WIN
+    ? 'tasklist /FI "IMAGENAME eq chrome.exe" /NH'
+    : 'pgrep -f chrome'
+
+  const deadline = Date.now() + 5_000
+  while (Date.now() < deadline) {
+    await new Promise((res) => setTimeout(res, 300))
+    const stillRunning = await new Promise<boolean>((res) => {
+      exec(checkCmd, { timeout: 2000, windowsHide: true }, (err, stdout) => {
+        if (err) { res(false); return }
+        // Windows tasklist shows "INFO: No tasks" when none found
+        res(IS_WIN ? !stdout.includes('INFO:') && stdout.includes('chrome.exe') : stdout.trim().length > 0)
+      })
+    })
+    if (!stillRunning) return
+  }
+  // Proceed anyway after 5s — processes might be zombie
+}
+
+/** Delete Chrome profile lockfiles that prevent CDP from activating. */
+async function deleteLockfiles(): Promise<void> {
+  const profileDir = IS_WIN
+    ? join(homedir(), 'AppData', 'Local', 'Google', 'Chrome', 'User Data')
+    : process.platform === 'darwin'
+      ? join(homedir(), 'Library', 'Application Support', 'Google', 'Chrome')
+      : join(homedir(), '.config', 'google-chrome')
+
+  const lockfiles = ['lockfile', 'SingletonLock', 'SingletonSocket', 'SingletonCookie']
+  for (const f of lockfiles) {
+    await unlink(join(profileDir, f)).catch(() => {})
+  }
 }
 
 export function createToolDispatcher(baseDir: string): ToolDispatcher {
