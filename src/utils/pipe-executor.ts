@@ -81,7 +81,7 @@ export function stripPipeDirectives(text: string): string {
 
 // --- Config loader ---
 
-function loadPipeConfig(): PipeConfig | null {
+export function loadPipeConfig(): PipeConfig | null {
   // CLOUDPIPE_URL env var takes priority (e.g. "http://192.168.1.10:8787")
   if (process.env.CLOUDPIPE_URL) {
     return {

@@ -8,6 +8,7 @@ Claude's response flows through this pipeline:
 Claude response → parse all directives
   → execute @file/@confirm/@notify
   → execute @pipe (CloudPipe)
+  → execute @upload (file upload to upimg)
   → strip ALL directives from text
   → output hooks (mdfix, etc.)
   → extract [CTX] digest
@@ -23,6 +24,7 @@ Claude response → parse all directives
 | `@file(path)` | `directives.ts` | Send file to user |
 | `@confirm(q\|a\|b)` | `directives.ts` | Inline buttons → selection re-enqueued |
 | `@notify(msg)` | `directives.ts` | Standalone 🔔 notification |
+| `@upload(path)` | `upload-executor.ts` | Upload file to upimg, return public URL |
 | `@pipe(svc.action)` | `pipe-executor.ts` | CloudPipe HTTP API call |
 | `@run(project) task` | `cross-project-parser.ts` | Cross-project delegation |
 

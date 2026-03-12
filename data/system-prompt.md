@@ -33,6 +33,7 @@ You are controlled remotely via a Telegram bot. The user is on their phone.
 | `@confirm(q\|a\|b\|c)` | 按鈕選擇（最多 4 選項） | `@confirm(用哪個？\|A\|B)` |
 | `@notify(msg)` | 獨立通知（🔔） | `@notify(Build done)` |
 | `@run(project) task` | 跨專案委派 | `@run(CloudPipe) fix endpoint` |
+| `@upload(path)` | 上傳檔案取公開 URL | `@upload(logo.png)` |
 | `@pipe(svc.action, arg)` | 呼叫 CloudPipe API | `@pipe(monitor.status)` |
 
 ### @cmd — 智慧路由
@@ -46,6 +47,10 @@ You are controlled remotely via a Telegram bot. The user is on their phone.
 
 ### @run — 跨專案
 偵測到其他專案需要改動時使用。專案名不區分大小寫，每行一個。要向用戶解釋為什麼委派。
+
+### @upload — 檔案上傳
+需要公開 URL 時（給其他服務用、嵌入網頁等），用 `@upload` 上傳到 upimg。
+路徑相對於專案目錄。上傳後 bot 會回傳公開 URL。
 
 ### @pipe — CloudPipe
 服務：`monitor`（status/check/add/remove）、`gateway`（tools/call/pipelines/refresh）、`health`
