@@ -124,13 +124,13 @@ function calcStreak(git: GitSummary): number {
   let streak = 0
 
   // If today has no commits yet, start from yesterday
-  const todayStr = d.toISOString().slice(0, 10)
+  const todayStr = localDate(d.getTime())
   if (!activeDays.has(todayStr)) {
     d.setDate(d.getDate() - 1)
   }
 
   while (true) {
-    const dateStr = d.toISOString().slice(0, 10)
+    const dateStr = localDate(d.getTime())
     if (activeDays.has(dateStr)) {
       streak++
       d.setDate(d.getDate() - 1)
@@ -197,7 +197,7 @@ function formatWeek(): string {
   const barLines: string[] = []
   for (let i = 6; i >= 0; i--) {
     const d = new Date(daysAgo(i))
-    const dateStr = d.toISOString().slice(0, 10)
+    const dateStr = localDate(d.getTime())
     const dayName = days[d.getDay()]
     const count = dailyCommitMap.get(dateStr) ?? 0
     barLines.push(`${dayName} ${bar(count, maxDaily, 12)} ${count}`)
@@ -250,7 +250,7 @@ function formatMonth(): string {
   weekLine = '  '.repeat(firstDow)
   for (let day = 1; day <= daysInMonth; day++) {
     const d = new Date(now.getFullYear(), now.getMonth(), day)
-    const dateStr = d.toISOString().slice(0, 10)
+    const dateStr = localDate(d.getTime())
     const count = dailyMap.get(dateStr) ?? 0
     weekLine += heatSquare(count)
     if (d.getDay() === 6 || day === daysInMonth) {
@@ -439,7 +439,7 @@ function formatRange(start: number, end: number, label: string): string {
     const barLines: string[] = []
     const cursor = new Date(start)
     while (cursor.getTime() <= end) {
-      const dateStr = cursor.toISOString().slice(0, 10)
+      const dateStr = localDate(cursor.getTime())
       const dayName = days[cursor.getDay()]
       const count = dailyMap.get(dateStr) ?? 0
       barLines.push(`${dayName} ${dateStr.slice(5)} ${bar(count, maxDaily, 10)} ${count}`)
