@@ -29,6 +29,7 @@ function runGit(cwd: string, args: string): string {
       cwd,
       encoding: 'utf-8',
       timeout: 5_000,
+      maxBuffer: 10 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'ignore'],
       windowsHide: true,
     }).trim()
@@ -37,9 +38,27 @@ function runGit(cwd: string, args: string): string {
   }
 }
 
-/** Cache: key = "sinceDate|untilDate", short TTL to avoid repeated scans within one request */
+/**
+ * Quick mtime check: skip repos where git reflog hasn't been touched since sinceDate.
+ * Filesystem stat only — no process spawn overhead.
+ */
+function hasRecentGitActivity(gitDir: string, sinceMs: number): boolean {
+  try {
+    // .git/logs/HEAD is updated on every commit, merge, checkout
+    const headLog = join(gitDir, 'logs', 'HEAD')
+    if (existsSync(headLog) && statSync(headLog).mtimeMs >= sinceMs) return true
+    // Fallback: check packed-refs (updated on fetch/gc)
+    const packedRefs = join(gitDir, 'packed-refs')
+    if (existsSync(packedRefs) && statSync(packedRefs).mtimeMs >= sinceMs) return true
+    return false
+  } catch {
+    return true // on error, don't skip — let git log handle it
+  }
+}
+
+/** Cache: key = "sinceDate|untilDate", 30s TTL to avoid repeated scans across current+delta */
 let gitCache: { key: string; data: GitSummary; ts: number } | null = null
-const GIT_CACHE_TTL_MS = 3_000
+const GIT_CACHE_TTL_MS = 30_000
 
 /**
  * Get the canonical git dir for a project path.
@@ -79,13 +98,14 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
   const allCommits: CommitInfo[] = []
   const seenGitDirs = new Set<string>()
   const seenHashes = new Set<string>()
+  const sinceMs = new Date(sinceDate).getTime()
 
   const untilArg = untilDate ? ` --until="${untilDate}"` : ''
 
-  // Track seen commits across all projects to avoid duplicates (git log --all shows all branches)
-  const seenCommits = new Set<string>()
-
   for (const project of projects) {
+    // Skip backup directories — they duplicate the original repo's commits
+    if (project.name.endsWith('.bak')) continue
+
     const gitDir = getGitDir(project.path)
     if (!gitDir) continue
 
@@ -93,10 +113,13 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
     if (seenGitDirs.has(gitDir)) continue
     seenGitDirs.add(gitDir)
 
-    // Use HEAD only (no --all) to avoid counting branch+merge commits twice
+    // Fast mtime check: skip repos with no git activity since the range start
+    if (!hasRecentGitActivity(gitDir, sinceMs)) continue
+
+    // Use HEAD only (no --all), --no-merges for clean counts
     const log = runGit(
       project.path,
-      `log --since="${sinceDate}" ${untilArg} --pretty=format:"%H|%aI|%s" --shortstat`
+      `log --no-merges --since="${sinceDate}" ${untilArg} --pretty=format:"%H|%aI|%s" --shortstat`
     )
 
     if (!log) continue
@@ -114,14 +137,14 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
       const message = msgParts.join('|')
       const timestamp = new Date(date).getTime()
 
-      // Skip if we've already seen this commit (same commit visible in multiple branches)
-      if (seenCommits.has(hash)) {
+      // Dedup by commit hash (same commit from forks/mirrors/clones)
+      if (seenHashes.has(hash)) {
         i++
         // Still need to skip stat line if present
         if (i < lines.length && lines[i].trim().match(/\d+ (insertion|deletion)/)) i++
         continue
       }
-      seenCommits.add(hash)
+      seenHashes.add(hash)
 
       // Next line(s) might be the stat line
       let insertions = 0
@@ -135,19 +158,15 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
         if (insMatch || delMatch) i++ // skip stat line
       }
 
-      // Dedup by commit hash (prevents counting same commit from forks/mirrors)
-      if (!seenHashes.has(hash)) {
-        seenHashes.add(hash)
-        allCommits.push({
-          hash,
-          date,
-          timestamp,
-          message,
-          insertions,
-          deletions,
-          project: project.name,
-        })
-      }
+      allCommits.push({
+        hash,
+        date,
+        timestamp,
+        message,
+        insertions,
+        deletions,
+        project: project.name,
+      })
 
       i++
     }

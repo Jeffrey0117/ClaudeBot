@@ -413,16 +413,20 @@ function formatProjects(): string {
 function formatRange(start: number, end: number, label: string): string {
   const s = aggregateStats(start, end)
 
-  // Calculate range duration for comparison with equal-length previous period
   const durationMs = end - start
-  const prevStart = start - durationMs
-  const prevEnd = start - 1
-  const prev = aggregateStats(prevStart, prevEnd)
-
-  const activeDays = s.git.dailyCommits.filter((d) => d.count > 0).length
   const totalDays = Math.max(1, Math.ceil(durationMs / 86_400_000))
 
-  // Daily bar chart (up to 14 days shown individually, else monthly)
+  // Delta comparison: only for ranges ≤14 days (avoids 2× git scan blocking)
+  let prev: ReturnType<typeof aggregateStats> | null = null
+  if (totalDays <= 14) {
+    const prevStart = start - durationMs
+    const prevEnd = start - 1
+    prev = aggregateStats(prevStart, prevEnd)
+  }
+
+  const activeDays = s.git.dailyCommits.filter((d) => d.count > 0).length
+
+  // Daily bar chart (up to 14 days shown individually)
   let chartSection = ''
   if (totalDays <= 14) {
     const dailyMap = new Map(s.git.dailyCommits.map((d) => [d.date, d.count]))
@@ -440,14 +444,18 @@ function formatRange(start: number, end: number, label: string): string {
     chartSection = ['', '*每日活動:*', '```', ...barLines, '```'].join('\n')
   }
 
+  const d = (cur: number, field: 'totalCommits' | 'prompts' | 'totalCost') =>
+    prev ? delta(cur, field === 'totalCommits' ? prev.git.totalCommits
+      : field === 'prompts' ? prev.prompts : prev.totalCost) : ''
+
   return [
     `📊 *${label}*`,
     '',
-    `🔨 Commits: *${s.git.totalCommits}*${delta(s.git.totalCommits, prev.git.totalCommits)}`,
+    `🔨 Commits: *${s.git.totalCommits}*${d(s.git.totalCommits, 'totalCommits')}`,
     `📝 Lines: *+${s.git.totalInsertions}* / *-${s.git.totalDeletions}*`,
     `💬 訊息: *${s.messages}* | 🎤 語音: *${s.voices}*`,
-    `🤖 Prompts: *${s.prompts}*${delta(s.prompts, prev.prompts)}`,
-    `💰 花費: *$${s.totalCost.toFixed(2)}*${delta(s.totalCost, prev.totalCost)}`,
+    `🤖 Prompts: *${s.prompts}*${d(s.prompts, 'prompts')}`,
+    `💰 花費: *$${s.totalCost.toFixed(2)}*${d(s.totalCost, 'totalCost')}`,
     `📅 活躍天數: *${activeDays}* / ${totalDays}`,
     chartSection,
     '',
