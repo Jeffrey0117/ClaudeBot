@@ -548,12 +548,13 @@ async function handleBrowserGetUrl(): Promise<string> {
  * then restart with CDP + --restore-last-session.
  *
  * 1. CDP already open? → skip
- * 2. Find Chrome executable
- * 3. Graceful close (WM_CLOSE, not /F) → Chrome saves session state
- * 4. If still alive after 5s → force kill
- * 5. Delete lockfiles
- * 6. Restart with CDP + anti-detection flags + session restore
- * 7. Poll CDP until confirmed
+ * 2. Find Chrome + patch shortcuts (permanent CDP)
+ * 3. Kill agent-browser daemon (prevents old session conflict)
+ * 4. Graceful Chrome close (WM_CLOSE) → saves session/cookies
+ * 5. Force kill fallback after 8s
+ * 6. Delete lockfiles
+ * 7. Restart Chrome with CDP + session restore + anti-detection
+ * 8. Poll CDP until confirmed
  */
 async function handleBrowserConnect(): Promise<string> {
   await ensureBrowserAvailable()
@@ -570,13 +571,16 @@ async function handleBrowserConnect(): Promise<string> {
   // So next time user opens Chrome normally, CDP is already on
   const patched = await patchChromeShortcuts()
 
-  // Step 3+4: Graceful shutdown → fallback to force kill
+  // Step 3: Kill agent-browser daemon (prevents old standalone session conflicting with CDP)
+  await runAB('close').catch(() => {})
+
+  // Step 4+5: Graceful Chrome shutdown → fallback to force kill
   await shutdownChrome()
 
-  // Step 5: Delete lockfiles
+  // Step 6: Delete lockfiles
   await deleteLockfiles()
 
-  // Step 6: Launch Chrome with CDP + session restore + anti-detection
+  // Step 7: Launch Chrome with CDP + session restore + anti-detection
   const profileDir = IS_WIN
     ? join(homedir(), 'AppData', 'Local', 'Google', 'Chrome', 'User Data')
     : process.platform === 'darwin'
@@ -597,7 +601,7 @@ async function handleBrowserConnect(): Promise<string> {
   })
   child.unref()
 
-  // Step 7: Poll CDP until ready (max 20s)
+  // Step 8: Poll CDP until ready (max 20s)
   const deadline = Date.now() + 20_000
   while (Date.now() < deadline) {
     await new Promise((res) => setTimeout(res, 800))
