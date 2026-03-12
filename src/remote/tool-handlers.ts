@@ -577,8 +577,15 @@ async function handleBrowserConnect(): Promise<string> {
   await deleteLockfiles()
 
   // Step 6: Launch Chrome with CDP + session restore + anti-detection
+  const profileDir = IS_WIN
+    ? join(homedir(), 'AppData', 'Local', 'Google', 'Chrome', 'User Data')
+    : process.platform === 'darwin'
+      ? join(homedir(), 'Library', 'Application Support', 'Google', 'Chrome')
+      : join(homedir(), '.config', 'google-chrome')
+
   const chromeArgs = [
     `--remote-debugging-port=${CDP_PORT}`,
+    `--user-data-dir=${profileDir}`,                  // explicit profile path — required for CDP to listen
     '--restore-last-session',                         // keep user's tabs & login state
     '--disable-blink-features=AutomationControlled',  // don't trigger Google bot detection
   ]
@@ -590,8 +597,8 @@ async function handleBrowserConnect(): Promise<string> {
   })
   child.unref()
 
-  // Step 7: Poll CDP until ready (max 15s)
-  const deadline = Date.now() + 15_000
+  // Step 7: Poll CDP until ready (max 20s)
+  const deadline = Date.now() + 20_000
   while (Date.now() < deadline) {
     await new Promise((res) => setTimeout(res, 800))
     if (await isCdpAvailable()) {
@@ -606,8 +613,8 @@ async function handleBrowserConnect(): Promise<string> {
   }
 
   throw new Error(
-    `Chrome launched but CDP port ${CDP_PORT} not responding after 15s. ` +
-    `Chrome path: ${chromePath}`,
+    `Chrome started but CDP port ${CDP_PORT} not responding after 20s. ` +
+    `Chrome path: ${chromePath}. Profile: ${profileDir}`,
   )
 }
 
@@ -726,8 +733,8 @@ async function shutdownChrome(): Promise<void> {
     await execPromise('pkill -f chrome')
   }
 
-  // Wait for graceful exit (max 5s)
-  if (await waitForChromeExit(5_000)) return
+  // Wait for graceful exit (max 8s — Chrome needs time to save session/cookies)
+  if (await waitForChromeExit(8_000)) return
 
   // Still alive → force kill
   if (IS_WIN) {
