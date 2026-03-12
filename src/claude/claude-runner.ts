@@ -164,20 +164,24 @@ export function runClaude(options: RunOptions): void {
         `\n` +
         (env.MCP_AGENT_BROWSER
           ? `瀏覽器操作（遠端機器）：\n` +
-            `- ab_connect_browser(): 【重要】連接使用者的 Chrome（帶登入狀態）。操作需要登入的網站前必須先呼叫！\n` +
+            `- ab_connect_browser(): 連接使用者的 Chrome（帶登入狀態）。需要登入的網站必須先呼叫。\n` +
             `- ab_open(url): 開啟網頁\n` +
             `- ab_snapshot(): 取得頁面元素清單（互動元素 ref）\n` +
             `- ab_click(ref): 點擊元素\n` +
             `- ab_fill(ref, text): 填寫輸入欄位\n` +
             `- ab_press(key): 按鍵（Enter, Escape, Tab）\n` +
-            `- ab_screenshot(): 截圖\n` +
+            `- ab_screenshot(): 截圖（頁面截圖）\n` +
             `- ab_back(): 回上一頁\n` +
             `- ab_get_url(): 取得當前網址\n` +
             `\n` +
-            `瀏覽器規則：\n` +
-            `1. 需要登入的網站（Gmail、GitHub 等）→ 先 ab_connect_browser()，再 ab_open()\n` +
-            `2. 不需要登入的網站 → 直接 ab_open()，會用獨立瀏覽器\n` +
-            `3. ab_connect_browser 會關閉再重啟 Chrome，使用者的 Chrome 會暫時關閉\n` +
+            `瀏覽器使用規則（嚴格遵守，不要自行發明替代方案）：\n` +
+            `1. 需要登入的網站 → ab_connect_browser() → ab_open(url) → ab_snapshot() → 操作\n` +
+            `2. 不需要登入 → 直接 ab_open(url)\n` +
+            `3. ab_connect_browser 內部會：殺 daemon → 關 Chrome → 刪 lockfile → 重開帶 CDP → 確認連線。\n` +
+            `   你只需要呼叫一次，不要自己用 remote_execute_command 去殺 Chrome 或改設定。\n` +
+            `4. 如果 ab_connect_browser 失敗，直接回報錯誤訊息。不要自行嘗試修復。\n` +
+            `5. 如果 ab_* 工具 timeout，可能是頁面太重。用 ab_screenshot 確認狀態後再操作。\n` +
+            `6. 絕對不要建議使用者「手動操作」。你有完整的瀏覽器控制能力，用它。\n` +
             `\n`
           : '') +
         `⚠️ 自我修改例外：\n` +
