@@ -82,10 +82,19 @@ function parseTimeRange(input: string): { start: number; end: number; label: str
   return null
 }
 
+/** Format a timestamp as local YYYY-MM-DD (avoids UTC shift from toISOString) */
+function localDate(ms: number): string {
+  const d = new Date(ms)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 /** Aggregate stats from activities + git for a time range */
 function aggregateStats(start: number, end: number) {
-  const sinceISO = new Date(start).toISOString().slice(0, 10)
-  const untilISO = new Date(end).toISOString().slice(0, 10)
+  const sinceISO = localDate(start)
+  const untilISO = localDate(end)
   const activities = readActivities(start, end)
   const git = scanGitActivity(sinceISO, untilISO)
 
@@ -154,7 +163,7 @@ function formatToday(): string {
   const yesterdayStart = daysAgo(1)
   const prev = aggregateStats(yesterdayStart, start - 1)
 
-  const todayISO = new Date().toISOString().slice(0, 10)
+  const todayISO = localDate(Date.now())
 
   return [
     `📊 *今日統計* (${todayISO})`,
@@ -274,8 +283,7 @@ function formatMonth(): string {
 function formatYear(): string {
   const now = new Date()
   const yearStart = new Date(now.getFullYear(), 0, 1)
-  const yearISO = yearStart.toISOString().slice(0, 10)
-  const git = scanGitActivity(yearISO)
+  const git = scanGitActivity(localDate(yearStart.getTime()))
   const activities = readActivities(yearStart.getTime(), Date.now())
 
   const prompts = activities.filter((a) => a.type === 'prompt_complete')
@@ -335,9 +343,7 @@ function formatHours(): string {
   const monthStart = new Date()
   monthStart.setDate(1)
   monthStart.setHours(0, 0, 0, 0)
-  const monthISO = monthStart.toISOString().slice(0, 10)
-
-  const git = scanGitActivity(monthISO)
+  const git = scanGitActivity(localDate(monthStart.getTime()))
   const activities = readActivities(monthStart.getTime(), Date.now())
 
   // Combine git + prompt activity per hour
@@ -387,9 +393,7 @@ function formatProjects(): string {
   const monthStart = new Date()
   monthStart.setDate(1)
   monthStart.setHours(0, 0, 0, 0)
-  const monthISO = monthStart.toISOString().slice(0, 10)
-
-  const git = scanGitActivity(monthISO)
+  const git = scanGitActivity(localDate(monthStart.getTime()))
 
   if (git.projects.length === 0) {
     return '📊 本月尚無 commit 紀錄'
