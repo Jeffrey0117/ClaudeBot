@@ -589,14 +589,14 @@ async function handleBrowserConnect(): Promise<string> {
 
   const chromeArgs = [
     `--remote-debugging-port=${CDP_PORT}`,
-    `--user-data-dir=${profileDir}`,                  // explicit profile path — required for CDP to listen
+    `--user-data-dir="${profileDir}"`,                // quoted — path contains spaces on Windows
     '--restore-last-session',                         // keep user's tabs & login state
     '--disable-blink-features=AutomationControlled',  // don't trigger Google bot detection
   ]
   const child = spawn(chromePath, chromeArgs, {
     detached: true,
     stdio: 'ignore',
-    shell: false,
+    shell: true,      // shell: true so Windows cmd handles quoted --user-data-dir path
     windowsHide: false, // user should see Chrome open
   })
   child.unref()
