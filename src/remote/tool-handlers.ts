@@ -566,6 +566,10 @@ async function handleBrowserConnect(): Promise<string> {
   // Step 2: Find Chrome
   const chromePath = await findChromePath()
 
+  // Step 2.5: Patch Chrome shortcuts to permanently include CDP flag
+  // So next time user opens Chrome normally, CDP is already on
+  const patched = await patchChromeShortcuts()
+
   // Step 3+4: Graceful shutdown → fallback to force kill
   await shutdownChrome()
 
@@ -591,9 +595,12 @@ async function handleBrowserConnect(): Promise<string> {
   while (Date.now() < deadline) {
     await new Promise((res) => setTimeout(res, 800))
     if (await isCdpAvailable()) {
+      const patchMsg = patched
+        ? ` Chrome shortcuts patched — future launches will always have CDP.`
+        : ''
       return (
         `Chrome restarted with CDP on port ${CDP_PORT}. ` +
-        `Login state preserved. All ab_* tools will control your Chrome.`
+        `Login state preserved. All ab_* tools will control your Chrome.${patchMsg}`
       )
     }
   }
@@ -602,6 +609,66 @@ async function handleBrowserConnect(): Promise<string> {
     `Chrome launched but CDP port ${CDP_PORT} not responding after 15s. ` +
     `Chrome path: ${chromePath}`,
   )
+}
+
+const CDP_FLAG = `--remote-debugging-port=${CDP_PORT}`
+
+/**
+ * Patch all Chrome .lnk shortcuts to include --remote-debugging-port.
+ * Uses PowerShell COM (WScript.Shell) to read/write .lnk files.
+ * Returns true if at least one shortcut was patched.
+ */
+async function patchChromeShortcuts(): Promise<boolean> {
+  if (!IS_WIN) return false // macOS/Linux: TODO (.desktop files)
+
+  const shortcutPaths = [
+    // Taskbar pin
+    join(homedir(), 'AppData', 'Roaming', 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar', 'Google Chrome.lnk'),
+    // Desktop
+    join(homedir(), 'Desktop', 'Google Chrome.lnk'),
+    // Public desktop
+    join(process.env.PUBLIC ?? 'C:\\Users\\Public', 'Desktop', 'Google Chrome.lnk'),
+    // Start menu (user)
+    join(homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Google Chrome.lnk'),
+    // Start menu (system)
+    join(process.env.PROGRAMDATA ?? 'C:\\ProgramData', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Google Chrome.lnk'),
+  ]
+
+  let patchedCount = 0
+  for (const lnkPath of shortcutPaths) {
+    try {
+      await stat(lnkPath)
+    } catch {
+      continue // shortcut doesn't exist
+    }
+
+    try {
+      // PowerShell: read shortcut arguments, append CDP flag if not present
+      const ps = `
+$s = (New-Object -ComObject WScript.Shell).CreateShortcut('${lnkPath.replace(/'/g, "''")}')
+if ($s.Arguments -notlike '*--remote-debugging-port=*') {
+  $s.Arguments = ($s.Arguments + ' ${CDP_FLAG}').Trim()
+  $s.Save()
+  Write-Output 'PATCHED'
+} else {
+  Write-Output 'ALREADY'
+}`.trim()
+
+      const result = await new Promise<string>((res, rej) => {
+        exec(
+          `powershell -NoProfile -Command "${ps.replace(/"/g, '\\"').replace(/\n/g, '; ')}"`,
+          { timeout: 5000, windowsHide: true },
+          (err, stdout) => err ? rej(err) : res(stdout.trim()),
+        )
+      })
+
+      if (result === 'PATCHED') patchedCount++
+    } catch {
+      // Skip this shortcut if PowerShell fails (permissions, etc.)
+    }
+  }
+
+  return patchedCount > 0
 }
 
 /** Find Chrome executable. Common paths + Windows registry fallback. */
