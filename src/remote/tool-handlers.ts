@@ -736,6 +736,32 @@ async function findChromePath(): Promise<string> {
 }
 
 /**
+ * Detect the Chrome profile the user actually uses.
+ * Reads Local State → last_used_profiles, falls back to "Default".
+ */
+async function detectChromeProfile(userDataDir: string): Promise<string> {
+  try {
+    const localState = JSON.parse(
+      await readFile(join(userDataDir, 'Local State'), 'utf-8'),
+    ) as { profile?: { last_used?: string; info_cache?: Record<string, unknown> } }
+
+    // Chrome stores the last used profile name
+    if (localState.profile?.last_used) {
+      return localState.profile.last_used
+    }
+
+    // Fallback: pick the first profile from info_cache
+    const profiles = Object.keys(localState.profile?.info_cache ?? {})
+    if (profiles.length > 0) {
+      return profiles[0]
+    }
+  } catch {
+    // Local State missing or unreadable
+  }
+  return 'Default'
+}
+
+/**
  * Shut down Chrome completely so the next launch owns the singleton.
  *
  * Windows Chrome single-instance: if ANY chrome.exe is still alive,
