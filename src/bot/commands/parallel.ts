@@ -42,6 +42,11 @@ let telegramApi: Telegram | null = null
 /** Whether the global completion hook has been installed. */
 let hookInstalled = false
 
+/** Escape Telegram Markdown special characters in user content. */
+function escMd(text: string): string {
+  return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1')
+}
+
 /** Generate a short hex ID for job identification. */
 function shortId(): string {
   return randomBytes(4).toString('hex')
@@ -181,12 +186,12 @@ export async function parallelCommand(ctx: BotContext): Promise<void> {
 
   // Show confirmation
   const taskList = job.tasks
-    .map((t, i) => `${i + 1}. ${t.description}`)
+    .map((t, i) => `${i + 1}\\. ${escMd(t.description)}`)
     .join('\n')
 
   await ctx.reply(
     `*平行任務確認*\n\n` +
-    `專案: \`${project.name}\`\n` +
+    `專案: \`${escMd(project.name)}\`\n` +
     `任務數: ${job.tasks.length}\n\n` +
     `${taskList}\n\n` +
     `每個任務會建立獨立 worktree，完成後自動 merge 回 master。`,
@@ -242,13 +247,13 @@ export async function createParallelJobFromSuggestion(
   setPendingJob(chatId, job)
 
   const taskList = job.tasks
-    .map((t, i) => `${i + 1}. ${t.description}`)
+    .map((t, i) => `${i + 1}\\. ${escMd(t.description)}`)
     .join('\n')
 
   await ctx.telegram.sendMessage(
     chatId,
     `*平行任務確認*\n\n` +
-    `專案: \`${project.name}\`\n` +
+    `專案: \`${escMd(project.name)}\`\n` +
     `任務數: ${job.tasks.length}\n\n` +
     `${taskList}\n\n` +
     `每個任務會建立獨立 worktree，完成後自動 merge 回 master。`,
@@ -461,7 +466,7 @@ async function mergeParallelResults(
     const mergeResult = mergeToMain(job.projectPath, task.branch)
 
     if (mergeResult.success) {
-      results.push(`✅ ${task.description}`)
+      results.push(`✅ ${escMd(task.description)}`)
       try {
         removeWorktree(job.projectPath, task.branch, true)
       } catch (error) {
@@ -472,7 +477,7 @@ async function mergeParallelResults(
       const conflictFiles = mergeResult.conflicts?.length
         ? `\n   衝突: ${mergeResult.conflicts.join(', ')}`
         : ''
-      results.push(`⚠️ ${task.description} — 合併衝突${conflictFiles}`)
+      results.push(`⚠️ ${escMd(task.description)} — 合併衝突${escMd(conflictFiles)}`)
       // Keep branch for manual resolution, remove worktree directory
       try {
         removeWorktree(job.projectPath, task.branch, false)
@@ -502,7 +507,7 @@ async function mergeParallelResults(
 
   const summary =
     `🎉 *平行任務完成*\n\n` +
-    `專案: \`${job.projectName}\`\n` +
+    `專案: \`${escMd(job.projectName)}\`\n` +
     `耗時: ${elapsed}s\n\n` +
     `${results.join('\n')}${conflictNote}`
 
