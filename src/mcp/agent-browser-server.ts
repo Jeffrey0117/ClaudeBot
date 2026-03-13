@@ -60,7 +60,7 @@ function runAB(...args: readonly string[]): Promise<string> {
     execFile(
       'agent-browser',
       args as string[],
-      { timeout: TIMEOUT_MS, shell: false },
+      { timeout: TIMEOUT_MS, shell: true, windowsHide: true },
       (error, stdout, stderr) => {
         if (error) {
           const msg = stderr?.trim() || error.message

@@ -14,6 +14,7 @@ function isGitRepo(cwd: string): boolean {
       cwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     })
     return out.trim() === 'true'
   } catch {
@@ -37,6 +38,7 @@ function hasRemote(cwd: string): boolean {
       cwd,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     }).trim()
     return out.length > 0
   } catch {

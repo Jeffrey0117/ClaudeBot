@@ -12,6 +12,7 @@ import { parseCrossProjectTasks, stripRunDirectives } from '../utils/cross-proje
 import { parseCommandDirectives, stripCommandDirectives } from '../utils/command-executor.js'
 import { parseDirectives, executeDirectives, stripDirectives } from '../utils/directives.js'
 import { parsePipeDirectives, executePipeDirectives, stripPipeDirectives } from '../utils/pipe-executor.js'
+import { parseUploadDirectives, executeUploadDirectives, stripUploadDirectives } from '../utils/upload-executor.js'
 import { createFakeContext } from '../utils/fake-context.js'
 import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand, getPluginModule } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
@@ -116,6 +117,7 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
     const cmdDirectives = parseCommandDirectives(rawAfterRun)
     const aiDirectives = parseDirectives(rawAfterRun)
     const pipeDirectives = parsePipeDirectives(rawAfterRun)
+    const uploadDirectives = parseUploadDirectives(rawAfterRun)
 
     // NOTE: @file/@confirm/@notify are executed AFTER sendResponseChunks (below)
     // so button messages appear below the response text, not above.
@@ -125,7 +127,12 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       await executePipeDirectives(pipeDirectives, ctx.item.chatId, ctx.telegram)
     }
 
-    // Strip all directives (@cmd + @file/@confirm/@notify + @pipe) before output hooks
+    // Execute @upload directives (file upload to upimg — before text processing)
+    if (uploadDirectives.length > 0) {
+      await executeUploadDirectives(uploadDirectives, ctx.item.chatId, ctx.telegram, ctx.item.project.path)
+    }
+
+    // Strip all directives (@cmd + @file/@confirm/@notify + @upload + @pipe) before output hooks
     // NOTE: @cmd is stripped here but executed AFTER main text is sent (below)
     const afterCmdStrip = cmdDirectives.length > 0
       ? stripCommandDirectives(rawAfterRun)
@@ -133,9 +140,12 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
     const afterAiStrip = aiDirectives.length > 0
       ? stripDirectives(afterCmdStrip)
       : afterCmdStrip
-    const textForHooks = pipeDirectives.length > 0
-      ? stripPipeDirectives(afterAiStrip)
+    const afterUploadStrip = uploadDirectives.length > 0
+      ? stripUploadDirectives(afterAiStrip)
       : afterAiStrip
+    const textForHooks = pipeDirectives.length > 0
+      ? stripPipeDirectives(afterUploadStrip)
+      : afterUploadStrip
 
     const hookResult = await dispatchOutputHooks(textForHooks, {
       projectPath: ctx.item.project.path,
@@ -152,13 +162,14 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
     }
 
     // Extract [CTX] digest and strip from display text
+    // NOTE: setContext() is deferred until AFTER @cmd execution (below),
+    // so @cmd(/ctx) can still read the PREVIOUS digest, not this response's.
     const { digest, cleaned: digestCleaned } = hookedText
       ? extractDigest(hookedText)
       : { digest: null, cleaned: '' }
 
     if (hookedText) {
       setLastResponse(ctx.item.project.path, digestCleaned || hookedText)
-      setContext(ctx.item.project.path, digestCleaned || hookedText, digest)
     }
 
     const responseText = digest !== null ? digestCleaned : hookedText
@@ -207,7 +218,7 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
     if (ctx.statusMsg) {
       ctx.telegram.editMessageText(
         ctx.item.chatId, ctx.statusMsg.message_id, undefined,
-        `\u{2705} *[${ctx.tag}]* \u{5B8C}\u{6210} | ${ctx.aiLabel} | $${cost} | ${totalTime}\u{79D2}${toolSummary}`,
+        `\u{2705} *[${ctx.tag}]* \u{5B8C}\u{6210} | \`${ctx.aiLabel}\` | $${cost} | ${totalTime}\u{79D2}${toolSummary}`,
         { parse_mode: 'Markdown' }
       ).catch(() => {})
     }
@@ -290,6 +301,12 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       }
     }
 
+    // Store context digest AFTER @cmd execution, so @cmd(/ctx) reads
+    // the PREVIOUS response's digest instead of the current one
+    if (hookedText) {
+      setContext(ctx.item.project.path, digestCleaned || hookedText, digest)
+    }
+
     ctx.done()
   } catch (err) {
     console.error('[queue] onResult error:', err)
@@ -341,21 +358,21 @@ async function sendResponseChunks(
   const hadDraft = ctx.draftActive
   if (hadDraft) {
     // draftText has ALL turns — strip directives + CTX so user sees full process
-    const draftStripped = stripPipeDirectives(
+    const draftStripped = stripPipeDirectives(stripUploadDirectives(
       stripDirectives(stripCommandDirectives(stripRunDirectives(ctx.draftText))),
-    )
+    ))
     const { cleaned: draftDigestCleaned } = extractDigest(draftStripped)
     const draftCleaned = cleanMarkdown(draftDigestCleaned || draftStripped)
     const botLabel = `\`[${deriveBotId()}]\` `
     await finalizeDraft(ctx.telegram, ctx.item.chatId, botLabel + (draftCleaned || cleaned))
     ctx.draftActive = false
 
-    // If there are choice buttons, send them separately
+    // If there are choice buttons, send them separately (draft can't attach buttons)
     if (replyButtons) {
       try {
         await ctx.telegram.sendMessage(
           ctx.item.chatId,
-          '請選擇：',
+          '\u200B', // invisible character — question is already in the response above
           { ...replyButtons }
         )
       } catch {
@@ -482,7 +499,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       ? null
       : await telegram.sendMessage(
           item.chatId,
-          `\u{1F680} *[${tag}]* \u{8655}\u{7406}\u{4E2D}...\n_${aiLabel}_`,
+          `\u{1F680} *[${tag}]* \u{8655}\u{7406}\u{4E2D}...\n\`${aiLabel}\``,
           { parse_mode: 'Markdown' }
         )
 
@@ -580,7 +597,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         const toolInfo = ctx.toolCount > 0
           ? `\n\u{1F527} Tools: ${ctx.toolCount} (${[...new Set(toolNames)].slice(-4).join(', ')})`
           : ''
-        const status = `\u{1F680} *[${tag}]* ${elapsed}s | ${aiLabel}${toolInfo}`
+        const status = `\u{1F680} *[${tag}]* ${elapsed}s | \`${aiLabel}\`${toolInfo}`
         if (status === lastStatusText) return
         lastStatusText = status
         telegram.editMessageText(

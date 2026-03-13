@@ -47,7 +47,7 @@ function resolveClaudeCli(): { cmd: string; prefix: readonly string[] } {
     return { cmd: 'claude', prefix: [] }
   }
   try {
-    const cmdPath = execSync('where claude.cmd', { encoding: 'utf-8' }).trim().split('\n')[0].trim()
+    const cmdPath = execSync('where claude.cmd', { encoding: 'utf-8', windowsHide: true }).trim().split('\n')[0].trim()
     const dir = path.dirname(cmdPath)
     const cliJs = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js')
     return { cmd: process.execPath, prefix: [cliJs] }
@@ -162,6 +162,28 @@ export function runClaude(options: RunOptions): void {
         `4. 搜尋程式碼用 remote_grep，比 remote_search_files 快很多。\n` +
         `5. 修改檔案前先 remote_read_file 讀取完整內容。\n` +
         `\n` +
+        (env.MCP_AGENT_BROWSER
+          ? `瀏覽器操作（遠端機器）：\n` +
+            `- ab_connect_browser(): 連接使用者的 Chrome（帶登入狀態）。需要登入的網站必須先呼叫。\n` +
+            `- ab_open(url): 開啟網頁\n` +
+            `- ab_snapshot(): 取得頁面元素清單（互動元素 ref）\n` +
+            `- ab_click(ref): 點擊元素\n` +
+            `- ab_fill(ref, text): 填寫輸入欄位\n` +
+            `- ab_press(key): 按鍵（Enter, Escape, Tab）\n` +
+            `- ab_screenshot(): 截圖（頁面截圖）\n` +
+            `- ab_back(): 回上一頁\n` +
+            `- ab_get_url(): 取得當前網址\n` +
+            `\n` +
+            `瀏覽器使用規則（嚴格遵守，不要自行發明替代方案）：\n` +
+            `1. 需要登入的網站 → ab_connect_browser() → ab_open(url) → ab_snapshot() → 操作\n` +
+            `2. 不需要登入 → 直接 ab_open(url)\n` +
+            `3. ab_connect_browser 內部會：殺 daemon → 關 Chrome → 刪 lockfile → 重開帶 CDP → 確認連線。\n` +
+            `   你只需要呼叫一次，不要自己用 remote_execute_command 去殺 Chrome 或改設定。\n` +
+            `4. 如果 ab_connect_browser 失敗，直接回報錯誤訊息。不要自行嘗試修復。\n` +
+            `5. 如果 ab_* 工具 timeout，可能是頁面太重。用 ab_screenshot 確認狀態後再操作。\n` +
+            `6. 絕對不要建議使用者「手動操作」。你有完整的瀏覽器控制能力，用它。\n` +
+            `\n`
+          : '') +
         `⚠️ 自我修改例外：\n` +
         `如果需要修改 ClaudeBot 專案本身的程式碼（當前工作目錄下的檔案），\n` +
         `一律使用本地工具（Read/Write/Edit/Bash），不要用 remote_* 工具。\n` +
@@ -218,17 +240,22 @@ export function runClaude(options: RunOptions): void {
     args.push('--resume', sessionId)
   }
 
+  // Determine if this is a remote session
+  const isRemoteSession = env.REMOTE_ENABLED && options.chatId
+    && getPairing(options.chatId, options.threadId)?.connected === true
+
   const mcpConfigs: string[] = []
   if (env.MCP_BROWSER) {
     mcpConfigs.push(path.resolve('data', 'mcp-browser.json'))
   }
-  if (env.MCP_AGENT_BROWSER) {
+  // Local agent-browser only when NOT remote — remote proxy provides ab_* tools
+  if (env.MCP_AGENT_BROWSER && !isRemoteSession) {
     mcpConfigs.push(path.resolve('data', 'mcp-agent-browser.json'))
   }
 
   // Dynamic remote pairing MCP config — only when REMOTE_ENABLED
   let remoteMcpConfigPath: string | null = null
-  if (env.REMOTE_ENABLED && options.chatId) {
+  if (isRemoteSession && options.chatId) {
     const pairing = getPairing(options.chatId, options.threadId)
     if (pairing?.connected) {
       const port = getRelayPort() || env.RELAY_PORT

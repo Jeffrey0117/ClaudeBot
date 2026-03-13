@@ -26,7 +26,7 @@ function ask(question: string, defaultValue?: string): Promise<string> {
 function checkCli(name: string): boolean {
   try {
     const cmd = process.platform === 'win32' ? `where ${name}` : `which ${name}`
-    execSync(cmd, { stdio: 'ignore' })
+    execSync(cmd, { stdio: 'ignore', windowsHide: true })
     return true
   } catch {
     return false
