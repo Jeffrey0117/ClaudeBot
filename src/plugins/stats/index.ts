@@ -82,10 +82,19 @@ function parseTimeRange(input: string): { start: number; end: number; label: str
   return null
 }
 
+/** Format a timestamp as local YYYY-MM-DD (avoids UTC shift from toISOString) */
+function localDate(ms: number): string {
+  const d = new Date(ms)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 /** Aggregate stats from activities + git for a time range */
 function aggregateStats(start: number, end: number) {
-  const sinceISO = new Date(start).toISOString().slice(0, 10)
-  const untilISO = new Date(end).toISOString().slice(0, 10)
+  const sinceISO = localDate(start)
+  const untilISO = localDate(end)
   const activities = readActivities(start, end)
   const git = scanGitActivity(sinceISO, untilISO)
 
@@ -115,13 +124,13 @@ function calcStreak(git: GitSummary): number {
   let streak = 0
 
   // If today has no commits yet, start from yesterday
-  const todayStr = d.toISOString().slice(0, 10)
+  const todayStr = localDate(d.getTime())
   if (!activeDays.has(todayStr)) {
     d.setDate(d.getDate() - 1)
   }
 
   while (true) {
-    const dateStr = d.toISOString().slice(0, 10)
+    const dateStr = localDate(d.getTime())
     if (activeDays.has(dateStr)) {
       streak++
       d.setDate(d.getDate() - 1)
@@ -154,7 +163,7 @@ function formatToday(): string {
   const yesterdayStart = daysAgo(1)
   const prev = aggregateStats(yesterdayStart, start - 1)
 
-  const todayISO = new Date().toISOString().slice(0, 10)
+  const todayISO = localDate(Date.now())
 
   return [
     `📊 *今日統計* (${todayISO})`,
@@ -188,7 +197,7 @@ function formatWeek(): string {
   const barLines: string[] = []
   for (let i = 6; i >= 0; i--) {
     const d = new Date(daysAgo(i))
-    const dateStr = d.toISOString().slice(0, 10)
+    const dateStr = localDate(d.getTime())
     const dayName = days[d.getDay()]
     const count = dailyCommitMap.get(dateStr) ?? 0
     barLines.push(`${dayName} ${bar(count, maxDaily, 12)} ${count}`)
@@ -241,7 +250,7 @@ function formatMonth(): string {
   weekLine = '  '.repeat(firstDow)
   for (let day = 1; day <= daysInMonth; day++) {
     const d = new Date(now.getFullYear(), now.getMonth(), day)
-    const dateStr = d.toISOString().slice(0, 10)
+    const dateStr = localDate(d.getTime())
     const count = dailyMap.get(dateStr) ?? 0
     weekLine += heatSquare(count)
     if (d.getDay() === 6 || day === daysInMonth) {
@@ -274,8 +283,7 @@ function formatMonth(): string {
 function formatYear(): string {
   const now = new Date()
   const yearStart = new Date(now.getFullYear(), 0, 1)
-  const yearISO = yearStart.toISOString().slice(0, 10)
-  const git = scanGitActivity(yearISO)
+  const git = scanGitActivity(localDate(yearStart.getTime()))
   const activities = readActivities(yearStart.getTime(), Date.now())
 
   const prompts = activities.filter((a) => a.type === 'prompt_complete')
@@ -335,9 +343,7 @@ function formatHours(): string {
   const monthStart = new Date()
   monthStart.setDate(1)
   monthStart.setHours(0, 0, 0, 0)
-  const monthISO = monthStart.toISOString().slice(0, 10)
-
-  const git = scanGitActivity(monthISO)
+  const git = scanGitActivity(localDate(monthStart.getTime()))
   const activities = readActivities(monthStart.getTime(), Date.now())
 
   // Combine git + prompt activity per hour
@@ -387,9 +393,7 @@ function formatProjects(): string {
   const monthStart = new Date()
   monthStart.setDate(1)
   monthStart.setHours(0, 0, 0, 0)
-  const monthISO = monthStart.toISOString().slice(0, 10)
-
-  const git = scanGitActivity(monthISO)
+  const git = scanGitActivity(localDate(monthStart.getTime()))
 
   if (git.projects.length === 0) {
     return '📊 本月尚無 commit 紀錄'
@@ -413,16 +417,20 @@ function formatProjects(): string {
 function formatRange(start: number, end: number, label: string): string {
   const s = aggregateStats(start, end)
 
-  // Calculate range duration for comparison with equal-length previous period
   const durationMs = end - start
-  const prevStart = start - durationMs
-  const prevEnd = start - 1
-  const prev = aggregateStats(prevStart, prevEnd)
-
-  const activeDays = s.git.dailyCommits.filter((d) => d.count > 0).length
   const totalDays = Math.max(1, Math.ceil(durationMs / 86_400_000))
 
-  // Daily bar chart (up to 14 days shown individually, else monthly)
+  // Delta comparison: only for ranges ≤14 days (avoids 2× git scan blocking)
+  let prev: ReturnType<typeof aggregateStats> | null = null
+  if (totalDays <= 14) {
+    const prevStart = start - durationMs
+    const prevEnd = start - 1
+    prev = aggregateStats(prevStart, prevEnd)
+  }
+
+  const activeDays = s.git.dailyCommits.filter((d) => d.count > 0).length
+
+  // Daily bar chart (up to 14 days shown individually)
   let chartSection = ''
   if (totalDays <= 14) {
     const dailyMap = new Map(s.git.dailyCommits.map((d) => [d.date, d.count]))
@@ -431,7 +439,7 @@ function formatRange(start: number, end: number, label: string): string {
     const barLines: string[] = []
     const cursor = new Date(start)
     while (cursor.getTime() <= end) {
-      const dateStr = cursor.toISOString().slice(0, 10)
+      const dateStr = localDate(cursor.getTime())
       const dayName = days[cursor.getDay()]
       const count = dailyMap.get(dateStr) ?? 0
       barLines.push(`${dayName} ${dateStr.slice(5)} ${bar(count, maxDaily, 10)} ${count}`)
@@ -440,14 +448,18 @@ function formatRange(start: number, end: number, label: string): string {
     chartSection = ['', '*每日活動:*', '```', ...barLines, '```'].join('\n')
   }
 
+  const d = (cur: number, field: 'totalCommits' | 'prompts' | 'totalCost') =>
+    prev ? delta(cur, field === 'totalCommits' ? prev.git.totalCommits
+      : field === 'prompts' ? prev.prompts : prev.totalCost) : ''
+
   return [
     `📊 *${label}*`,
     '',
-    `🔨 Commits: *${s.git.totalCommits}*${delta(s.git.totalCommits, prev.git.totalCommits)}`,
+    `🔨 Commits: *${s.git.totalCommits}*${d(s.git.totalCommits, 'totalCommits')}`,
     `📝 Lines: *+${s.git.totalInsertions}* / *-${s.git.totalDeletions}*`,
     `💬 訊息: *${s.messages}* | 🎤 語音: *${s.voices}*`,
-    `🤖 Prompts: *${s.prompts}*${delta(s.prompts, prev.prompts)}`,
-    `💰 花費: *$${s.totalCost.toFixed(2)}*${delta(s.totalCost, prev.totalCost)}`,
+    `🤖 Prompts: *${s.prompts}*${d(s.prompts, 'prompts')}`,
+    `💰 花費: *$${s.totalCost.toFixed(2)}*${d(s.totalCost, 'totalCost')}`,
     `📅 活躍天數: *${activeDays}* / ${totalDays}`,
     chartSection,
     '',

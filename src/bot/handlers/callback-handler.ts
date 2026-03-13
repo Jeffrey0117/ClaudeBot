@@ -93,7 +93,7 @@ async function handleProjectSelect(ctx: BotContext, chatId: number, name: string
   const state = getUserState(chatId, threadId)
 
   await ctx.editMessageText(
-    `\u{2705} \u{5DF2}\u{9078}\u{64C7}: *${project.name}*\n\u{6A21}\u{578B}: ${formatAILabel(state.ai)}\n\n\u{50B3}\u{9001}\u{8A0A}\u{606F}\u{958B}\u{59CB}\u{5C0D}\u{8A71}\u{3002}`,
+    `\u{2705} \u{5DF2}\u{9078}\u{64C7}: *${project.name}*\n\u{6A21}\u{578B}: \`${formatAILabel(state.ai)}\`\n\n\u{50B3}\u{9001}\u{8A0A}\u{606F}\u{958B}\u{59CB}\u{5C0D}\u{8A71}\u{3002}`,
     { parse_mode: 'Markdown' }
   )
   await ctx.answerCbQuery()
@@ -112,7 +112,7 @@ async function handleRemoteProjectSelect(ctx: BotContext, chatId: number, name: 
   const state = getUserState(chatId, threadId)
 
   await ctx.editMessageText(
-    `\u{2705} \u{5DF2}\u{9078}\u{64C7}: *${name}*\n\u{6A21}\u{578B}: ${formatAILabel(state.ai)}\n\n\u{50B3}\u{9001}\u{8A0A}\u{606F}\u{958B}\u{59CB}\u{5C0D}\u{8A71}\u{3002}`,
+    `\u{2705} \u{5DF2}\u{9078}\u{64C7}: *${name}*\n\u{6A21}\u{578B}: \`${formatAILabel(state.ai)}\`\n\n\u{50B3}\u{9001}\u{8A0A}\u{606F}\u{958B}\u{59CB}\u{5C0D}\u{8A71}\u{3002}`,
     { parse_mode: 'Markdown' },
   )
   await ctx.answerCbQuery()
@@ -131,13 +131,13 @@ async function handleAISelect(ctx: BotContext, chatId: number, payload: string):
   const threadId = getThreadId(ctx)
   setUserAI(chatId, ai, threadId)
 
-  await ctx.editMessageText(`\u{2705} \u{5DF2}\u{5207}\u{63DB}\u{70BA} *${formatAILabel(ai)}*`, { parse_mode: 'Markdown' })
+  await ctx.editMessageText(`\u{2705} \u{5DF2}\u{5207}\u{63DB}\u{70BA} \`${formatAILabel(ai)}\``, { parse_mode: 'Markdown' }).catch(() => {})
   await ctx.answerCbQuery()
 
   // Update pin to reflect new model
   const state = getUserState(chatId, threadId)
   if (state.selectedProject) {
-    await pinProjectStatus(chatId, state.selectedProject, formatAILabel(ai))
+    await pinProjectStatus(chatId, state.selectedProject, formatAILabel(ai)).catch(() => {})
   }
 }
 

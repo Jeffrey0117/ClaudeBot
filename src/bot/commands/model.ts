@@ -26,7 +26,7 @@ export async function modelCommand(ctx: BotContext): Promise<void> {
   // No args → show keyboard
   if (!args) {
     const keyboard = buildModelKeyboard(state.ai)
-    await ctx.reply(`\u{1F916} \u{76EE}\u{524D}: *${formatAILabel(state.ai)}*\n\u{9078}\u{64C7} AI \u{5F8C}\u{7AEF}\u{8207}\u{6A21}\u{578B}:`, {
+    await ctx.reply(`\u{1F916} \u{76EE}\u{524D}: \`${formatAILabel(state.ai)}\`\n\u{9078}\u{64C7} AI \u{5F8C}\u{7AEF}\u{8207}\u{6A21}\u{578B}:`, {
       ...keyboard,
       parse_mode: 'Markdown',
     })
@@ -58,7 +58,7 @@ export async function modelCommand(ctx: BotContext): Promise<void> {
       if (models.includes(modelName)) {
         const ai: AIModelSelection = { backend: backend as AIBackend, model: modelName }
         setUserAI(chatId, ai, threadId)
-        await ctx.reply(`\u{2705} \u{5DF2}\u{5207}\u{63DB}\u{70BA} *${formatAILabel(ai)}*`, { parse_mode: 'Markdown' })
+        await ctx.reply(`\u{2705} \u{5DF2}\u{5207}\u{63DB}\u{70BA} \`${formatAILabel(ai)}\``, { parse_mode: 'Markdown' })
         await updatePin(ai)
         return
       }
@@ -91,6 +91,6 @@ export async function modelCommand(ctx: BotContext): Promise<void> {
 
   const ai: AIModelSelection = { backend: backendStr as AIBackend, model: modelStr }
   setUserAI(chatId, ai, threadId)
-  await ctx.reply(`\u{2705} \u{5DF2}\u{5207}\u{63DB}\u{70BA} *${formatAILabel(ai)}*`, { parse_mode: 'Markdown' })
+  await ctx.reply(`\u{2705} \u{5DF2}\u{5207}\u{63DB}\u{70BA} \`${formatAILabel(ai)}\``, { parse_mode: 'Markdown' })
   await updatePin(ai)
 }

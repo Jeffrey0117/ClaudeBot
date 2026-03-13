@@ -39,7 +39,7 @@ export function scheduleRestartNotifications(bot: Telegraf<BotContext>): void {
 
       bot.telegram.sendMessage(
         chatId,
-        `🔄 ${label} 已重啟，已自動帶入 *${project}*\n_${ai}_`,
+        `🔄 ${label} 已重啟，已自動帶入 *${project}*\n\`${ai}\``,
         { parse_mode: 'Markdown' },
       ).catch((err) => {
         console.error(`[restart-notify] Failed to notify ${chatId}:`, err.message)

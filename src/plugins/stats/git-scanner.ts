@@ -29,16 +29,36 @@ function runGit(cwd: string, args: string): string {
       cwd,
       encoding: 'utf-8',
       timeout: 5_000,
+      maxBuffer: 10 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
     }).trim()
   } catch {
     return ''
   }
 }
 
-/** Cache: key = "sinceDate|untilDate", short TTL to avoid repeated scans within one request */
+/**
+ * Quick mtime check: skip repos where git reflog hasn't been touched since sinceDate.
+ * Filesystem stat only — no process spawn overhead.
+ */
+function hasRecentGitActivity(gitDir: string, sinceMs: number): boolean {
+  try {
+    // .git/logs/HEAD is updated on every commit, merge, checkout
+    const headLog = join(gitDir, 'logs', 'HEAD')
+    if (existsSync(headLog) && statSync(headLog).mtimeMs >= sinceMs) return true
+    // Fallback: check packed-refs (updated on fetch/gc)
+    const packedRefs = join(gitDir, 'packed-refs')
+    if (existsSync(packedRefs) && statSync(packedRefs).mtimeMs >= sinceMs) return true
+    return false
+  } catch {
+    return true // on error, don't skip — let git log handle it
+  }
+}
+
+/** Cache: key = "sinceDate|untilDate", 30s TTL to avoid repeated scans across current+delta */
 let gitCache: { key: string; data: GitSummary; ts: number } | null = null
-const GIT_CACHE_TTL_MS = 3_000
+const GIT_CACHE_TTL_MS = 30_000
 
 /**
  * Get the canonical git dir for a project path.
@@ -64,6 +84,16 @@ function getGitDir(dirPath: string): string | null {
   }
 }
 
+/** Normalize bare YYYY-MM-DD to explicit midnight so git doesn't misinterpret */
+function normSince(d: string): string { return d.includes('T') ? d : `${d}T00:00:00` }
+function normUntil(d: string): string { return d.includes('T') ? d : `${d}T23:59:59` }
+
+/** Local YYYY-MM-DD from epoch ms (avoids UTC shift from toISOString) */
+function localDateStr(ms: number): string {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 /**
  * Scan git logs across all projects for a given time range.
  * Deduplicates worktrees (same repo scanned once) and commits (by hash).
@@ -78,13 +108,15 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
   const allCommits: CommitInfo[] = []
   const seenGitDirs = new Set<string>()
   const seenHashes = new Set<string>()
+  const sinceNorm = normSince(sinceDate)
+  const sinceMs = new Date(sinceNorm).getTime()
 
-  const untilArg = untilDate ? ` --until="${untilDate}"` : ''
-
-  // Track seen commits across all projects to avoid duplicates (git log --all shows all branches)
-  const seenCommits = new Set<string>()
+  const untilArg = untilDate ? ` --until="${normUntil(untilDate)}"` : ''
 
   for (const project of projects) {
+    // Skip backup directories — they duplicate the original repo's commits
+    if (project.name.endsWith('.bak')) continue
+
     const gitDir = getGitDir(project.path)
     if (!gitDir) continue
 
@@ -92,10 +124,13 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
     if (seenGitDirs.has(gitDir)) continue
     seenGitDirs.add(gitDir)
 
-    // Use HEAD only (no --all) to avoid counting branch+merge commits twice
+    // Fast mtime check: skip repos with no git activity since the range start
+    if (!hasRecentGitActivity(gitDir, sinceMs)) continue
+
+    // Use HEAD only (no --all), --no-merges for clean counts
     const log = runGit(
       project.path,
-      `log --since="${sinceDate}" ${untilArg} --pretty=format:"%H|%aI|%s" --shortstat`
+      `log --no-merges --since="${sinceNorm}" ${untilArg} --pretty=format:"%H|%aI|%s" --shortstat`
     )
 
     if (!log) continue
@@ -113,14 +148,14 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
       const message = msgParts.join('|')
       const timestamp = new Date(date).getTime()
 
-      // Skip if we've already seen this commit (same commit visible in multiple branches)
-      if (seenCommits.has(hash)) {
+      // Dedup by commit hash (same commit from forks/mirrors/clones)
+      if (seenHashes.has(hash)) {
         i++
         // Still need to skip stat line if present
         if (i < lines.length && lines[i].trim().match(/\d+ (insertion|deletion)/)) i++
         continue
       }
-      seenCommits.add(hash)
+      seenHashes.add(hash)
 
       // Next line(s) might be the stat line
       let insertions = 0
@@ -134,19 +169,15 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
         if (insMatch || delMatch) i++ // skip stat line
       }
 
-      // Dedup by commit hash (prevents counting same commit from forks/mirrors)
-      if (!seenHashes.has(hash)) {
-        seenHashes.add(hash)
-        allCommits.push({
-          hash,
-          date,
-          timestamp,
-          message,
-          insertions,
-          deletions,
-          project: project.name,
-        })
-      }
+      allCommits.push({
+        hash,
+        date,
+        timestamp,
+        message,
+        insertions,
+        deletions,
+        project: project.name,
+      })
 
       i++
     }
@@ -176,7 +207,7 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
   // Daily commits
   const dailyMap = new Map<string, number>()
   for (const c of allCommits) {
-    const day = new Date(c.timestamp).toISOString().slice(0, 10)
+    const day = localDateStr(c.timestamp)
     dailyMap.set(day, (dailyMap.get(day) ?? 0) + 1)
   }
 

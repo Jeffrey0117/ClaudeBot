@@ -20,8 +20,11 @@ import {
   on429Detected,
   adaptiveTick,
   pruneExpiredRecords,
+  perRemoteRateBudget,
+  perRemoteWeeklyBudget,
 } from './quota-engine.js'
 import { RATE_WINDOW_MS } from './types.js'
+import { getBotConnectedPairings } from '../../remote/pairing-store.js'
 
 // Re-export for integration hooks (via getPluginModule)
 export { tryReserve, settle, on429Detected }
@@ -32,6 +35,117 @@ export { tryReserve, settle, on429Detected }
 
 let adaptiveTimer: ReturnType<typeof setInterval> | null = null
 let pruneTimer: ReturnType<typeof setInterval> | null = null
+
+// ---------------------------------------------------------------------------
+// Chaining: tokenize args into subcommand groups
+// ---------------------------------------------------------------------------
+
+const KNOWN_KEYWORDS = new Set([
+  'on', 'off', 'auto', 'set', 'weekly', 'ratio', 'margin', 'reset', 'history',
+])
+
+/** Split "on set 20 weekly 3000" → [["on"], ["set","20"], ["weekly","3000"]] */
+function tokenizeChain(tokens: readonly string[]): string[][] {
+  const groups: string[][] = []
+  let current: string[] = []
+
+  for (const t of tokens) {
+    if (KNOWN_KEYWORDS.has(t.toLowerCase()) && current.length > 0) {
+      groups.push(current)
+      current = [t]
+    } else {
+      current.push(t)
+    }
+  }
+  if (current.length > 0) groups.push(current)
+  return groups
+}
+
+// ---------------------------------------------------------------------------
+// Execute a single subcommand, return result text (or null for panel cmds)
+// ---------------------------------------------------------------------------
+
+function executeSubcommand(parts: readonly string[]): string | 'panel' | null {
+  const sub = parts[0].toLowerCase()
+
+  switch (sub) {
+    case 'on':
+      updateConfig({ enabled: true })
+      return '\u{1F7E2} Allot \u{5DF2}\u{555F}\u{7528}'
+
+    case 'off':
+      updateConfig({ enabled: false })
+      return '\u{1F534} Allot \u{5DF2}\u{505C}\u{7528}'
+
+    case 'auto': {
+      // One-key setup: enable + auto mode + smart ratio
+      updateConfig({ enabled: true, mode: 'auto' })
+
+      const numRemotes = Math.max(1, getBotConnectedPairings().length)
+      const ratio = Math.min(80, Math.floor(80 / numRemotes))
+      updateConfig({ ratioPercent: ratio, marginPercent: 10 })
+
+      // Optional: /allot auto <rate> <weekly>
+      const rateArg = parseInt(parts[1], 10)
+      const weeklyArg = parseInt(parts[2], 10)
+      if (!isNaN(rateArg) && rateArg >= 1) updateConfig({ rateBudget: rateArg })
+      if (!isNaN(weeklyArg) && weeklyArg >= 1) updateConfig({ weeklyBudget: weeklyArg })
+
+      const config = getStore().load().config
+      const perRate = perRemoteRateBudget(config)
+      const perWeekly = perRemoteWeeklyBudget(config)
+
+      return (
+        `\u{1F916} Auto \u{4E00}\u{9375}\u{8A2D}\u{5B9A}\u{5B8C}\u{6210}\n`
+        + `\u{2022} \u{9060}\u{7AEF}\u{53F0}\u{6578}: ${numRemotes}\n`
+        + `\u{2022} ratio: ${config.ratioPercent}% / margin: ${config.marginPercent}%\n`
+        + `\u{2022} Rate: ${config.rateBudget} \u{2192} \u{6BCF}\u{53F0} ${perRate} turns/5min\n`
+        + `\u{2022} Weekly: ${config.weeklyBudget} \u{2192} \u{6BCF}\u{53F0} ${perWeekly} turns/week`
+      )
+    }
+
+    case 'set': {
+      const n = parseInt(parts[1], 10)
+      if (isNaN(n) || n < 1) return '\u{26A0}\u{FE0F} \u{7528}\u{6CD5}: /allot set <N>'
+      updateConfig({ rateBudget: n, mode: 'manual' })
+      return `\u{1F4D0} Rate \u{9810}\u{7B97}\u{5DF2}\u{8A2D}\u{70BA} ${n} turns (\u{624B}\u{52D5}\u{6A21}\u{5F0F})`
+    }
+
+    case 'weekly': {
+      const w = parseInt(parts[1], 10)
+      if (isNaN(w) || w < 1) return '\u{26A0}\u{FE0F} \u{7528}\u{6CD5}: /allot weekly <N>'
+      updateConfig({ weeklyBudget: w })
+      return `\u{1F4C5} Weekly \u{9810}\u{7B97}\u{5DF2}\u{8A2D}\u{70BA} ${w} turns`
+    }
+
+    case 'ratio': {
+      const r = parseInt(parts[1], 10)
+      if (isNaN(r) || r < 5 || r > 95) return '\u{26A0}\u{FE0F} \u{7528}\u{6CD5}: /allot ratio <5-95>'
+      updateConfig({ ratioPercent: r })
+      return `\u{1F4B0} \u{6BCF}\u{53F0}\u{9060}\u{7AEF}\u{4F54}\u{6BD4}\u{5DF2}\u{8A2D}\u{70BA} ${r}%`
+    }
+
+    case 'margin': {
+      const m = parseInt(parts[1], 10)
+      if (isNaN(m) || m < 0 || m > 50) return '\u{26A0}\u{FE0F} \u{7528}\u{6CD5}: /allot margin <0-50>'
+      updateConfig({ marginPercent: m })
+      return `\u{1F4CA} \u{908A}\u{969B}\u{5DF2}\u{8A2D}\u{70BA} ${m}%`
+    }
+
+    case 'reset': {
+      const targetId = parts[1]
+      if (!targetId) return '\u{26A0}\u{FE0F} \u{7528}\u{6CD5}: /allot reset <remote-id>'
+      resetRemoteUsage(targetId)
+      return `\u{1F504} \u{5DF2}\u{91CD}\u{7F6E} ${targetId} \u{7684}\u{4F7F}\u{7528}\u{8A18}\u{9304}`
+    }
+
+    case 'history':
+      return 'panel'
+
+    default:
+      return null
+  }
+}
 
 // ---------------------------------------------------------------------------
 // /allot command
@@ -53,101 +167,40 @@ async function allotCommand(ctx: BotContext): Promise<void> {
     return
   }
 
-  const parts = args.split(/\s+/)
-  const sub = parts[0].toLowerCase()
+  const tokens = args.split(/\s+/)
+  const groups = tokenizeChain(tokens)
+  const results: string[] = []
 
-  switch (sub) {
-    case 'on':
-      updateConfig({ enabled: true })
-      await ctx.reply('\u{1F7E2} Allot \u{5DF2}\u{555F}\u{7528}')
-      break
-
-    case 'off':
-      updateConfig({ enabled: false })
-      await ctx.reply('\u{1F534} Allot \u{5DF2}\u{505C}\u{7528}')
-      break
-
-    case 'auto':
-      updateConfig({ mode: 'auto' })
-      await ctx.reply('\u{1F916} \u{5DF2}\u{5207}\u{63DB}\u{70BA}\u{81EA}\u{9069}\u{61C9}\u{6A21}\u{5F0F}')
-      break
-
-    case 'set': {
-      const n = parseInt(parts[1], 10)
-      if (isNaN(n) || n < 1) {
-        await ctx.reply('\u{26A0}\u{FE0F} \u{7528}\u{6CD5}: /allot set <N>')
-        break
-      }
-      updateConfig({ rateBudget: n, mode: 'manual' })
-      await ctx.reply(`\u{1F4D0} Rate \u{9810}\u{7B97}\u{5DF2}\u{8A2D}\u{70BA} ${n} turns (\u{624B}\u{52D5}\u{6A21}\u{5F0F})`)
-      break
-    }
-
-    case 'weekly': {
-      const w = parseInt(parts[1], 10)
-      if (isNaN(w) || w < 1) {
-        await ctx.reply('\u{26A0}\u{FE0F} \u{7528}\u{6CD5}: /allot weekly <N>')
-        break
-      }
-      updateConfig({ weeklyBudget: w })
-      await ctx.reply(`\u{1F4C5} Weekly \u{9810}\u{7B97}\u{5DF2}\u{8A2D}\u{70BA} ${w} turns`)
-      break
-    }
-
-    case 'ratio': {
-      const r = parseInt(parts[1], 10)
-      if (isNaN(r) || r < 5 || r > 95) {
-        await ctx.reply('\u{26A0}\u{FE0F} \u{7528}\u{6CD5}: /allot ratio <5-95>')
-        break
-      }
-      updateConfig({ ratioPercent: r })
-      await ctx.reply(`\u{1F4B0} \u{6BCF}\u{53F0}\u{9060}\u{7AEF}\u{4F54}\u{6BD4}\u{5DF2}\u{8A2D}\u{70BA} ${r}%`)
-      break
-    }
-
-    case 'margin': {
-      const m = parseInt(parts[1], 10)
-      if (isNaN(m) || m < 0 || m > 50) {
-        await ctx.reply('\u{26A0}\u{FE0F} \u{7528}\u{6CD5}: /allot margin <0-50>')
-        break
-      }
-      updateConfig({ marginPercent: m })
-      await ctx.reply(`\u{1F4CA} \u{908A}\u{969B}\u{5DF2}\u{8A2D}\u{70BA} ${m}%`)
-      break
-    }
-
-    case 'reset': {
-      const targetId = parts[1]
-      if (!targetId) {
-        await ctx.reply('\u{26A0}\u{FE0F} \u{7528}\u{6CD5}: /allot reset <remote-id>')
-        break
-      }
-      resetRemoteUsage(targetId)
-      await ctx.reply(`\u{1F504} \u{5DF2}\u{91CD}\u{7F6E} ${targetId} \u{7684}\u{4F7F}\u{7528}\u{8A18}\u{9304}`)
-      break
-    }
-
-    case 'history': {
+  for (const group of groups) {
+    const result = executeSubcommand(group)
+    if (result === 'panel') {
       const panel = buildHistoryPanel()
       await ctx.reply(panel.text, { parse_mode: 'Markdown', ...panel.keyboard })
-      break
+      return
     }
+    if (result !== null) {
+      results.push(result)
+    }
+  }
 
-    default:
-      await ctx.reply(
-        '\u{26A0}\u{FE0F} \u{672A}\u{77E5}\u{6307}\u{4EE4}\n\n'
-        + '\u{7528}\u{6CD5}:\n'
-        + '`/allot` \u{2014} \u{6253}\u{958B}\u{9762}\u{677F}\n'
-        + '`/allot on|off` \u{2014} \u{555F}\u{7528}/\u{505C}\u{7528}\n'
-        + '`/allot auto` \u{2014} \u{81EA}\u{9069}\u{61C9}\u{6A21}\u{5F0F}\n'
-        + '`/allot ratio <5-95>` \u{2014} \u{9060}\u{7AEF}\u{4F54}\u{6BD4} %\n'
-        + '`/allot set <N>` \u{2014} \u{8A2D}\u{5B9A} Rate \u{9810}\u{7B97}\n'
-        + '`/allot weekly <N>` \u{2014} \u{8A2D}\u{5B9A}\u{6BCF}\u{9031}\u{9810}\u{7B97}\n'
-        + '`/allot margin <0-50>` \u{2014} \u{908A}\u{969B}\u{767E}\u{5206}\u{6BD4}\n'
-        + '`/allot reset <id>` \u{2014} \u{91CD}\u{7F6E}\u{4F7F}\u{7528}\u{8A18}\u{9304}\n'
-        + '`/allot history` \u{2014} \u{67E5}\u{770B}\u{6B77}\u{53F2}',
-        { parse_mode: 'Markdown' },
-      )
+  if (results.length > 0) {
+    await ctx.reply(results.join('\n'), { parse_mode: 'Markdown' })
+  } else {
+    await ctx.reply(
+      '\u{26A0}\u{FE0F} \u{672A}\u{77E5}\u{6307}\u{4EE4}\n\n'
+      + '\u{7528}\u{6CD5}:\n'
+      + '`/allot` \u{2014} \u{6253}\u{958B}\u{9762}\u{677F}\n'
+      + '`/allot on|off` \u{2014} \u{555F}\u{7528}/\u{505C}\u{7528}\n'
+      + '`/allot auto [rate] [weekly]` \u{2014} \u{4E00}\u{9375}\u{8A2D}\u{5B9A}\n'
+      + '`/allot ratio <5-95>` \u{2014} \u{9060}\u{7AEF}\u{4F54}\u{6BD4} %\n'
+      + '`/allot set <N>` \u{2014} \u{8A2D}\u{5B9A} Rate \u{9810}\u{7B97}\n'
+      + '`/allot weekly <N>` \u{2014} \u{8A2D}\u{5B9A}\u{6BCF}\u{9031}\u{9810}\u{7B97}\n'
+      + '`/allot margin <0-50>` \u{2014} \u{908A}\u{969B}\u{767E}\u{5206}\u{6BD4}\n'
+      + '`/allot reset <id>` \u{2014} \u{91CD}\u{7F6E}\u{4F7F}\u{7528}\u{8A18}\u{9304}\n'
+      + '`/allot history` \u{2014} \u{67E5}\u{770B}\u{6B77}\u{53F2}\n'
+      + '\u{6307}\u{4EE4}\u{53EF}\u{4E32}\u{63A5}: `/allot on set 20 weekly 3000`',
+      { parse_mode: 'Markdown' },
+    )
   }
 }
 
