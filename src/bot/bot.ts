@@ -68,6 +68,7 @@ import { startCommandReader } from '../dashboard/command-reader.js'
 import { setAvailableCommands } from '../utils/system-prompt.js'
 import { scheduleRestartNotifications } from './restart-notifier.js'
 import { onPairingConnect, onPairingDisconnect } from '../remote/pairing-store.js'
+import { setUserProject } from './state.js'
 
 let botInstance: Telegraf<BotContext> | null = null
 
@@ -324,9 +325,12 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
 
   // Notify Telegram when remote pairing connects/disconnects
   onPairingConnect((session, label) => {
+    // Auto-switch to remote project so user doesn't have to /projects manually
+    setUserProject(session.chatId, { name: 'remote', path: 'remote:remote' }, session.threadId)
+
     bot.telegram.sendMessage(
       session.chatId,
-      `🔗 *遠端已連線* — ${label}\n_可以開始操作遠端電腦了_`,
+      `🔗 *遠端已連線* — ${label}\n_已自動切換到遠端模式，可以開始操作了_\n💡 _用 /projects 選擇遠端專案_`,
       { parse_mode: 'Markdown' },
     ).catch(() => {})
   })

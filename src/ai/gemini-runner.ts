@@ -9,7 +9,7 @@ const MAX_ACCUMULATED_LENGTH = 100_000
 
 /** Gemini model aliases → actual model IDs */
 const MODEL_MAP: Record<string, string> = {
-  'flash-lite': 'gemini-2.5-flash-lite-preview-06-17',
+  'flash-lite': 'gemini-2.5-flash-lite',
   'flash': 'gemini-2.5-flash',
   'pro': 'gemini-2.5-pro',
 }
@@ -23,7 +23,7 @@ function resolveGeminiCli(): { cmd: string; prefix: readonly string[]; shell: bo
     return { cmd: 'gemini', prefix: [], shell: false }
   }
   try {
-    const cmdPath = execSync('where gemini.cmd', { encoding: 'utf-8' }).trim().split('\n')[0].trim()
+    const cmdPath = execSync('where gemini.cmd', { encoding: 'utf-8', windowsHide: true }).trim().split('\n')[0].trim()
     const dir = path.dirname(cmdPath)
     const content = readFileSync(cmdPath, 'utf-8')
     // Extract JS entry point from npm .cmd shim (e.g. "%~dp0\node_modules\pkg\cli.js")
@@ -49,36 +49,60 @@ interface ActiveProcess {
 
 const activeProcesses = new Map<string, ActiveProcess>()
 
-/** Gemini CLI JSONL event types */
+/**
+ * Gemini CLI JSONL event types.
+ * Based on @google/gemini-cli-core/src/output/types.ts
+ */
 interface GeminiInitEvent {
   readonly type: 'init'
   readonly session_id?: string
+  readonly model?: string
 }
 
 interface GeminiMessageEvent {
   readonly type: 'message'
-  readonly content?: string
-  readonly delta?: string
-  readonly role?: string
+  readonly role: 'user' | 'assistant'
+  readonly content: string
+  /** true = incremental delta, false/absent = full content */
+  readonly delta?: boolean
 }
 
 interface GeminiToolUseEvent {
   readonly type: 'tool_use'
-  readonly name?: string
   readonly tool_name?: string
+  readonly tool_id?: string
+}
+
+interface GeminiToolResultEvent {
+  readonly type: 'tool_result'
+  readonly tool_id?: string
+  readonly status?: 'success' | 'error'
+  readonly output?: string
+}
+
+interface GeminiErrorEvent {
+  readonly type: 'error'
+  readonly severity?: 'warning' | 'error'
+  readonly message?: string
 }
 
 interface GeminiResultEvent {
   readonly type: 'result'
-  readonly session_id?: string
-  readonly result?: string
-  readonly is_error?: boolean
-  readonly error?: string
-  readonly total_cost_usd?: number
-  readonly duration_ms?: number
+  readonly status?: 'success' | 'error'
+  readonly error?: { type: string; message: string }
+  readonly stats?: {
+    readonly total_tokens?: number
+    readonly duration_ms?: number
+  }
 }
 
-type GeminiStreamEvent = GeminiInitEvent | GeminiMessageEvent | GeminiToolUseEvent | GeminiResultEvent
+type GeminiStreamEvent =
+  | GeminiInitEvent
+  | GeminiMessageEvent
+  | GeminiToolUseEvent
+  | GeminiToolResultEvent
+  | GeminiErrorEvent
+  | GeminiResultEvent
 
 export const geminiRunner: AIRunner = {
   backend: 'gemini' as AIBackend,
@@ -96,8 +120,13 @@ export const geminiRunner: AIRunner = {
 
     const resolvedModel = resolveModel(model)
 
+    // Gemini CLI has no --system-prompt flag, so prepend language hint on first turn
+    const effectivePrompt = sessionId
+      ? prompt
+      : `[請用繁體中文回覆，除非用戶寫英文]\n\n${prompt}`
+
     const args = [
-      prompt,
+      '--prompt', effectivePrompt,
       '--output-format', 'stream-json',
       '--model', resolvedModel,
       '--sandbox', 'false',
@@ -123,6 +152,7 @@ export const geminiRunner: AIRunner = {
     activeProcesses.set(validatedPath, active)
     let accumulated = ''
     let buffer = ''
+    let stderrBuf = ''
     let resultReceived = false
     let capturedSessionId = sessionId ?? ''
 
@@ -159,6 +189,14 @@ export const geminiRunner: AIRunner = {
                   console.error('[gemini-runner] Failed to save session ID:', err)
                 }
               }
+
+              // If result and accumulated are both empty, surface stderr as diagnostics
+              const text = result.resultText || accumulated
+              if (!text.trim() && stderrBuf.trim()) {
+                onError(`Gemini 無回覆。stderr:\n${stderrBuf.trim().slice(0, 500)}`)
+                return
+              }
+
               onResult({
                 backend: 'gemini',
                 model,
@@ -166,7 +204,7 @@ export const geminiRunner: AIRunner = {
                 costUsd: result.costUsd,
                 durationMs: result.durationMs,
                 cancelled: false,
-                resultText: result.resultText,
+                resultText: result.resultText || accumulated,
               })
             },
             onError,
@@ -178,7 +216,9 @@ export const geminiRunner: AIRunner = {
     })
 
     proc.stderr?.on('data', (chunk: Buffer) => {
-      console.log('[gemini-runner] stderr:', chunk.toString().trim())
+      const text = chunk.toString().trim()
+      if (text) stderrBuf += text + '\n'
+      console.log('[gemini-runner] stderr:', text)
     })
 
     proc.on('close', (code) => {
@@ -290,26 +330,35 @@ function handleGeminiEvent(event: GeminiStreamEvent, handlers: GeminiEventHandle
       break
     }
     case 'message': {
-      const text = event.delta ?? event.content ?? ''
-      if (text) {
-        handlers.onTextDelta(text)
+      // Skip user message echoes — only process assistant responses
+      if (event.role === 'user') break
+      // content is the text; delta is a boolean flag (not text)
+      if (event.content) {
+        handlers.onTextDelta(event.content)
       }
       break
     }
     case 'tool_use': {
-      const name = event.name ?? event.tool_name ?? 'unknown'
+      const name = event.tool_name ?? 'unknown'
       handlers.onToolUse(name)
       break
     }
+    case 'error': {
+      if (event.severity === 'error') {
+        handlers.onError(event.message ?? 'Unknown Gemini error')
+      }
+      break
+    }
     case 'result': {
-      if (event.is_error) {
-        handlers.onError(event.error ?? 'Unknown Gemini error')
+      if (event.status === 'error') {
+        const errMsg = event.error?.message ?? 'Unknown Gemini error'
+        handlers.onError(errMsg)
       } else {
         handlers.onResult({
-          sessionId: event.session_id ?? '',
-          costUsd: event.total_cost_usd ?? 0,
-          durationMs: event.duration_ms ?? 0,
-          resultText: event.result ?? '',
+          sessionId: '',
+          costUsd: 0,
+          durationMs: event.stats?.duration_ms ?? 0,
+          resultText: '',  // result event has no text — text comes from message events
         })
       }
       break

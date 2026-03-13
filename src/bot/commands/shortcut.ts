@@ -35,7 +35,7 @@ export async function shortcutCommand(ctx: BotContext): Promise<void> {
   const state = getUserState(chatId, threadId)
 
   await ctx.reply(
-    `\u{2705} \u{5DF2}\u{5207}\u{63DB}\u{5230} *${project.name}*\n\u{6A21}\u{578B}: ${formatAILabel(state.ai)}`,
+    `\u{2705} \u{5DF2}\u{5207}\u{63DB}\u{5230} *${project.name}*\n\u{6A21}\u{578B}: \`${formatAILabel(state.ai)}\``,
     { parse_mode: 'Markdown' }
   )
 }

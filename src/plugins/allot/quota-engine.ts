@@ -158,10 +158,12 @@ export function tryReserve(
   // Layer 1: Rate limit check
   const rateUsed = sumTurnsInWindow(remote.rateUsage, RATE_WINDOW_MS) + remote.pendingReserve
   const rateBudget = perRemoteRateBudget(config)
+  const effectiveReserve = Math.min(reserve, rateBudget)
 
-  if (rateUsed + reserve > rateBudget) {
+  if (rateUsed + effectiveReserve > rateBudget) {
     const recoveryMs = estimateRecoveryMs(remote.rateUsage, RATE_WINDOW_MS, rateBudget)
-    const reason = `\u{23F3} 額度已用完，預計 ${formatRecovery(recoveryMs)} 後恢復，請稍後再試`
+    const recoveryStr = recoveryMs > 0 ? formatRecovery(recoveryMs) : formatRecovery(RATE_WINDOW_MS)
+    const reason = `\u{23F3} 額度已用完，預計 ${recoveryStr} 後恢復，請稍後再試`
     addHistory({ type: 'reject', remoteId: id, detail: `rate: ${rateUsed}/${rateBudget}` })
     return { allowed: false, reason }
   }
@@ -170,9 +172,10 @@ export function tryReserve(
   const weeklyUsed = sumTurnsInWindow(remote.weeklyUsage, WEEKLY_WINDOW_MS) + remote.pendingReserve
   const weekBudget = perRemoteWeeklyBudget(config)
 
-  if (weeklyUsed + reserve > weekBudget) {
+  if (weeklyUsed + effectiveReserve > weekBudget) {
     const recoveryMs = estimateRecoveryMs(remote.weeklyUsage, WEEKLY_WINDOW_MS, weekBudget)
-    const reason = `\u{23F3} 本週額度已用完，預計 ${formatRecovery(recoveryMs)} 後恢復，請稍後再試`
+    const recoveryStr = recoveryMs > 0 ? formatRecovery(recoveryMs) : formatRecovery(WEEKLY_WINDOW_MS)
+    const reason = `\u{23F3} 本週額度已用完，預計 ${recoveryStr} 後恢復，請稍後再試`
     addHistory({ type: 'reject', remoteId: id, detail: `weekly: ${weeklyUsed}/${weekBudget}` })
     return { allowed: false, reason }
   }
@@ -180,12 +183,12 @@ export function tryReserve(
   // Reserve turns
   updateRemote(id, (r) => ({
     ...r,
-    pendingReserve: r.pendingReserve + reserve,
+    pendingReserve: r.pendingReserve + effectiveReserve,
   }))
-  addHistory({ type: 'reserve', remoteId: id, detail: `+${reserve}` })
+  addHistory({ type: 'reserve', remoteId: id, detail: `+${effectiveReserve}` })
 
   // Check weekly warning thresholds
-  const pctAfter = ((weeklyUsed + reserve) / weekBudget) * 100
+  const pctAfter = ((weeklyUsed + effectiveReserve) / weekBudget) * 100
   let warningLevel: 70 | 85 | 95 | undefined
   if (pctAfter >= 95) warningLevel = 95
   else if (pctAfter >= 85) warningLevel = 85
