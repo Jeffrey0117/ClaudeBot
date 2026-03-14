@@ -26,6 +26,14 @@ export interface BrowserSession {
 
 const sessions = new Map<number, { session: BrowserSession; idleTimer: ReturnType<typeof setTimeout> }>()
 
+/** Get existing session for continuation mode. Returns null if no active session. */
+export function getSession(chatId: number): BrowserSession | null {
+  const entry = sessions.get(chatId)
+  if (!entry) return null
+  resetSessionIdle(chatId)
+  return entry.session
+}
+
 function resetSessionIdle(chatId: number): void {
   const entry = sessions.get(chatId)
   if (!entry) return

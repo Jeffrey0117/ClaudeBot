@@ -5,6 +5,7 @@
  *   /bv                  → usage help
  *   /bv <url>            → one-shot screenshot + Gemini analysis
  *   /bv <url> <指令>      → agent loop (screenshot → analyze → act → repeat)
+ *   /bv <指令>            → continuation: follow-up on existing session
  *   /bv cancel           → cancel active agent
  */
 
@@ -13,6 +14,7 @@ import { captureScreenshot, cleanupScreenshot } from '../vision/browser-pool.js'
 import { analyzeImageFromPath } from '../../ai/gemini-vision.js'
 import { isSsrfBlocked } from '../vision/ssrf-guard.js'
 import { runAgentLoop } from '../vision/web-agent.js'
+import { getSession } from '../vision/browser-session.js'
 import {
   setActiveAgent,
   getActiveAgent,
@@ -56,12 +58,14 @@ export async function browseVisionCommand(ctx: BotContext): Promise<void> {
       '`/bv <URL>` — 截圖 → Gemini 分析\n\n' +
       '*網頁自動化:*\n' +
       '`/bv <URL> <指令>` — Agent 自動執行任務\n\n' +
+      '*連續指令:*\n' +
+      '`/bv <指令>` — 在目前頁面繼續操作\n\n' +
       '*取消:*\n' +
       '`/bv cancel` — 取消進行中的 Agent\n\n' +
       '*範例:*\n' +
       '`/bv example\\.com`\n' +
       '`/bv google\\.com 搜尋 Claude Code`\n' +
-      '`/bv github\\.com 找到 trending repos`',
+      '`/bv 點擊第一個結果`',
       { parse_mode: 'MarkdownV2' },
     )
     return
@@ -80,8 +84,14 @@ export async function browseVisionCommand(ctx: BotContext): Promise<void> {
   // Parse URL and optional instruction
   const { url, instruction } = parseArgs(args)
 
+  // No valid URL → treat entire args as follow-up instruction (continuation mode)
   if (!url) {
-    await ctx.reply('URL 格式無效')
+    const existingSession = getSession(chatId)
+    if (!existingSession) {
+      await ctx.reply('💤 沒有進行中的瀏覽器 session。\n請先用 `/bv <URL> <指令>` 開始。', { parse_mode: 'Markdown' })
+      return
+    }
+    await handleContinuationMode(ctx, chatId, existingSession, args)
     return
   }
 
@@ -161,6 +171,89 @@ async function handleOneShotMode(
     if (screenshotPath) await cleanupScreenshot(screenshotPath)
     const msg = err instanceof Error ? err.message : String(err)
     await ctx.reply(`截圖失敗: ${msg}`)
+  }
+}
+
+// --- Continuation mode (follow-up instruction on existing session) ---
+
+async function handleContinuationMode(
+  ctx: BotContext,
+  chatId: number,
+  existingSession: import('../vision/browser-session.js').BrowserSession,
+  instruction: string,
+): Promise<void> {
+  // Check if already running
+  if (getActiveAgent(chatId)) {
+    await ctx.reply('⚠️ 已有進行中的自動化任務。\n用 `/bv cancel` 取消後再試。', { parse_mode: 'Markdown' })
+    return
+  }
+
+  const pageUrl = existingSession.page.url()
+  const statusMsg = await ctx.reply(`🤖 繼續操作...\n🎯 ${instruction}\n🌐 ${pageUrl}`)
+
+  const abortController = new AbortController()
+
+  setActiveAgent(chatId, {
+    chatId,
+    url: pageUrl,
+    instruction,
+    abortController,
+    startedAt: Date.now(),
+    currentStep: 0,
+    statusMessageId: statusMsg.message_id,
+  })
+
+  try {
+    const result = await runAgentLoop({
+      chatId,
+      url: pageUrl,
+      instruction,
+      statusMessageId: statusMsg.message_id,
+      telegram: ctx.telegram,
+      abortSignal: abortController.signal,
+      existingSession,
+    })
+
+    // Build summary
+    const stepsText = result.steps
+      .map((s, i) => `${i + 1}. ${s.thought}`)
+      .join('\n')
+
+    const icon = result.success ? '✅' : '⚠️'
+    const summary = (
+      `${icon} *繼續操作完成*\n\n` +
+      `🌐 ${escapeMd(pageUrl)}\n` +
+      `🎯 ${escapeMd(instruction)}\n` +
+      `📊 ${result.steps.length} 步驟\n\n` +
+      `*結果:* ${escapeMd(result.summary)}\n\n` +
+      `*步驟記錄:*\n${escapeMd(stepsText)}`
+    )
+
+    try {
+      await ctx.reply(summary, { parse_mode: 'MarkdownV2' })
+    } catch {
+      await ctx.reply(
+        `${icon} 繼續操作完成\n\n` +
+        `🌐 ${pageUrl}\n` +
+        `🎯 ${instruction}\n` +
+        `📊 ${result.steps.length} 步驟\n\n` +
+        `結果: ${result.summary}\n\n` +
+        `步驟記錄:\n${stepsText}`,
+      )
+    }
+
+    // Send final screenshot if available
+    if (result.finalScreenshot) {
+      try {
+        const buf = Buffer.from(result.finalScreenshot, 'base64')
+        await ctx.replyWithPhoto({ source: buf, filename: 'final.png' })
+      } catch {
+        // ignore photo send failure
+      }
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await ctx.reply(`❌ 自動化失敗: ${msg}`)
   }
 }
 
