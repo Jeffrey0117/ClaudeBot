@@ -683,6 +683,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         imagePaths: item.imagePaths,
         chatId: item.chatId,
         maxTurns: item.maxTurns,
+        yolo: item.yolo,
         onTextDelta: async (delta, acc) => {
           ctx.accumulated = acc
           ctx.draftText += delta

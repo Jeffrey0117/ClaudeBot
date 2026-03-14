@@ -132,6 +132,10 @@ export const geminiRunner: AIRunner = {
       '--sandbox', 'false',
     ]
 
+    if (options.yolo) {
+      args.push('--yolo')
+    }
+
     if (sessionId) {
       args.push('--resume', sessionId)
     }

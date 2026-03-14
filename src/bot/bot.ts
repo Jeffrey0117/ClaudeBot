@@ -43,6 +43,7 @@ import { rlogCommand } from './commands/rlog.js'
 import { parallelCommand } from './commands/parallel.js'
 import { ctxCommand } from './commands/ctx.js'
 import { deepCommand } from './commands/deep.js'
+import { browseVisionCommand } from './commands/browse-vision.js'
 import { lastCommand } from './commands/last.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
@@ -117,6 +118,7 @@ export const CORE_COMMANDS = [
   { command: 'parallel', description: '平行執行多個任務' },
   { command: 'ctx', description: '查看/管理上下文摘要' },
   { command: 'deep', description: '深度分析 (opus + subagent)' },
+  { command: 'bv', description: '網頁視覺分析 (Gemini)' },
   { command: 'last', description: '重送最近的訊息 (/last2=上上條)' },
   { command: 'help', description: '顯示說明' },
 ] as const
@@ -163,6 +165,21 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   bot.use(rateLimitMiddleware())
   bot.use(authMiddleware())
 
+  // Fix: Telegram clients sometimes send registered commands as text_link
+  // with tg://bot_command URLs instead of bot_command entities.
+  // Telegraf only matches bot_command, so we normalize here.
+  bot.use((ctx, next) => {
+    const msg = ctx.message
+    if (msg && 'entities' in msg && msg.entities) {
+      for (const entity of msg.entities) {
+        if (entity.type === 'text_link' && (entity as { url?: string }).url?.startsWith('tg://bot_command')) {
+          Object.assign(entity, { type: 'bot_command', url: undefined })
+        }
+      }
+    }
+    return next()
+  })
+
   // Core commands — register with Telegraf AND populate handler map for @cmd dispatch
   const coreEntries: ReadonlyArray<[string, (ctx: BotContext) => Promise<void>]> = [
     ['start', startCommand],
@@ -205,6 +222,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['parallel', parallelCommand],
     ['ctx', ctxCommand],
     ['deep', deepCommand],
+    ['bv', browseVisionCommand],
     ['last', lastCommand],
     ['last1', lastCommand],
     ['last2', lastCommand],

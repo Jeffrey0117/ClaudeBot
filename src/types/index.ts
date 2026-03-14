@@ -27,6 +27,7 @@ export interface QueueItem {
   readonly imagePaths: readonly string[]
   readonly dashboardCommandId?: string
   readonly maxTurns?: number
+  readonly yolo?: boolean
 }
 
 export interface ClaudeResult {
