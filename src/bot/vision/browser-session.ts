@@ -95,6 +95,20 @@ export async function sessionClick(session: BrowserSession, selector: string): P
   const { locator, source } = await findElement(session.page, selector)
 
   if (!locator) {
+    // Locator not found — try deep click (DOM walking including shadow DOM)
+    const textMatch = selector.match(/^text="(.+)"$/)
+    if (textMatch) {
+      const clicked = await sessionDeepClick(session, textMatch[1])
+      if (clicked) return
+
+      // Also try last segment (e.g. "沒有帳號？註冊" → "註冊")
+      const lastSeg = extractLastSegment(textMatch[1])
+      if (lastSeg !== textMatch[1]) {
+        const clickedSeg = await sessionDeepClick(session, lastSeg)
+        if (clickedSeg) return
+      }
+    }
+
     const debug = await getPageDebugInfo(session.page, selector)
     throw new Error(`元素不存在: ${selector}。${debug}`)
   }
@@ -110,9 +124,25 @@ export async function sessionClick(session: BrowserSession, selector: string): P
   try {
     await locator.first().scrollIntoViewIfNeeded({ timeout: 3000 })
     await locator.first().click({ timeout: 5000, force: true })
+    return
   } catch {
-    throw new Error(`元素存在(${source})但無法點擊: ${selector}`)
+    // Force click also failed — try deep click as last resort
   }
+
+  // Last resort: deep click via DOM walking
+  const textMatch = selector.match(/^text="(.+)"$/)
+  if (textMatch) {
+    const clicked = await sessionDeepClick(session, textMatch[1])
+    if (clicked) return
+
+    const lastSeg = extractLastSegment(textMatch[1])
+    if (lastSeg !== textMatch[1]) {
+      const clickedSeg = await sessionDeepClick(session, lastSeg)
+      if (clickedSeg) return
+    }
+  }
+
+  throw new Error(`元素存在(${source})但無法點擊: ${selector}`)
 }
 
 export async function sessionFill(session: BrowserSession, selector: string, text: string): Promise<void> {
@@ -129,6 +159,64 @@ export async function sessionFill(session: BrowserSession, selector: string, tex
   } catch { /* ignore scroll failure */ }
 
   await locator.first().fill(text, { timeout: ACTION_TIMEOUT_MS })
+}
+
+export async function sessionClickXY(session: BrowserSession, x: number, y: number): Promise<void> {
+  resetSessionIdle(session.chatId)
+  await session.page.mouse.click(x, y)
+}
+
+/**
+ * Nuclear option: walk entire DOM including shadow roots via page.evaluate(),
+ * find element by text content, and click it via JS.
+ * Returns true if found and clicked.
+ */
+export async function sessionDeepClick(session: BrowserSession, text: string): Promise<boolean> {
+  resetSessionIdle(session.chatId)
+  return session.page.evaluate((searchText: string) => {
+    function findInNode(root: Document | ShadowRoot | Element): HTMLElement | null {
+      // Search text nodes
+      const walker = document.createTreeWalker(
+        root instanceof Document ? root.body : root,
+        NodeFilter.SHOW_TEXT,
+      )
+      while (walker.nextNode()) {
+        const node = walker.currentNode
+        if (node.textContent && node.textContent.trim().includes(searchText)) {
+          const el = node.parentElement
+          if (el && el.offsetParent !== null) return el
+        }
+      }
+      // Search shadow roots
+      const elements = (root instanceof Document ? root.body : root).querySelectorAll('*')
+      for (const el of elements) {
+        if ((el as HTMLElement).shadowRoot) {
+          const found = findInNode((el as HTMLElement).shadowRoot!)
+          if (found) return found
+        }
+      }
+      // Search iframes
+      const iframes = (root instanceof Document ? root : root).querySelectorAll('iframe')
+      for (const iframe of iframes) {
+        try {
+          const doc = (iframe as HTMLIFrameElement).contentDocument
+          if (doc) {
+            const found = findInNode(doc)
+            if (found) return found
+          }
+        } catch { /* cross-origin */ }
+      }
+      return null
+    }
+
+    const el = findInNode(document)
+    if (el) {
+      el.scrollIntoView({ block: 'center' })
+      el.click()
+      return true
+    }
+    return false
+  }, text)
 }
 
 export async function sessionPress(session: BrowserSession, key: string): Promise<void> {
