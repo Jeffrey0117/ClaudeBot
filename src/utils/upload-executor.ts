@@ -61,7 +61,7 @@ export function stripUploadDirectives(text: string): string {
 
 // --- Uploaders ---
 
-async function uploadToUpimg(filePath: string, config: PipeConfig): Promise<string> {
+export async function uploadToUpimg(filePath: string, config: PipeConfig): Promise<string> {
   const form = new FormData()
   form.append('file', new Blob([readFileSync(filePath)]), basename(filePath))
 

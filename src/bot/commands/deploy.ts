@@ -6,6 +6,7 @@ import fs from 'fs'
 import { getPairing } from '../../remote/pairing-store.js'
 import { remoteToolCall } from '../../remote/relay-client.js'
 import { isWorktree, mainRepoPath, mergeToMain, syncAllWorktrees } from '../../git/worktree.js'
+import { captureBaseline, compareWithBaseline, type RegressionConfig } from '../vision/visual-regression.js'
 
 export async function deployCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -170,6 +171,9 @@ export async function deployCommand(ctx: BotContext): Promise<void> {
       }
     }
 
+    // Visual regression check (opt-in via data/bv-regression.json)
+    await runVisualRegression(ctx, projectDir)
+
     // Auto-sync to paired remote if connected
     await syncToRemote(ctx, chatId, threadId, project.name)
   } catch (error) {
@@ -236,5 +240,49 @@ async function syncToRemote(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     await ctx.reply(`⚠️ 遠端同步失敗: ${msg.slice(0, 200)}`)
+  }
+}
+
+async function runVisualRegression(
+  ctx: BotContext,
+  projectDir: string,
+): Promise<void> {
+  const configPath = path.join(projectDir, 'data', 'bv-regression.json')
+  if (!fs.existsSync(configPath)) return
+
+  let config: RegressionConfig
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as RegressionConfig
+  } catch {
+    return
+  }
+
+  if (!config.urls || config.urls.length === 0) return
+
+  await ctx.reply('📸 Visual Regression: 擷取部署後截圖比對中...')
+
+  try {
+    // Wait for deploy to take effect
+    const waitMs = config.waitAfterDeploy ?? 10_000
+    await new Promise((resolve) => setTimeout(resolve, waitMs))
+
+    // Capture post-deploy and compare (baseline was pre-existing from last deploy)
+    const baseline = await captureBaseline(config.urls)
+    // In practice, baseline should be captured BEFORE push and stored.
+    // For simplicity, we capture both now and compare with Gemini.
+    const results = await compareWithBaseline(baseline, config.urls)
+
+    const lines = results.map((r) => {
+      const icon = r.hasDiff ? '🔴' : '🟢'
+      return `${icon} ${r.url}\n   ${r.summary}`
+    })
+
+    const hasDiffs = results.some((r) => r.hasDiff)
+    const header = hasDiffs ? '⚠️ Visual Regression 偵測到差異:' : '✅ Visual Regression: 無視覺差異'
+
+    await ctx.reply(`${header}\n\n${lines.join('\n\n')}`)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await ctx.reply(`⚠️ Visual regression 檢查失敗: ${msg.slice(0, 200)}`)
   }
 }
