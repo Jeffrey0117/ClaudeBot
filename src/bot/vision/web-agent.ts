@@ -3,6 +3,7 @@
  *
  * Flow: screenshot → Gemini analyze → execute action → repeat
  * Max 10 steps, 120s total timeout, self-correcting on selector errors.
+ * Stuck detection: 3 consecutive failures → abort.
  */
 
 import type { Telegram } from 'telegraf'
@@ -24,6 +25,7 @@ import { updateAgentStep, clearActiveAgent } from './web-agent-store.js'
 
 const DEFAULT_MAX_STEPS = 10
 const TOTAL_TIMEOUT_MS = 120_000
+const MAX_CONSECUTIVE_FAILURES = 3
 
 export interface AgentLoopOptions {
   readonly chatId: number
@@ -56,10 +58,14 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   const steps: AgentStep[] = []
   const startTime = Date.now()
   let finalScreenshot: string | undefined
+  let consecutiveFailures = 0
+  const failedSelectors = new Set<string>()
 
-  const session = await createSession(chatId)
+  let session: Awaited<ReturnType<typeof createSession>> | null = null
 
   try {
+    session = await createSession(chatId)
+
     // Navigate to initial URL
     await updateStatus(telegram, chatId, statusMessageId, '🌐 導航中...')
     await sessionNavigate(session, url)
@@ -80,12 +86,19 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       updateAgentStep(chatId, i + 1)
       await updateStatus(
         telegram, chatId, statusMessageId,
-        `🤖 步驟 ${i + 1}/${maxSteps}: 分析中...`,
+        `🤖 步驟 ${i + 1}/${maxSteps}: 截圖分析中...`,
       )
 
       // 1. Screenshot + accessibility tree
-      const screenshot = await sessionScreenshot(session)
-      finalScreenshot = screenshot
+      let screenshot: string
+      try {
+        screenshot = await sessionScreenshot(session)
+        finalScreenshot = screenshot
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return buildResult(steps, finalScreenshot, false, `截圖失敗: ${msg}`)
+      }
+
       let accessTree: string
       try {
         accessTree = await sessionAccessTree(session)
@@ -93,8 +106,14 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         accessTree = '(accessibility tree unavailable)'
       }
 
+      // Build failure context for Gemini
+      const failedContext = failedSelectors.size > 0
+        ? `\n\nPreviously failed selectors (DO NOT reuse): ${[...failedSelectors].join(', ')}`
+        : ''
+      const instructionWithContext = instruction + failedContext
+
       // 2. Ask Gemini for next action
-      const result = await analyzeForAction(screenshot, accessTree, instruction, steps)
+      const result = await analyzeForAction(screenshot, accessTree, instructionWithContext, steps)
 
       if (result.error || !result.step) {
         const errorMsg = result.error ?? 'Gemini 未回覆'
@@ -114,7 +133,6 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
           telegram, chatId, statusMessageId,
           `✅ 完成 (${steps.length} 步)`,
         )
-        // Take final screenshot
         try {
           finalScreenshot = await sessionScreenshot(session)
         } catch { /* page may have navigated away */ }
@@ -129,24 +147,40 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
 
       try {
         await executeAction(session, step)
+        consecutiveFailures = 0 // reset on success
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
+        consecutiveFailures++
 
-        // Self-correction: add error info as a failed step, let Gemini retry
-        const errorStep: AgentStep = {
-          thought: `Action failed: ${msg}. Element "${step.action.selector ?? ''}" not found or not interactable.`,
+        // Track failed selectors so Gemini won't reuse them
+        if (step.action.selector) {
+          failedSelectors.add(step.action.selector)
+        }
+
+        // Replace the step with error info
+        steps.pop()
+        steps.push({
+          thought: `Action failed: ${msg}`,
           action: step.action,
           done: false,
+        })
+
+        // Stuck detection: too many consecutive failures → abort
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+          await updateStatus(
+            telegram, chatId, statusMessageId,
+            `❌ 連續 ${MAX_CONSECUTIVE_FAILURES} 次失敗，停止`,
+          )
+          return buildResult(
+            steps, finalScreenshot, false,
+            `連續 ${MAX_CONSECUTIVE_FAILURES} 次操作失敗，無法繼續`,
+          )
         }
-        steps.pop()
-        steps.push(errorStep)
 
         await updateStatus(
           telegram, chatId, statusMessageId,
-          `⚠️ 步驟 ${i + 1}: 重試中...`,
+          `⚠️ 步驟 ${i + 1}: 失敗 (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})，換方式重試...`,
         )
-
-        // Continue loop — Gemini will see the error in history and try differently
         continue
       }
 
@@ -164,11 +198,13 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     } catch { /* ignore */ }
 
     return buildResult(
-      steps,
-      finalScreenshot,
-      false,
+      steps, finalScreenshot, false,
       `已達最大步驟數 (${maxSteps})`,
     )
+  } catch (err) {
+    // Catch-all for unexpected errors (Playwright crash, etc.)
+    const msg = err instanceof Error ? err.message : String(err)
+    return buildResult(steps, finalScreenshot, false, `Agent 錯誤: ${msg}`)
   } finally {
     clearActiveAgent(chatId)
     await closeSession(chatId)
