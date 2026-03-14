@@ -91,10 +91,11 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         `🤖 步驟 ${i + 1}/${maxSteps}: 截圖分析中...`,
       )
 
-      // 1. Screenshot + accessibility tree
+      // 1. Screenshot + accessibility tree (add grid overlay after failures for click_xy accuracy)
+      const useGrid = consecutiveFailures >= 1
       let screenshot: string
       try {
-        screenshot = await sessionScreenshot(session)
+        screenshot = await sessionScreenshot(session, useGrid)
         finalScreenshot = screenshot
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)

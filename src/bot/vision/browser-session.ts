@@ -78,9 +78,39 @@ export async function sessionNavigate(session: BrowserSession, url: string): Pro
   await session.page.goto(url, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS })
 }
 
-export async function sessionScreenshot(session: BrowserSession): Promise<string> {
+export async function sessionScreenshot(session: BrowserSession, withGrid = false): Promise<string> {
   resetSessionIdle(session.chatId)
+  if (withGrid) {
+    // Inject coordinate grid overlay for click_xy accuracy
+    await session.page.evaluate(`
+      (function() {
+        var existing = document.getElementById('__pw_grid');
+        if (existing) existing.remove();
+        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.id = '__pw_grid';
+        svg.style.cssText = 'position:fixed;top:0;left:0;width:1280px;height:720px;z-index:999999;pointer-events:none;';
+        svg.setAttribute('viewBox', '0 0 1280 720');
+        var html = '';
+        for (var x = 0; x <= 1280; x += 160) {
+          html += '<line x1="'+x+'" y1="0" x2="'+x+'" y2="720" stroke="rgba(255,0,0,0.3)" stroke-width="1"/>';
+          html += '<text x="'+(x+2)+'" y="12" fill="red" font-size="10">'+x+'</text>';
+        }
+        for (var y = 0; y <= 720; y += 120) {
+          html += '<line x1="0" y1="'+y+'" x2="1280" y2="'+y+'" stroke="rgba(255,0,0,0.3)" stroke-width="1"/>';
+          html += '<text x="2" y="'+(y+22)+'" fill="red" font-size="10">y='+y+'</text>';
+        }
+        svg.innerHTML = html;
+        document.body.appendChild(svg);
+      })()
+    `).catch(() => { /* ignore if evaluate fails (closed shadow DOM page) */ })
+  }
   const buffer = await session.page.screenshot({ fullPage: false })
+  if (withGrid) {
+    // Remove grid after screenshot
+    await session.page.evaluate(`
+      (function() { var g = document.getElementById('__pw_grid'); if (g) g.remove(); })()
+    `).catch(() => {})
+  }
   return buffer.toString('base64')
 }
 
