@@ -97,7 +97,7 @@ function buildAgentPrompt(
     '- IMPORTANT: Selectors MUST use the role= prefix for ARIA roles, e.g. role=combobox[name="Search"], role=button[name="Submit"]\n' +
     '- IMPORTANT: For text selectors, use ONLY the clickable element\'s own text, NOT surrounding text\n' +
     '- CRITICAL: If an element is VISIBLE in the screenshot but NOT in the accessibility tree, it is likely inside a closed shadow DOM or iframe. You MUST use click_xy with pixel coordinates. Do NOT use click or deep_click — they will fail because the element does not exist in the accessible DOM. Modals, login forms, and popups often use closed shadow DOM.\n' +
-    '- CRITICAL: When using click_xy, carefully estimate the CENTER of the target element from the screenshot. The viewport is 1280x720. Be precise — count grid lines and element positions carefully.\n' +
+    '- CRITICAL: When using click_xy, carefully estimate the CENTER of the target element from the screenshot. The viewport is 1280x720. If a red coordinate grid overlay is visible in the screenshot, use those numbers to precisely locate elements. Read the x values at the top and y values on the left.\n' +
     '- For deep_click actions, provide the visible text in text field — this walks the DOM to find and click by text content\n' +
     '- Action priority when element is visible but click fails: 1) click_xy (best for shadow DOM), 2) deep_click (walks DOM), 3) click with different selector\n' +
     '- If click_xy hits the wrong element, adjust coordinates by looking at the screenshot more carefully. Do NOT keep retrying the same coordinates.'
@@ -128,7 +128,7 @@ export async function analyzeForAction(
     generationConfig: {
       responseMimeType: 'application/json',
       responseSchema: AGENT_RESPONSE_SCHEMA,
-      maxOutputTokens: 1024,
+      maxOutputTokens: 2048,
     },
   }
 
