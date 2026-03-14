@@ -98,14 +98,12 @@ export async function sessionClick(session: BrowserSession, selector: string): P
     // Locator not found — try deep click (DOM walking including shadow DOM)
     const textMatch = selector.match(/^text="(.+)"$/)
     if (textMatch) {
-      const clicked = await sessionDeepClick(session, textMatch[1])
-      if (clicked) return
+      if (await tryDeepClick(session, textMatch[1])) return
 
       // Also try last segment (e.g. "沒有帳號？註冊" → "註冊")
       const lastSeg = extractLastSegment(textMatch[1])
       if (lastSeg !== textMatch[1]) {
-        const clickedSeg = await sessionDeepClick(session, lastSeg)
-        if (clickedSeg) return
+        if (await tryDeepClick(session, lastSeg)) return
       }
     }
 
@@ -130,15 +128,13 @@ export async function sessionClick(session: BrowserSession, selector: string): P
   }
 
   // Last resort: deep click via DOM walking
-  const textMatch = selector.match(/^text="(.+)"$/)
-  if (textMatch) {
-    const clicked = await sessionDeepClick(session, textMatch[1])
-    if (clicked) return
+  const textMatch2 = selector.match(/^text="(.+)"$/)
+  if (textMatch2) {
+    if (await tryDeepClick(session, textMatch2[1])) return
 
-    const lastSeg = extractLastSegment(textMatch[1])
-    if (lastSeg !== textMatch[1]) {
-      const clickedSeg = await sessionDeepClick(session, lastSeg)
-      if (clickedSeg) return
+    const lastSeg = extractLastSegment(textMatch2[1])
+    if (lastSeg !== textMatch2[1]) {
+      if (await tryDeepClick(session, lastSeg)) return
     }
   }
 
@@ -166,57 +162,66 @@ export async function sessionClickXY(session: BrowserSession, x: number, y: numb
   await session.page.mouse.click(x, y)
 }
 
+/** Try deep click, swallowing errors so the caller can fall through. */
+async function tryDeepClick(session: BrowserSession, text: string): Promise<boolean> {
+  try {
+    return await sessionDeepClick(session, text)
+  } catch {
+    return false
+  }
+}
+
 /**
  * Nuclear option: walk entire DOM including shadow roots via page.evaluate(),
  * find element by text content, and click it via JS.
+ * Uses raw JS string to avoid function serialization issues (__name, etc.).
  * Returns true if found and clicked.
  */
 export async function sessionDeepClick(session: BrowserSession, text: string): Promise<boolean> {
   resetSessionIdle(session.chatId)
-  return session.page.evaluate((searchText: string) => {
-    function findInNode(root: Document | ShadowRoot | Element): HTMLElement | null {
-      // Search text nodes
-      const walker = document.createTreeWalker(
-        root instanceof Document ? root.body : root,
-        NodeFilter.SHOW_TEXT,
-      )
-      while (walker.nextNode()) {
-        const node = walker.currentNode
-        if (node.textContent && node.textContent.trim().includes(searchText)) {
-          const el = node.parentElement
-          if (el && el.offsetParent !== null) return el
-        }
-      }
-      // Search shadow roots
-      const elements = (root instanceof Document ? root.body : root).querySelectorAll('*')
-      for (const el of elements) {
-        if ((el as HTMLElement).shadowRoot) {
-          const found = findInNode((el as HTMLElement).shadowRoot!)
-          if (found) return found
-        }
-      }
-      // Search iframes
-      const iframes = (root instanceof Document ? root : root).querySelectorAll('iframe')
-      for (const iframe of iframes) {
-        try {
-          const doc = (iframe as HTMLIFrameElement).contentDocument
-          if (doc) {
-            const found = findInNode(doc)
-            if (found) return found
+  const escaped = text.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+  try {
+    return await session.page.evaluate(`
+      (function() {
+        var searchText = '${escaped}';
+        var found = null;
+        var allEls = document.querySelectorAll('*');
+        for (var i = 0; i < allEls.length; i++) {
+          var el = allEls[i];
+          if (el.offsetParent === null && el.tagName !== 'BODY' && el.tagName !== 'HTML') continue;
+          var txt = el.textContent || '';
+          if (txt.trim().includes(searchText)) {
+            var children = el.children;
+            var isLeaf = true;
+            for (var j = 0; j < children.length; j++) {
+              if ((children[j].textContent || '').trim().includes(searchText)) {
+                isLeaf = false;
+                break;
+              }
+            }
+            if (isLeaf) { found = el; break; }
           }
-        } catch { /* cross-origin */ }
-      }
-      return null
-    }
-
-    const el = findInNode(document)
-    if (el) {
-      el.scrollIntoView({ block: 'center' })
-      el.click()
-      return true
-    }
+        }
+        if (!found) {
+          var links = document.querySelectorAll('a, button, [role="button"], [onclick]');
+          for (var k = 0; k < links.length; k++) {
+            if ((links[k].textContent || '').trim().includes(searchText)) {
+              found = links[k];
+              break;
+            }
+          }
+        }
+        if (found) {
+          found.scrollIntoView({ block: 'center' });
+          found.click();
+          return true;
+        }
+        return false;
+      })()
+    `) as boolean
+  } catch {
     return false
-  }, text)
+  }
 }
 
 export async function sessionPress(session: BrowserSession, key: string): Promise<void> {
