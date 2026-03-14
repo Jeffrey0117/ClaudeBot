@@ -88,7 +88,9 @@ function buildAgentPrompt(
     '- For navigate actions, provide full URL in text\n' +
     '- Set done=true when the task is complete or you cannot proceed\n' +
     '- If an element was not found in a previous step, try a different selector\n' +
-    '- Do NOT fill password fields unless the instruction explicitly asks for it'
+    '- Do NOT fill password fields unless the instruction explicitly asks for it\n' +
+    '- IMPORTANT: If you see a CAPTCHA, reCAPTCHA, or "I\'m not a robot" challenge, set done=true immediately and explain in thought that a CAPTCHA is blocking progress\n' +
+    '- IMPORTANT: Selectors MUST use the role= prefix for ARIA roles, e.g. role=combobox[name="Search"], role=button[name="Submit"]'
   )
 }
 

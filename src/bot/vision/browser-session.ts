@@ -12,9 +12,11 @@ import type { Page } from 'playwright'
 
 const MAX_SESSIONS = 3
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000
-const PAGE_TIMEOUT_MS = 30_000
+const NAV_TIMEOUT_MS = 30_000
+const ACTION_TIMEOUT_MS = 10_000
 const SETTLE_DELAY_MS = 500
 const VIEWPORT = { width: 1280, height: 720 }
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 
 export interface BrowserSession {
   readonly chatId: number
@@ -51,7 +53,10 @@ export async function createSession(chatId: number): Promise<BrowserSession> {
   }
 
   const browser = await getBrowser()
-  const page = await browser.newPage({ viewport: VIEWPORT })
+  const page = await browser.newPage({
+    viewport: VIEWPORT,
+    userAgent: USER_AGENT,
+  })
 
   const session: BrowserSession = {
     chatId,
@@ -70,7 +75,7 @@ export async function sessionNavigate(session: BrowserSession, url: string): Pro
     throw new Error('不允許存取內部網路位址')
   }
   resetSessionIdle(session.chatId)
-  await session.page.goto(url, { waitUntil: 'networkidle', timeout: PAGE_TIMEOUT_MS })
+  await session.page.goto(url, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS })
 }
 
 export async function sessionScreenshot(session: BrowserSession): Promise<string> {
@@ -88,13 +93,13 @@ export async function sessionAccessTree(session: BrowserSession): Promise<string
 export async function sessionClick(session: BrowserSession, selector: string): Promise<void> {
   resetSessionIdle(session.chatId)
   const locator = resolveLocator(session.page, selector)
-  await locator.click({ timeout: PAGE_TIMEOUT_MS })
+  await locator.click({ timeout: ACTION_TIMEOUT_MS })
 }
 
 export async function sessionFill(session: BrowserSession, selector: string, text: string): Promise<void> {
   resetSessionIdle(session.chatId)
   const locator = resolveLocator(session.page, selector)
-  await locator.fill(text, { timeout: PAGE_TIMEOUT_MS })
+  await locator.fill(text, { timeout: ACTION_TIMEOUT_MS })
 }
 
 export async function sessionPress(session: BrowserSession, key: string): Promise<void> {
@@ -138,11 +143,32 @@ export async function closeSession(chatId: number): Promise<void> {
  *   #search-input               → page.locator('#search-input')
  *   .my-class                   → page.locator('.my-class')
  */
+/** Known ARIA role names — used to auto-detect bare role selectors from Gemini. */
+const ARIA_ROLES = new Set([
+  'alert', 'alertdialog', 'application', 'article', 'banner', 'button',
+  'cell', 'checkbox', 'combobox', 'complementary', 'contentinfo', 'definition',
+  'dialog', 'directory', 'document', 'feed', 'figure', 'form', 'grid',
+  'gridcell', 'group', 'heading', 'img', 'link', 'list', 'listbox',
+  'listitem', 'log', 'main', 'marquee', 'math', 'menu', 'menubar',
+  'menuitem', 'menuitemcheckbox', 'menuitemradio', 'navigation', 'none', 'note',
+  'option', 'presentation', 'progressbar', 'radio', 'radiogroup', 'region',
+  'row', 'rowgroup', 'rowheader', 'scrollbar', 'search', 'searchbox',
+  'separator', 'slider', 'spinbutton', 'status', 'switch', 'tab', 'table',
+  'tablist', 'tabpanel', 'term', 'textbox', 'timer', 'toolbar', 'tooltip',
+  'tree', 'treegrid', 'treeitem',
+])
+
 function resolveLocator(page: Page, selector: string): ReturnType<Page['locator']> {
   // role=button[name="Submit"]
   const roleMatch = selector.match(/^role=(\w+)\[name="(.+)"\]$/)
   if (roleMatch) {
     return page.getByRole(roleMatch[1] as Parameters<Page['getByRole']>[0], { name: roleMatch[2] })
+  }
+
+  // Auto-detect bare role: combobox[name="搜尋"] → getByRole('combobox', { name: '搜尋' })
+  const bareRoleMatch = selector.match(/^(\w+)\[name="(.+)"\]$/)
+  if (bareRoleMatch && ARIA_ROLES.has(bareRoleMatch[1])) {
+    return page.getByRole(bareRoleMatch[1] as Parameters<Page['getByRole']>[0], { name: bareRoleMatch[2] })
   }
 
   // text="something"
