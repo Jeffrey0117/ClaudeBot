@@ -93,13 +93,43 @@ export async function sessionAccessTree(session: BrowserSession): Promise<string
 export async function sessionClick(session: BrowserSession, selector: string): Promise<void> {
   resetSessionIdle(session.chatId)
   const locator = resolveLocator(session.page, selector)
-  await locator.click({ timeout: ACTION_TIMEOUT_MS })
+
+  // Check if element exists in DOM at all
+  const count = await locator.count()
+  if (count === 0) {
+    throw new Error(`元素不存在: ${selector}`)
+  }
+
+  // Try normal click first
+  try {
+    await locator.first().click({ timeout: ACTION_TIMEOUT_MS })
+    return
+  } catch {
+    // Normal click failed — try scroll into view + force click
+  }
+
+  try {
+    await locator.first().scrollIntoViewIfNeeded({ timeout: 3000 })
+    await locator.first().click({ timeout: 5000, force: true })
+  } catch {
+    throw new Error(`元素存在但無法點擊 (可能被遮擋或不可見): ${selector}`)
+  }
 }
 
 export async function sessionFill(session: BrowserSession, selector: string, text: string): Promise<void> {
   resetSessionIdle(session.chatId)
   const locator = resolveLocator(session.page, selector)
-  await locator.fill(text, { timeout: ACTION_TIMEOUT_MS })
+
+  const count = await locator.count()
+  if (count === 0) {
+    throw new Error(`元素不存在: ${selector}`)
+  }
+
+  try {
+    await locator.first().scrollIntoViewIfNeeded({ timeout: 3000 })
+  } catch { /* ignore scroll failure */ }
+
+  await locator.first().fill(text, { timeout: ACTION_TIMEOUT_MS })
 }
 
 export async function sessionPress(session: BrowserSession, key: string): Promise<void> {

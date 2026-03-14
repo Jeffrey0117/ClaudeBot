@@ -125,6 +125,21 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       }
 
       const step = result.step
+
+      // Code-level dedup: reject if Gemini returned a previously failed selector
+      if (step.action.selector && failedSelectors.has(step.action.selector)) {
+        consecutiveFailures++
+        steps.push({
+          thought: `Gemini returned previously failed selector "${step.action.selector}" again — skipped.`,
+          action: step.action,
+          done: false,
+        })
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+          return buildResult(steps, finalScreenshot, false, `連續 ${MAX_CONSECUTIVE_FAILURES} 次操作失敗，無法繼續`)
+        }
+        continue
+      }
+
       steps.push(step)
 
       // 3. Check if done
