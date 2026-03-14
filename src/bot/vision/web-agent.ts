@@ -19,7 +19,6 @@ import {
   sessionPress,
   sessionScroll,
   sessionWaitForSettle,
-  closeSession,
 } from './browser-session.js'
 import { isSsrfBlocked } from './ssrf-guard.js'
 import { analyzeForAction, type AgentStep } from '../../ai/gemini-agent-vision.js'
@@ -37,6 +36,8 @@ export interface AgentLoopOptions {
   readonly statusMessageId: number
   readonly telegram: Telegram
   readonly abortSignal?: AbortSignal
+  /** Reuse existing session, skip navigation. For follow-up instructions. */
+  readonly existingSession?: import('./browser-session.js').BrowserSession
 }
 
 export interface AgentLoopResult {
@@ -55,23 +56,30 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     statusMessageId,
     telegram,
     abortSignal,
+    existingSession,
   } = options
 
   const steps: AgentStep[] = []
   const startTime = Date.now()
   let finalScreenshot: string | undefined
   let consecutiveFailures = 0
+  let hadAnyFailure = false  // once true, stays true — enables grid + shadow hint permanently
   const failedSelectors = new Set<string>()
 
   let session: Awaited<ReturnType<typeof createSession>> | null = null
 
   try {
-    session = await createSession(chatId)
+    if (existingSession) {
+      // Continuation mode: reuse existing page, skip navigation
+      session = existingSession
+    } else {
+      session = await createSession(chatId)
 
-    // Navigate to initial URL
-    await updateStatus(telegram, chatId, statusMessageId, '🌐 導航中...')
-    await sessionNavigate(session, url)
-    await sessionWaitForSettle(session)
+      // Navigate to initial URL
+      await updateStatus(telegram, chatId, statusMessageId, '🌐 導航中...')
+      await sessionNavigate(session, url)
+      await sessionWaitForSettle(session)
+    }
 
     for (let i = 0; i < maxSteps; i++) {
       // Check abort
@@ -91,8 +99,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         `🤖 步驟 ${i + 1}/${maxSteps}: 截圖分析中...`,
       )
 
-      // 1. Screenshot + accessibility tree (add grid overlay after failures for click_xy accuracy)
-      const useGrid = consecutiveFailures >= 1
+      // 1. Screenshot + accessibility tree (grid overlay stays on permanently after any failure)
+      const useGrid = hadAnyFailure
       let screenshot: string
       try {
         screenshot = await sessionScreenshot(session, useGrid)
@@ -115,8 +123,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         : ''
 
       // Detect if the page likely has closed shadow DOM (visible content not in tree)
-      const shadowHint = consecutiveFailures >= 1
-        ? '\n\nWARNING: Previous click/deep_click actions failed. The target element is likely inside a CLOSED shadow DOM (invisible to DOM APIs). You MUST use click_xy with accurate pixel coordinates from the screenshot. Do NOT try click or deep_click again.'
+      const shadowHint = hadAnyFailure
+        ? '\n\nWARNING: Previous click/deep_click actions failed. The target element is likely inside a CLOSED shadow DOM (invisible to DOM APIs). You MUST use click_xy with accurate pixel coordinates from the screenshot. Do NOT try click or deep_click again. A red coordinate grid is overlaid on the screenshot — use those x/y numbers for precise click_xy coordinates.'
         : ''
 
       const instructionWithContext = instruction + failedContext + shadowHint
@@ -138,6 +146,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       // Code-level dedup: reject if Gemini returned a previously failed selector
       if (step.action.selector && failedSelectors.has(step.action.selector)) {
         consecutiveFailures++
+        hadAnyFailure = true
         steps.push({
           thought: `Gemini returned previously failed selector "${step.action.selector}" again — skipped.`,
           action: step.action,
@@ -175,6 +184,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         consecutiveFailures++
+        hadAnyFailure = true
 
         // Track failed selectors so Gemini won't reuse them
         if (step.action.selector) {
@@ -231,7 +241,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     return buildResult(steps, finalScreenshot, false, `Agent 錯誤: ${msg}`)
   } finally {
     clearActiveAgent(chatId)
-    await closeSession(chatId)
+    // Don't close session — let idle timeout (5min) handle cleanup.
+    // This allows user to send follow-up instructions via `/bv <指令>`.
   }
 }
 

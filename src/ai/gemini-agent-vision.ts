@@ -93,7 +93,7 @@ function buildAgentPrompt(
     '- Set done=true when the task is complete or you cannot proceed\n' +
     '- If an element was not found in a previous step, try a different selector\n' +
     '- Do NOT fill password fields unless the instruction explicitly asks for it\n' +
-    '- IMPORTANT: If you see a CAPTCHA, reCAPTCHA, or "I\'m not a robot" challenge, set done=true immediately\n' +
+    '- IMPORTANT: If you encounter a BLOCKING CAPTCHA that requires solving (image selection puzzle, "I\'m not a robot" checkbox you must click), set done=true. But do NOT stop just because you see a reCAPTCHA badge/logo in the corner — many sites include invisible reCAPTCHA that does not block the flow.\n' +
     '- IMPORTANT: Selectors MUST use the role= prefix for ARIA roles, e.g. role=combobox[name="Search"], role=button[name="Submit"]\n' +
     '- IMPORTANT: For text selectors, use ONLY the clickable element\'s own text, NOT surrounding text\n' +
     '- CRITICAL: If an element is VISIBLE in the screenshot but NOT in the accessibility tree, it is likely inside a closed shadow DOM or iframe. You MUST use click_xy with pixel coordinates. Do NOT use click or deep_click — they will fail because the element does not exist in the accessible DOM. Modals, login forms, and popups often use closed shadow DOM.\n' +
