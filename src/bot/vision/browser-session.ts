@@ -66,6 +66,11 @@ export async function createSession(chatId: number): Promise<BrowserSession> {
     userAgent: USER_AGENT,
   })
 
+  // Auto-accept native dialogs (alert, confirm, prompt)
+  page.on('dialog', (dialog) => {
+    dialog.accept().catch(() => {})
+  })
+
   const session: BrowserSession = {
     chatId,
     page,
