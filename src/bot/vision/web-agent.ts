@@ -13,6 +13,8 @@ import {
   sessionScreenshot,
   sessionAccessTree,
   sessionClick,
+  sessionClickXY,
+  sessionDeepClick,
   sessionFill,
   sessionPress,
   sessionScroll,
@@ -240,6 +242,17 @@ async function executeAction(
       await sessionClick(session, action.selector)
       break
 
+    case 'click_xy':
+      if (action.x == null || action.y == null) throw new Error('click_xy 需要 x, y 座標')
+      await sessionClickXY(session, action.x, action.y)
+      break
+
+    case 'deep_click':
+      if (!action.text) throw new Error('deep_click 需要 text')
+      const deepClicked = await sessionDeepClick(session, action.text)
+      if (!deepClicked) throw new Error(`deep_click 找不到包含 "${action.text}" 的元素`)
+      break
+
     case 'fill':
       if (!action.selector) throw new Error('fill 需要 selector')
       if (!action.text) throw new Error('fill 需要 text')
@@ -275,6 +288,8 @@ function actionLabel(step: AgentStep): string {
   const { action } = step
   switch (action.type) {
     case 'click': return `點擊 ${action.selector ?? ''}`
+    case 'click_xy': return `座標點擊 (${action.x}, ${action.y})`
+    case 'deep_click': return `深層點擊 "${action.text ?? ''}"`
     case 'fill': return `填入 "${action.text ?? ''}" → ${action.selector ?? ''}`
     case 'press': return `按鍵 ${action.text ?? ''}`
     case 'scroll': return `捲動 ${action.text ?? 'down'}`

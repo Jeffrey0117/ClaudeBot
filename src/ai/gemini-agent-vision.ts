@@ -11,9 +11,11 @@ const TIMEOUT_MS = 30_000
 // --- Types ---
 
 export interface AgentAction {
-  readonly type: 'click' | 'fill' | 'press' | 'scroll' | 'navigate' | 'done'
+  readonly type: 'click' | 'click_xy' | 'deep_click' | 'fill' | 'press' | 'scroll' | 'navigate' | 'done'
   readonly selector?: string
   readonly text?: string
+  readonly x?: number
+  readonly y?: number
 }
 
 export interface AgentStep {
@@ -41,9 +43,11 @@ const AGENT_RESPONSE_SCHEMA = {
     action: {
       type: 'OBJECT' as const,
       properties: {
-        type: { type: 'STRING' as const, enum: ['click', 'fill', 'press', 'scroll', 'navigate', 'done'] },
+        type: { type: 'STRING' as const, enum: ['click', 'click_xy', 'deep_click', 'fill', 'press', 'scroll', 'navigate', 'done'] },
         selector: { type: 'STRING' as const, description: 'Element selector: role=button[name="X"], text="Y", or CSS selector' },
         text: { type: 'STRING' as const, description: 'Text to fill or key to press or URL to navigate to' },
+        x: { type: 'NUMBER' as const, description: 'X coordinate for click_xy (0-1280)' },
+        y: { type: 'NUMBER' as const, description: 'Y coordinate for click_xy (0-720)' },
       },
       required: ['type'],
     },
@@ -89,10 +93,13 @@ function buildAgentPrompt(
     '- Set done=true when the task is complete or you cannot proceed\n' +
     '- If an element was not found in a previous step, try a different selector\n' +
     '- Do NOT fill password fields unless the instruction explicitly asks for it\n' +
-    '- IMPORTANT: If you see a CAPTCHA, reCAPTCHA, or "I\'m not a robot" challenge, set done=true immediately and explain in thought that a CAPTCHA is blocking progress\n' +
+    '- IMPORTANT: If you see a CAPTCHA, reCAPTCHA, or "I\'m not a robot" challenge, set done=true immediately\n' +
     '- IMPORTANT: Selectors MUST use the role= prefix for ARIA roles, e.g. role=combobox[name="Search"], role=button[name="Submit"]\n' +
-    '- IMPORTANT: For text selectors, use ONLY the clickable element\'s own text, NOT surrounding text. Example: if you see "沒有帳號？註冊" where "註冊" is a link, use text="註冊" or role=link[name="註冊"], NOT text="沒有帳號？註冊"\n' +
-    '- IMPORTANT: If "元素不存在" error occurs, the element text you used is wrong. Look at the accessibility tree carefully and use the EXACT text from there. Try shorter, more specific selectors.'
+    '- IMPORTANT: For text selectors, use ONLY the clickable element\'s own text, NOT surrounding text\n' +
+    '- IMPORTANT: If a click action fails with "元素不存在", switch to click_xy and provide the x,y pixel coordinates of the element on the screenshot (viewport is 1280x720). This bypasses DOM issues.\n' +
+    '- For deep_click actions, provide the visible text of the element in text field — this walks the entire DOM including shadow DOM and iframes to find and click it\n' +
+    '- IMPORTANT: If click and click_xy both fail for an element, use deep_click with the element\'s visible text. deep_click bypasses all selector issues by walking the raw DOM.\n' +
+    '- PREFER click_xy over click when you can see the element in the screenshot but the accessibility tree doesn\'t show a clear selector for it'
   )
 }
 
