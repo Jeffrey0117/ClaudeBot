@@ -205,11 +205,13 @@ function resolveLocator(page: Page, selector: string): ReturnType<Page['locator'
   const textMatch = selector.match(/^text="(.+)"$/)
   if (textMatch) {
     const fullText = textMatch[1]
-    const locator = page.getByText(fullText, { exact: true })
+    const lastSegment = extractLastSegment(fullText)
 
-    // Sync check not possible, return a smart locator:
-    // Try exact first, then fallback to last segment (for split elements like "沒有帳號？註冊")
-    return locator.or(page.getByText(extractLastSegment(fullText), { exact: true }))
+    // Try full text first, then fall back to last segment (e.g. "沒有帳號？註冊" → "註冊")
+    if (lastSegment !== fullText) {
+      return page.getByText(fullText).or(page.getByText(lastSegment))
+    }
+    return page.getByText(fullText)
   }
 
   // CSS selector fallback
