@@ -90,7 +90,9 @@ function buildAgentPrompt(
     '- If an element was not found in a previous step, try a different selector\n' +
     '- Do NOT fill password fields unless the instruction explicitly asks for it\n' +
     '- IMPORTANT: If you see a CAPTCHA, reCAPTCHA, or "I\'m not a robot" challenge, set done=true immediately and explain in thought that a CAPTCHA is blocking progress\n' +
-    '- IMPORTANT: Selectors MUST use the role= prefix for ARIA roles, e.g. role=combobox[name="Search"], role=button[name="Submit"]'
+    '- IMPORTANT: Selectors MUST use the role= prefix for ARIA roles, e.g. role=combobox[name="Search"], role=button[name="Submit"]\n' +
+    '- IMPORTANT: For text selectors, use ONLY the clickable element\'s own text, NOT surrounding text. Example: if you see "沒有帳號？註冊" where "註冊" is a link, use text="註冊" or role=link[name="註冊"], NOT text="沒有帳號？註冊"\n' +
+    '- IMPORTANT: If "元素不存在" error occurs, the element text you used is wrong. Look at the accessibility tree carefully and use the EXACT text from there. Try shorter, more specific selectors.'
   )
 }
 

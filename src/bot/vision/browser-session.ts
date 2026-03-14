@@ -201,12 +201,24 @@ function resolveLocator(page: Page, selector: string): ReturnType<Page['locator'
     return page.getByRole(bareRoleMatch[1] as Parameters<Page['getByRole']>[0], { name: bareRoleMatch[2] })
   }
 
-  // text="something"
+  // text="something" — with fallback for split-element text
   const textMatch = selector.match(/^text="(.+)"$/)
   if (textMatch) {
-    return page.getByText(textMatch[1])
+    const fullText = textMatch[1]
+    const locator = page.getByText(fullText, { exact: true })
+
+    // Sync check not possible, return a smart locator:
+    // Try exact first, then fallback to last segment (for split elements like "沒有帳號？註冊")
+    return locator.or(page.getByText(extractLastSegment(fullText), { exact: true }))
   }
 
   // CSS selector fallback
   return page.locator(selector)
+}
+
+/** Extract the last meaningful segment from combined text like "沒有帳號？註冊" → "註冊" */
+function extractLastSegment(text: string): string {
+  // Split on common delimiters: ？?、，,/| and whitespace
+  const parts = text.split(/[？?、，,/|\s]+/).filter(Boolean)
+  return parts.length > 1 ? parts[parts.length - 1] : text
 }
