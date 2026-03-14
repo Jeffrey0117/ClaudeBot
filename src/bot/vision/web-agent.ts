@@ -112,7 +112,13 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       const failedContext = failedSelectors.size > 0
         ? `\n\nPreviously failed selectors (DO NOT reuse): ${[...failedSelectors].join(', ')}`
         : ''
-      const instructionWithContext = instruction + failedContext
+
+      // Detect if the page likely has closed shadow DOM (visible content not in tree)
+      const shadowHint = consecutiveFailures >= 1
+        ? '\n\nWARNING: Previous click/deep_click actions failed. The target element is likely inside a CLOSED shadow DOM (invisible to DOM APIs). You MUST use click_xy with accurate pixel coordinates from the screenshot. Do NOT try click or deep_click again.'
+        : ''
+
+      const instructionWithContext = instruction + failedContext + shadowHint
 
       // 2. Ask Gemini for next action
       const result = await analyzeForAction(screenshot, accessTree, instructionWithContext, steps)
