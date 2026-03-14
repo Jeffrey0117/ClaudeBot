@@ -22,6 +22,8 @@ export interface AgentStep {
   readonly thought: string
   readonly action: AgentAction
   readonly done: boolean
+  /** True when this step came from a playbook replay (not a fresh Gemini call). */
+  readonly isReplay?: boolean
 }
 
 export interface GeminiAgentResult {

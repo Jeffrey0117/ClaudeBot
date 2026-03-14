@@ -113,6 +113,7 @@ export async function runPlaybook(options: PlaybookRunOptions): Promise<AgentLoo
         thought: `Replay: ${resolvedAction.type}${resolvedAction.selector ? ` on ${resolvedAction.selector}` : ''}${resolvedAction.text ? ` "${resolvedAction.text}"` : ''}`,
         action: resolvedAction,
         done: false,
+        isReplay: true,
       }
 
       updateAgentStep(chatId, i + 1)
@@ -131,6 +132,7 @@ export async function runPlaybook(options: PlaybookRunOptions): Promise<AgentLoo
           thought: `Replay failed at step ${i + 1}: ${msg}`,
           action: resolvedAction,
           done: false,
+          isReplay: true,
         })
 
         // disableFallback: return failure instead of nesting another agent loop

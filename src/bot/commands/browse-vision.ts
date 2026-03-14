@@ -445,16 +445,21 @@ async function sendAgentResult(
   instruction: string,
   result: import('../vision/web-agent.js').AgentLoopResult,
 ): Promise<void> {
+  const replayCount = result.steps.filter((s) => s.isReplay).length
+  const aiCount = result.steps.length - replayCount
   const stepsText = result.steps
-    .map((s, i) => `${i + 1}. ${s.thought}`)
+    .map((s, i) => `${s.isReplay ? '▶️' : `${i + 1}.`} ${s.thought}`)
     .join('\n')
 
   const icon = result.success ? '✅' : '⚠️'
+  const statsLine = replayCount > 0
+    ? `📊 ${result.steps.length} 步驟 \\(🤖${aiCount} \\+ ▶️${replayCount} 回放\\)`
+    : `📊 ${result.steps.length} 步驟`
   const summary = (
     `${icon} *網頁自動化完成*\n\n` +
     `🌐 ${escapeMd(url)}\n` +
     `🎯 ${escapeMd(instruction)}\n` +
-    `📊 ${result.steps.length} 步驟\n\n` +
+    `${statsLine}\n\n` +
     `*結果:* ${escapeMd(result.summary)}\n\n` +
     `*步驟記錄:*\n${escapeMd(stepsText)}`
   )
@@ -462,11 +467,14 @@ async function sendAgentResult(
   try {
     await ctx.reply(summary, { parse_mode: 'MarkdownV2' })
   } catch {
+    const plainStats = replayCount > 0
+      ? `📊 ${result.steps.length} 步驟 (🤖${aiCount} + ▶️${replayCount} 回放)`
+      : `📊 ${result.steps.length} 步驟`
     await ctx.reply(
       `${icon} 網頁自動化完成\n\n` +
       `🌐 ${url}\n` +
       `🎯 ${instruction}\n` +
-      `📊 ${result.steps.length} 步驟\n\n` +
+      `${plainStats}\n\n` +
       `結果: ${result.summary}\n\n` +
       `步驟記錄:\n${stepsText}`,
     )
@@ -507,9 +515,11 @@ async function handleSavePlaybook(
     return
   }
 
-  const allActions = extractPlaybookActions(lastResult.steps)
+  // Filter out replay steps — they're already saved as playbooks
+  const freshSteps = lastResult.steps.filter((s) => !s.isReplay && s.action.type !== 'use_playbook')
+  const allActions = extractPlaybookActions(freshSteps)
   if (allActions.length === 0) {
-    await ctx.reply('上次執行沒有可記錄的動作。')
+    await ctx.reply('上次執行沒有新動作可儲存（全為已有的 playbook 回放）。')
     return
   }
 
@@ -522,7 +532,7 @@ async function handleSavePlaybook(
   // --- Always auto-split (name is used as prefix if provided) ---
   const statusMsg = await ctx.reply('🔍 AI 分析步驟，自動拆分 playbook...')
 
-  const splitResult = await autoSplitSteps(lastResult.url, lastResult.instruction, lastResult.steps)
+  const splitResult = await autoSplitSteps(lastResult.url, lastResult.instruction, freshSteps)
 
   if (splitResult.error || splitResult.groups.length === 0) {
     // Fallback: save as single playbook
@@ -545,7 +555,7 @@ async function handleSavePlaybook(
 
   // Save each group as a separate playbook
   const savedNames: string[] = []
-  const nonDoneSteps = lastResult.steps.filter((s) => s.action.type !== 'done')
+  const nonDoneSteps = freshSteps.filter((s) => s.action.type !== 'done')
 
   for (const group of splitResult.groups) {
     const start = Math.max(0, group.startIndex)
