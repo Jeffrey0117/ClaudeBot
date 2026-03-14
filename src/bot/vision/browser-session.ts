@@ -26,6 +26,14 @@ export interface BrowserSession {
 
 const sessions = new Map<number, { session: BrowserSession; idleTimer: ReturnType<typeof setTimeout> }>()
 
+/** Get existing session for continuation mode. Returns null if no active session. */
+export function getSession(chatId: number): BrowserSession | null {
+  const entry = sessions.get(chatId)
+  if (!entry) return null
+  resetSessionIdle(chatId)
+  return entry.session
+}
+
 function resetSessionIdle(chatId: number): void {
   const entry = sessions.get(chatId)
   if (!entry) return
@@ -91,13 +99,13 @@ export async function sessionScreenshot(session: BrowserSession, withGrid = fals
         svg.style.cssText = 'position:fixed;top:0;left:0;width:1280px;height:720px;z-index:999999;pointer-events:none;';
         svg.setAttribute('viewBox', '0 0 1280 720');
         var html = '';
-        for (var x = 0; x <= 1280; x += 160) {
-          html += '<line x1="'+x+'" y1="0" x2="'+x+'" y2="720" stroke="rgba(255,0,0,0.3)" stroke-width="1"/>';
+        for (var x = 0; x <= 1280; x += 100) {
+          html += '<line x1="'+x+'" y1="0" x2="'+x+'" y2="720" stroke="rgba(255,0,0,0.25)" stroke-width="1"/>';
           html += '<text x="'+(x+2)+'" y="12" fill="red" font-size="10">'+x+'</text>';
         }
-        for (var y = 0; y <= 720; y += 120) {
-          html += '<line x1="0" y1="'+y+'" x2="1280" y2="'+y+'" stroke="rgba(255,0,0,0.3)" stroke-width="1"/>';
-          html += '<text x="2" y="'+(y+22)+'" fill="red" font-size="10">y='+y+'</text>';
+        for (var y = 0; y <= 720; y += 80) {
+          html += '<line x1="0" y1="'+y+'" x2="1280" y2="'+y+'" stroke="rgba(255,0,0,0.25)" stroke-width="1"/>';
+          html += '<text x="2" y="'+(y+12)+'" fill="red" font-size="10">'+y+'</text>';
         }
         svg.innerHTML = html;
         document.body.appendChild(svg);
