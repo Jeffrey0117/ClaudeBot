@@ -14,6 +14,7 @@ export interface AIRunOptions {
   readonly chatId?: number
   readonly threadId?: number
   readonly maxTurns?: number
+  readonly yolo?: boolean
   readonly onTextDelta: (text: string, accumulated: string) => void
   readonly onToolUse: (toolName: string) => void
   readonly onResult: (result: AIResult) => void
