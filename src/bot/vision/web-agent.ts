@@ -24,8 +24,8 @@ import { isSsrfBlocked } from './ssrf-guard.js'
 import { analyzeForAction, type AgentStep } from '../../ai/gemini-agent-vision.js'
 import { updateAgentStep, clearActiveAgent } from './web-agent-store.js'
 
-const DEFAULT_MAX_STEPS = 10
-const TOTAL_TIMEOUT_MS = 120_000
+const DEFAULT_MAX_STEPS = 15
+const TOTAL_TIMEOUT_MS = 180_000
 const MAX_CONSECUTIVE_FAILURES = 3
 
 export interface AgentLoopOptions {
@@ -160,7 +160,59 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
 
       steps.push(step)
 
-      // 3. Check if done
+      // 3. Execute action FIRST (even if done=true, Gemini often says
+      //    "click submit, task complete" — we must execute before returning)
+      if (step.action.type !== 'done') {
+        await updateStatus(
+          telegram, chatId, statusMessageId,
+          `🤖 步驟 ${i + 1}/${maxSteps}: ${actionLabel(step)}`,
+        )
+
+        try {
+          await executeAction(session, step)
+          consecutiveFailures = 0 // reset on success
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          consecutiveFailures++
+          hadAnyFailure = true
+
+          // Track failed selectors so Gemini won't reuse them
+          if (step.action.selector) {
+            failedSelectors.add(step.action.selector)
+          }
+
+          // Replace the step with error info
+          steps.pop()
+          steps.push({
+            thought: `Action failed: ${msg}`,
+            action: step.action,
+            done: false,
+          })
+
+          // Stuck detection: too many consecutive failures → abort
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            await updateStatus(
+              telegram, chatId, statusMessageId,
+              `❌ 連續 ${MAX_CONSECUTIVE_FAILURES} 次失敗，停止`,
+            )
+            return buildResult(
+              steps, finalScreenshot, false,
+              `連續 ${MAX_CONSECUTIVE_FAILURES} 次操作失敗，無法繼續`,
+            )
+          }
+
+          await updateStatus(
+            telegram, chatId, statusMessageId,
+            `⚠️ 步驟 ${i + 1}: 失敗 (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})，換方式重試...`,
+          )
+          continue
+        }
+
+        // Wait for page to settle
+        await sessionWaitForSettle(session)
+      }
+
+      // 4. Check if done (AFTER executing action)
       if (step.done || step.action.type === 'done') {
         await updateStatus(
           telegram, chatId, statusMessageId,
@@ -171,55 +223,6 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         } catch { /* page may have navigated away */ }
         return buildResult(steps, finalScreenshot, true, step.thought)
       }
-
-      // 4. Execute action
-      await updateStatus(
-        telegram, chatId, statusMessageId,
-        `🤖 步驟 ${i + 1}/${maxSteps}: ${actionLabel(step)}`,
-      )
-
-      try {
-        await executeAction(session, step)
-        consecutiveFailures = 0 // reset on success
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        consecutiveFailures++
-        hadAnyFailure = true
-
-        // Track failed selectors so Gemini won't reuse them
-        if (step.action.selector) {
-          failedSelectors.add(step.action.selector)
-        }
-
-        // Replace the step with error info
-        steps.pop()
-        steps.push({
-          thought: `Action failed: ${msg}`,
-          action: step.action,
-          done: false,
-        })
-
-        // Stuck detection: too many consecutive failures → abort
-        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-          await updateStatus(
-            telegram, chatId, statusMessageId,
-            `❌ 連續 ${MAX_CONSECUTIVE_FAILURES} 次失敗，停止`,
-          )
-          return buildResult(
-            steps, finalScreenshot, false,
-            `連續 ${MAX_CONSECUTIVE_FAILURES} 次操作失敗，無法繼續`,
-          )
-        }
-
-        await updateStatus(
-          telegram, chatId, statusMessageId,
-          `⚠️ 步驟 ${i + 1}: 失敗 (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})，換方式重試...`,
-        )
-        continue
-      }
-
-      // 5. Wait for page to settle
-      await sessionWaitForSettle(session)
     }
 
     // Max steps reached
