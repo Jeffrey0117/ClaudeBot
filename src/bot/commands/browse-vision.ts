@@ -1,38 +1,25 @@
 /**
- * /bv — Browse & Vision: screenshot a URL and analyse it with Gemini.
+ * /bv — Browse & Vision: screenshot analysis + web agent automation.
  *
- * Flow: Playwright screenshot → base64 → Gemini Vision API (direct) → reply
- *       No upload needed, no CLI needed — direct multimodal API call.
+ * Modes:
+ *   /bv                  → usage help
+ *   /bv <url>            → one-shot screenshot + Gemini analysis
+ *   /bv <url> <指令>      → agent loop (screenshot → analyze → act → repeat)
+ *   /bv cancel           → cancel active agent
  */
 
 import type { BotContext } from '../../types/context.js'
 import { captureScreenshot, cleanupScreenshot } from '../vision/browser-pool.js'
 import { analyzeImageFromPath } from '../../ai/gemini-vision.js'
+import { isSsrfBlocked } from '../vision/ssrf-guard.js'
+import { runAgentLoop } from '../vision/web-agent.js'
+import {
+  setActiveAgent,
+  getActiveAgent,
+  cancelActiveAgent,
+} from '../vision/web-agent-store.js'
 
-// --- SSRF guard ---
-
-const BLOCKED_HOSTS = [
-  /^localhost$/i,
-  /^127\./,
-  /^10\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^192\.168\./,
-  /^169\.254\./,
-  /^0\./,
-  /^\[::1\]$/,
-]
-
-function isSsrfBlocked(url: string): boolean {
-  try {
-    const parsed = new URL(url)
-    if (!['http:', 'https:'].includes(parsed.protocol)) return true
-    return BLOCKED_HOSTS.some((re) => re.test(parsed.hostname))
-  } catch {
-    return true
-  }
-}
-
-// --- Prompt template ---
+// --- Prompt template (one-shot mode) ---
 
 function buildPrompt(pageUrl: string): string {
   return (
@@ -59,47 +46,93 @@ export async function browseVisionCommand(ctx: BotContext): Promise<void> {
   if (!chatId) return
 
   const text = ctx.message && 'text' in ctx.message ? ctx.message.text : ''
-  let rawUrl = text.replace(/^\/bv\s*/i, '').trim()
+  const args = text.replace(/^\/bv\s*/i, '').trim()
 
-  if (!rawUrl) {
+  // No args → usage help
+  if (!args) {
     await ctx.reply(
-      '🌐 *網頁視覺分析*\n\n' +
-      '用法: `/bv <URL>`\n\n' +
-      '範例:\n' +
-      '`/bv https://example.com`\n' +
-      '`/bv github.com`\n\n' +
-      '_截圖 → Gemini 視覺分析 UI/UX 和內容_',
-      { parse_mode: 'Markdown' },
+      '🌐 *網頁視覺分析 \\+ 自動化*\n\n' +
+      '*截圖分析:*\n' +
+      '`/bv <URL>` — 截圖 → Gemini 分析\n\n' +
+      '*網頁自動化:*\n' +
+      '`/bv <URL> <指令>` — Agent 自動執行任務\n\n' +
+      '*取消:*\n' +
+      '`/bv cancel` — 取消進行中的 Agent\n\n' +
+      '*範例:*\n' +
+      '`/bv example\\.com`\n' +
+      '`/bv google\\.com 搜尋 Claude Code`\n' +
+      '`/bv github\\.com 找到 trending repos`',
+      { parse_mode: 'MarkdownV2' },
     )
     return
   }
+
+  // Cancel command
+  if (args.toLowerCase() === 'cancel') {
+    if (cancelActiveAgent(chatId)) {
+      await ctx.reply('🛑 已取消網頁自動化')
+    } else {
+      await ctx.reply('💤 沒有進行中的網頁自動化任務')
+    }
+    return
+  }
+
+  // Parse URL and optional instruction
+  const { url, instruction } = parseArgs(args)
+
+  if (!url) {
+    await ctx.reply('URL 格式無效')
+    return
+  }
+
+  if (isSsrfBlocked(url)) {
+    await ctx.reply('不允許存取內部網路位址')
+    return
+  }
+
+  if (instruction) {
+    await handleAgentMode(ctx, chatId, url, instruction)
+  } else {
+    await handleOneShotMode(ctx, chatId, url)
+  }
+}
+
+// --- Parse URL and instruction from args ---
+
+function parseArgs(args: string): { url: string | null; instruction: string } {
+  // Try to extract URL from the beginning
+  const parts = args.split(/\s+/)
+  let rawUrl = parts[0]
 
   // Auto-prepend https://
   if (!/^https?:\/\//i.test(rawUrl)) {
     rawUrl = `https://${rawUrl}`
   }
 
-  // Validate URL
   try {
     new URL(rawUrl)
   } catch {
-    await ctx.reply('URL 格式無效')
-    return
+    return { url: null, instruction: '' }
   }
 
-  if (isSsrfBlocked(rawUrl)) {
-    await ctx.reply('不允許存取內部網路位址')
-    return
-  }
+  const instruction = parts.slice(1).join(' ').trim()
+  return { url: rawUrl, instruction }
+}
 
+// --- One-shot mode (existing behavior) ---
+
+async function handleOneShotMode(
+  ctx: BotContext,
+  chatId: number,
+  url: string,
+): Promise<void> {
   let screenshotPath: string | null = null
 
   try {
-    const statusMsg = await ctx.reply(`📸 截圖中... ${rawUrl}`)
+    const statusMsg = await ctx.reply(`📸 截圖中... ${url}`)
 
-    screenshotPath = await captureScreenshot(rawUrl)
+    screenshotPath = await captureScreenshot(url)
 
-    // Update status
     try {
       await ctx.telegram.editMessageText(
         chatId, statusMsg.message_id, undefined,
@@ -107,10 +140,9 @@ export async function browseVisionCommand(ctx: BotContext): Promise<void> {
       )
     } catch { /* ignore edit failure */ }
 
-    const prompt = buildPrompt(rawUrl)
+    const prompt = buildPrompt(url)
     const result = await analyzeImageFromPath(screenshotPath, prompt)
 
-    // Clean up screenshot
     await cleanupScreenshot(screenshotPath)
     screenshotPath = null
 
@@ -119,19 +151,96 @@ export async function browseVisionCommand(ctx: BotContext): Promise<void> {
       return
     }
 
-    // Send result — try Markdown first, fall back to plain text
-    const header = `🌐 *${escapeMd(rawUrl)}*\n\n`
+    const header = `🌐 *${escapeMd(url)}*\n\n`
     try {
       await ctx.reply(header + result.text, { parse_mode: 'MarkdownV2' })
     } catch {
-      // Markdown parse failed, send as plain text
-      await ctx.reply(`🌐 ${rawUrl}\n\n${result.text}`)
+      await ctx.reply(`🌐 ${url}\n\n${result.text}`)
     }
   } catch (err) {
-    if (screenshotPath) {
-      await cleanupScreenshot(screenshotPath)
-    }
+    if (screenshotPath) await cleanupScreenshot(screenshotPath)
     const msg = err instanceof Error ? err.message : String(err)
     await ctx.reply(`截圖失敗: ${msg}`)
+  }
+}
+
+// --- Agent mode (new) ---
+
+async function handleAgentMode(
+  ctx: BotContext,
+  chatId: number,
+  url: string,
+  instruction: string,
+): Promise<void> {
+  // Check if already running
+  if (getActiveAgent(chatId)) {
+    await ctx.reply('⚠️ 已有進行中的自動化任務。\n用 `/bv cancel` 取消後再試。', { parse_mode: 'Markdown' })
+    return
+  }
+
+  const statusMsg = await ctx.reply(`🤖 啟動網頁自動化...\n🎯 ${instruction}\n🌐 ${url}`)
+
+  const abortController = new AbortController()
+
+  setActiveAgent(chatId, {
+    chatId,
+    url,
+    instruction,
+    abortController,
+    startedAt: Date.now(),
+    currentStep: 0,
+    statusMessageId: statusMsg.message_id,
+  })
+
+  try {
+    const result = await runAgentLoop({
+      chatId,
+      url,
+      instruction,
+      statusMessageId: statusMsg.message_id,
+      telegram: ctx.telegram,
+      abortSignal: abortController.signal,
+    })
+
+    // Build summary
+    const stepsText = result.steps
+      .map((s, i) => `${i + 1}. ${s.thought}`)
+      .join('\n')
+
+    const icon = result.success ? '✅' : '⚠️'
+    const summary = (
+      `${icon} *網頁自動化完成*\n\n` +
+      `🌐 ${escapeMd(url)}\n` +
+      `🎯 ${escapeMd(instruction)}\n` +
+      `📊 ${result.steps.length} 步驟\n\n` +
+      `*結果:* ${escapeMd(result.summary)}\n\n` +
+      `*步驟記錄:*\n${escapeMd(stepsText)}`
+    )
+
+    try {
+      await ctx.reply(summary, { parse_mode: 'MarkdownV2' })
+    } catch {
+      await ctx.reply(
+        `${icon} 網頁自動化完成\n\n` +
+        `🌐 ${url}\n` +
+        `🎯 ${instruction}\n` +
+        `📊 ${result.steps.length} 步驟\n\n` +
+        `結果: ${result.summary}\n\n` +
+        `步驟記錄:\n${stepsText}`,
+      )
+    }
+
+    // Send final screenshot if available
+    if (result.finalScreenshot) {
+      try {
+        const buf = Buffer.from(result.finalScreenshot, 'base64')
+        await ctx.replyWithPhoto({ source: buf, filename: 'final.png' })
+      } catch {
+        // ignore photo send failure
+      }
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await ctx.reply(`❌ 自動化失敗: ${msg}`)
   }
 }

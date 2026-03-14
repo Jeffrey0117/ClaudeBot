@@ -3,10 +3,17 @@ import { cancelAnyRunning, isAnyRunning } from '../../ai/registry.js'
 import { getUserState } from '../state.js'
 import { getPairing } from '../../remote/pairing-store.js'
 import { env } from '../../config/env.js'
+import { cancelActiveAgent } from '../vision/web-agent-store.js'
 
 export async function cancelCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
   if (!chatId) return
+
+  // Cancel web agent if active
+  if (cancelActiveAgent(chatId)) {
+    await ctx.reply('\u{1F6D1} 已取消網頁自動化')
+    return
+  }
 
   const threadId = ctx.message?.message_thread_id
   const state = getUserState(chatId, threadId)

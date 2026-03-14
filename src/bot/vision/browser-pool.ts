@@ -26,7 +26,7 @@ function resetIdleTimer(): void {
   }, IDLE_TIMEOUT_MS)
 }
 
-async function getBrowser(): Promise<import('playwright').Browser> {
+export async function getBrowser(): Promise<import('playwright').Browser> {
   if (browser?.isConnected()) {
     resetIdleTimer()
     return browser
