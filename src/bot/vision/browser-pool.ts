@@ -33,7 +33,13 @@ export async function getBrowser(): Promise<import('playwright').Browser> {
   }
 
   const { chromium } = await import('playwright')
-  browser = await chromium.launch({ headless: true })
+  browser = await chromium.launch({
+    headless: true,
+    args: [
+      '--disable-blink-features=AutomationControlled',
+      '--no-sandbox',
+    ],
+  })
   resetIdleTimer()
   return browser
 }
@@ -41,7 +47,10 @@ export async function getBrowser(): Promise<import('playwright').Browser> {
 export async function captureScreenshot(url: string): Promise<string> {
   activeRequests++
   const b = await getBrowser()
-  const page = await b.newPage({ viewport: VIEWPORT })
+  const page = await b.newPage({
+    viewport: VIEWPORT,
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  })
 
   try {
     await page.goto(url, { waitUntil: 'networkidle', timeout: PAGE_TIMEOUT_MS })
