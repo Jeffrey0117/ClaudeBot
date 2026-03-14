@@ -8,7 +8,7 @@
 
 import { getBrowser } from './browser-pool.js'
 import { isSsrfBlocked } from './ssrf-guard.js'
-import type { Page } from 'playwright'
+import type { Page, Frame, Locator } from 'playwright'
 
 const MAX_SESSIONS = 3
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000
@@ -92,12 +92,11 @@ export async function sessionAccessTree(session: BrowserSession): Promise<string
 
 export async function sessionClick(session: BrowserSession, selector: string): Promise<void> {
   resetSessionIdle(session.chatId)
-  const locator = resolveLocator(session.page, selector)
+  const { locator, source } = await findElement(session.page, selector)
 
-  // Check if element exists in DOM at all
-  const count = await locator.count()
-  if (count === 0) {
-    throw new Error(`元素不存在: ${selector}`)
+  if (!locator) {
+    const debug = await getPageDebugInfo(session.page, selector)
+    throw new Error(`元素不存在: ${selector}。${debug}`)
   }
 
   // Try normal click first
@@ -112,17 +111,17 @@ export async function sessionClick(session: BrowserSession, selector: string): P
     await locator.first().scrollIntoViewIfNeeded({ timeout: 3000 })
     await locator.first().click({ timeout: 5000, force: true })
   } catch {
-    throw new Error(`元素存在但無法點擊 (可能被遮擋或不可見): ${selector}`)
+    throw new Error(`元素存在(${source})但無法點擊: ${selector}`)
   }
 }
 
 export async function sessionFill(session: BrowserSession, selector: string, text: string): Promise<void> {
   resetSessionIdle(session.chatId)
-  const locator = resolveLocator(session.page, selector)
+  const { locator } = await findElement(session.page, selector)
 
-  const count = await locator.count()
-  if (count === 0) {
-    throw new Error(`元素不存在: ${selector}`)
+  if (!locator) {
+    const debug = await getPageDebugInfo(session.page, selector)
+    throw new Error(`元素不存在: ${selector}。${debug}`)
   }
 
   try {
@@ -165,14 +164,90 @@ export async function closeSession(chatId: number): Promise<void> {
   }
 }
 
-/**
- * Translate agent selectors to Playwright locators.
- * Supports:
- *   role=button[name="Submit"]  → page.getByRole('button', { name: 'Submit' })
- *   text="登入"                 → page.getByText('登入')
- *   #search-input               → page.locator('#search-input')
- *   .my-class                   → page.locator('.my-class')
- */
+// --- Smart element finding: main page + all frames ---
+
+interface FindResult {
+  readonly locator: Locator | null
+  readonly source: string
+}
+
+async function findElement(page: Page, selector: string): Promise<FindResult> {
+  // 1. Try main page
+  const mainLocator = resolveLocator(page, selector)
+  try {
+    if (await mainLocator.count() > 0) {
+      return { locator: mainLocator, source: 'main' }
+    }
+  } catch { /* count failed, try frames */ }
+
+  // 2. Try all iframes
+  const frames = page.frames()
+  for (const frame of frames) {
+    if (frame === page.mainFrame()) continue
+    try {
+      const frameLoc = resolveLocatorForFrame(frame, selector)
+      if (await frameLoc.count() > 0) {
+        return { locator: frameLoc, source: `iframe:${frame.url().slice(0, 50)}` }
+      }
+    } catch { continue }
+  }
+
+  // 3. Last resort: try page.locator with CSS :text() which can be more flexible
+  try {
+    const textMatch = selector.match(/^text="(.+)"$/)
+    if (textMatch) {
+      const cssTextLocator = page.locator(`:text("${textMatch[1]}")`)
+      if (await cssTextLocator.count() > 0) {
+        return { locator: cssTextLocator, source: 'css-text' }
+      }
+      // Also try with the last segment
+      const lastSeg = extractLastSegment(textMatch[1])
+      if (lastSeg !== textMatch[1]) {
+        const segLocator = page.locator(`:text("${lastSeg}")`)
+        if (await segLocator.count() > 0) {
+          return { locator: segLocator, source: 'css-text-segment' }
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
+  return { locator: null, source: 'not-found' }
+}
+
+/** Debug info when element not found — helps diagnose iframe/shadow DOM issues */
+async function getPageDebugInfo(page: Page, selector: string): Promise<string> {
+  const parts: string[] = []
+
+  // Check iframe count
+  const frameCount = page.frames().length
+  if (frameCount > 1) {
+    parts.push(`頁面有 ${frameCount - 1} 個 iframe`)
+  }
+
+  // Check page URL (might have navigated)
+  parts.push(`URL: ${page.url().slice(0, 80)}`)
+
+  // Try to find similar text on page
+  const textMatch = selector.match(/^text="(.+)"$/)
+  if (textMatch) {
+    try {
+      const bodyText = await page.locator('body').innerText({ timeout: 3000 })
+      const searchText = extractLastSegment(textMatch[1])
+      if (bodyText.includes(searchText)) {
+        parts.push(`"${searchText}" 存在於頁面文字中但 locator 找不到 (可能在 shadow DOM)`)
+      } else {
+        parts.push(`"${searchText}" 不在頁面文字中`)
+      }
+    } catch {
+      parts.push('無法讀取頁面文字')
+    }
+  }
+
+  return parts.join('; ')
+}
+
+// --- Locator resolution ---
+
 /** Known ARIA role names — used to auto-detect bare role selectors from Gemini. */
 const ARIA_ROLES = new Set([
   'alert', 'alertdialog', 'application', 'article', 'banner', 'button',
@@ -188,17 +263,21 @@ const ARIA_ROLES = new Set([
   'tree', 'treegrid', 'treeitem',
 ])
 
-function resolveLocator(page: Page, selector: string): ReturnType<Page['locator']> {
+function resolveLocator(page: Page, selector: string): Locator {
+  return resolveLocatorForFrame(page, selector)
+}
+
+function resolveLocatorForFrame(frame: Page | Frame, selector: string): Locator {
   // role=button[name="Submit"]
   const roleMatch = selector.match(/^role=(\w+)\[name="(.+)"\]$/)
   if (roleMatch) {
-    return page.getByRole(roleMatch[1] as Parameters<Page['getByRole']>[0], { name: roleMatch[2] })
+    return frame.getByRole(roleMatch[1] as Parameters<Page['getByRole']>[0], { name: roleMatch[2] })
   }
 
   // Auto-detect bare role: combobox[name="搜尋"] → getByRole('combobox', { name: '搜尋' })
   const bareRoleMatch = selector.match(/^(\w+)\[name="(.+)"\]$/)
   if (bareRoleMatch && ARIA_ROLES.has(bareRoleMatch[1])) {
-    return page.getByRole(bareRoleMatch[1] as Parameters<Page['getByRole']>[0], { name: bareRoleMatch[2] })
+    return frame.getByRole(bareRoleMatch[1] as Parameters<Page['getByRole']>[0], { name: bareRoleMatch[2] })
   }
 
   // text="something" — with fallback for split-element text
@@ -207,20 +286,18 @@ function resolveLocator(page: Page, selector: string): ReturnType<Page['locator'
     const fullText = textMatch[1]
     const lastSegment = extractLastSegment(fullText)
 
-    // Try full text first, then fall back to last segment (e.g. "沒有帳號？註冊" → "註冊")
     if (lastSegment !== fullText) {
-      return page.getByText(fullText).or(page.getByText(lastSegment))
+      return frame.getByText(fullText).or(frame.getByText(lastSegment))
     }
-    return page.getByText(fullText)
+    return frame.getByText(fullText)
   }
 
   // CSS selector fallback
-  return page.locator(selector)
+  return frame.locator(selector)
 }
 
 /** Extract the last meaningful segment from combined text like "沒有帳號？註冊" → "註冊" */
 function extractLastSegment(text: string): string {
-  // Split on common delimiters: ？?、，,/| and whitespace
   const parts = text.split(/[？?、，,/|\s]+/).filter(Boolean)
   return parts.length > 1 ? parts[parts.length - 1] : text
 }
