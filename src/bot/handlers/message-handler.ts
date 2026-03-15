@@ -103,6 +103,33 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
 
   // Unmatched commands: show hint instead of silently dropping
   if (text.startsWith('/')) {
+    // Normalize: strip zero-width chars, replace fullwidth slash, trim
+    const cleaned = text
+      .replace(/[\u200B\u200C\u200D\u200E\u200F\uFEFF\u00AD]/g, '')
+      .replace(/\u00A0/g, ' ')
+      .replace(/^\uFF0F/, '/')
+      .trim()
+
+    // If cleaned text differs and is a valid command, re-dispatch via bot
+    if (cleaned !== text && cleaned.startsWith('/')) {
+      const cmdName = cleaned.slice(1).split(/[@\s]/)[0]
+      if (cmdName) {
+        // Try plugin dispatch first
+        const { isPluginCommand, dispatchPluginCommand } = await import('../../plugins/loader.js')
+        if (isPluginCommand(cmdName)) {
+          await dispatchPluginCommand(cmdName, ctx)
+          return
+        }
+        // Try core command dispatch
+        const { getCoreCommandHandler } = await import('../bot.js')
+        const handler = getCoreCommandHandler(cmdName)
+        if (handler) {
+          await handler(ctx)
+          return
+        }
+      }
+    }
+
     const cmd = text.split(/\s/)[0]
     await ctx.reply(`❌ 未知指令 ${cmd}。用 /help 查看所有指令。`)
     return

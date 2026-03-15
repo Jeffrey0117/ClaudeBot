@@ -803,6 +803,21 @@ DASHBOARD_TOKEN=your_secret_token</code></pre>
               <td data-i18n="ch12_run">在專案目錄執行 shell 指令</td>
               <td><code>/run npm test</code></td>
             </tr>
+            <tr>
+              <td><code>/deploy</code></td>
+              <td data-i18n="ch12_deploy">部署專案 (commit + merge + push)</td>
+              <td><code>/deploy</code></td>
+            </tr>
+            <tr>
+              <td><code>/sync</code></td>
+              <td data-i18n="ch12_sync">同步所有 worktree</td>
+              <td><code>/sync</code></td>
+            </tr>
+            <tr>
+              <td><code>/claudemd</code></td>
+              <td data-i18n="ch12_claudemd">自動生成/更新 CLAUDE.md</td>
+              <td><code>/claudemd</code></td>
+            </tr>
           </tbody>
         </table>
 
@@ -842,6 +857,120 @@ DASHBOARD_TOKEN=your_secret_token</code></pre>
               <td data-i18n="ch12_asr">開關語音辨識</td>
               <td><code>/asr</code></td>
             </tr>
+            <tr>
+              <td><code>/bv</code></td>
+              <td data-i18n="ch12_bv">網頁視覺分析 (Playwright + Gemini)</td>
+              <td><code>/bv https://example.com</code></td>
+            </tr>
+            <tr>
+              <td><code>/chain</code></td>
+              <td data-i18n="ch12_chain">指令鏈自動化工作流</td>
+              <td><code>/chain list</code></td>
+            </tr>
+            <tr>
+              <td><code>/last</code></td>
+              <td data-i18n="ch12_last">重送最近訊息</td>
+              <td><code>/last2</code></td>
+            </tr>
+            <tr>
+              <td><code>/ctx</code></td>
+              <td data-i18n="ch12_ctx">查看/管理上下文摘要</td>
+              <td><code>/ctx clear</code></td>
+            </tr>
+            <tr>
+              <td><code>/deep</code></td>
+              <td data-i18n="ch12_deep">深度分析 (Opus + subagent)</td>
+              <td><code>/deep 分析架構</code></td>
+            </tr>
+            <tr>
+              <td><code>/parallel</code></td>
+              <td data-i18n="ch12_parallel">平行執行多個任務</td>
+              <td><code>/parallel status</code></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Remote -->
+        <h2 class="section-heading" data-i18n="ch12_cat_remote">遠端操控</h2>
+        <table class="guide-table">
+          <thead>
+            <tr>
+              <th data-i18n="ch12_col_cmd">指令</th>
+              <th data-i18n="ch12_col_desc">說明</th>
+              <th data-i18n="ch12_col_example">範例</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>/pair</code></td>
+              <td data-i18n="ch12_pair">配對遠端電腦</td>
+              <td><code>/pair code@192.168.1.1:3000</code></td>
+            </tr>
+            <tr>
+              <td><code>/unpair</code></td>
+              <td data-i18n="ch12_unpair">斷開遠端配對</td>
+              <td><code>/unpair</code></td>
+            </tr>
+            <tr>
+              <td><code>/rpair</code></td>
+              <td data-i18n="ch12_rpair">重啟遠端 agent</td>
+              <td><code>/rpair</code></td>
+            </tr>
+            <tr>
+              <td><code>/grab</code></td>
+              <td data-i18n="ch12_grab">從遠端下載檔案</td>
+              <td><code>/grab ~/report.pdf</code></td>
+            </tr>
+            <tr>
+              <td><code>/rstatus</code></td>
+              <td data-i18n="ch12_rstatus">查看遠端系統狀態</td>
+              <td><code>/rstatus</code></td>
+            </tr>
+            <tr>
+              <td><code>/rlog</code></td>
+              <td data-i18n="ch12_rlog">查看遠端 log</td>
+              <td><code>/rlog</code></td>
+            </tr>
+            <tr>
+              <td><code>/rexec</code></td>
+              <td data-i18n="ch12_rexec">在遠端執行指令</td>
+              <td><code>/rexec npm test</code></td>
+            </tr>
+            <tr>
+              <td><code>/desktop</code></td>
+              <td data-i18n="ch12_desktop">列出遠端桌面檔案</td>
+              <td><code>/desktop</code></td>
+            </tr>
+            <tr>
+              <td><code>/downloads</code></td>
+              <td data-i18n="ch12_downloads">列出遠端下載資料夾</td>
+              <td><code>/downloads</code></td>
+            </tr>
+            <tr>
+              <td><code>/ls</code></td>
+              <td data-i18n="ch12_ls">列出遠端目錄</td>
+              <td><code>/ls ~/projects</code></td>
+            </tr>
+            <tr>
+              <td><code>/rcat</code></td>
+              <td data-i18n="ch12_rcat">讀取遠端檔案內容</td>
+              <td><code>/rcat ~/.env</code></td>
+            </tr>
+            <tr>
+              <td><code>/rwrite</code></td>
+              <td data-i18n="ch12_rwrite">寫入遠端檔案</td>
+              <td><code>/rwrite ~/test.txt hello</code></td>
+            </tr>
+            <tr>
+              <td><code>/rinfo</code></td>
+              <td data-i18n="ch12_rinfo">遠端系統資訊</td>
+              <td><code>/rinfo</code></td>
+            </tr>
+            <tr>
+              <td><code>/find</code></td>
+              <td data-i18n="ch12_find">搜尋遠端檔案</td>
+              <td><code>/find *.ts</code></td>
+            </tr>
           </tbody>
         </table>
 
@@ -876,6 +1005,26 @@ DASHBOARD_TOKEN=your_secret_token</code></pre>
               <td data-i18n="ch12_ideas">查看靈感列表</td>
               <td><code>/ideas</code></td>
             </tr>
+            <tr>
+              <td><code>/save</code></td>
+              <td data-i18n="ch12_save">儲存訊息 (書籤/釘選/AI記憶)</td>
+              <td><code>/save</code></td>
+            </tr>
+            <tr>
+              <td><code>/recall</code></td>
+              <td data-i18n="ch12_recall">叫回書籤</td>
+              <td><code>/recall API-key</code></td>
+            </tr>
+            <tr>
+              <td><code>/unsave</code></td>
+              <td data-i18n="ch12_unsave">刪除書籤</td>
+              <td><code>/unsave API-key</code></td>
+            </tr>
+            <tr>
+              <td><code>/vault</code></td>
+              <td data-i18n="ch12_vault">訊息索引/搜尋/注入/摘要</td>
+              <td><code>/vault inject 登入</code></td>
+            </tr>
           </tbody>
         </table>
 
@@ -904,6 +1053,31 @@ DASHBOARD_TOKEN=your_secret_token</code></pre>
               <td><code>/reload</code></td>
               <td data-i18n="ch12_reload">熱重載插件（不重啟 Bot）</td>
               <td><code>/reload</code></td>
+            </tr>
+            <tr>
+              <td><code>/restart</code></td>
+              <td data-i18n="ch12_restart">重啟 Bot</td>
+              <td><code>/restart all</code></td>
+            </tr>
+            <tr>
+              <td><code>/stats</code></td>
+              <td data-i18n="ch12_stats">生產力統計</td>
+              <td><code>/stats</code></td>
+            </tr>
+            <tr>
+              <td><code>/cost</code></td>
+              <td data-i18n="ch12_cost">查看 AI 花費面板</td>
+              <td><code>/cost</code></td>
+            </tr>
+            <tr>
+              <td><code>/sysinfo</code></td>
+              <td data-i18n="ch12_sysinfo">查看系統資訊</td>
+              <td><code>/sysinfo</code></td>
+            </tr>
+            <tr>
+              <td><code>/mdfix</code></td>
+              <td data-i18n="ch12_mdfix">Markdown 修正設定</td>
+              <td><code>/mdfix</code></td>
             </tr>
           </tbody>
         </table>
