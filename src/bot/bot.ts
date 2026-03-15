@@ -269,13 +269,27 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
 
   // Plugin interceptor — dynamic command dispatch + message handlers
   // Catches plugin commands installed after startup (e.g., via /install)
+  // Also normalizes pasted text with invisible Unicode chars (zero-width, fullwidth slash)
   bot.on('text', async (ctx, next) => {
-    const text = ctx.message?.text ?? ''
+    const raw = ctx.message?.text ?? ''
+    const text = raw
+      .replace(/[\u200B\u200C\u200D\u200E\u200F\uFEFF\u00AD]/g, '')
+      .replace(/\u00A0/g, ' ')
+      .replace(/^\uFF0F/, '/')
+      .trim()
     if (text.startsWith('/')) {
       const cmdName = text.slice(1).split(/[@\s]/)[0]
       if (cmdName && isPluginCommand(cmdName)) {
         await dispatchPluginCommand(cmdName, ctx)
         return
+      }
+      // If text was normalized, try core handler dispatch
+      if (text !== raw) {
+        const handler = getCoreCommandHandler(cmdName)
+        if (handler) {
+          await handler(ctx)
+          return
+        }
       }
     }
     const handled = await dispatchPluginMessage(ctx)
