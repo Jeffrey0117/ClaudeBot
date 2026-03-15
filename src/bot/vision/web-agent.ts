@@ -22,7 +22,9 @@ import {
 } from './browser-session.js'
 import { isSsrfBlocked } from './ssrf-guard.js'
 import { analyzeForAction, type AgentStep } from '../../ai/gemini-agent-vision.js'
+import type { PlaybookSummary } from '../../ai/gemini-agent-vision.js'
 import { updateAgentStep, clearActiveAgent } from './web-agent-store.js'
+import { getPlaybook, buildSkillsPrompt } from './playbook-store.js'
 
 const DEFAULT_MAX_STEPS = 15
 const TOTAL_TIMEOUT_MS = 180_000
@@ -38,6 +40,8 @@ export interface AgentLoopOptions {
   readonly abortSignal?: AbortSignal
   /** Reuse existing session, skip navigation. For follow-up instructions. */
   readonly existingSession?: import('./browser-session.js').BrowserSession
+  /** Available playbook skills for this domain (injected into Gemini prompt). */
+  readonly playbookSkills?: readonly PlaybookSummary[]
 }
 
 export interface AgentLoopResult {
@@ -57,7 +61,11 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     telegram,
     abortSignal,
     existingSession,
+    playbookSkills,
   } = options
+
+  // Inject playbook skills awareness into the instruction
+  const skillsInfo = playbookSkills ? buildSkillsPrompt(playbookSkills) : ''
 
   const steps: AgentStep[] = []
   const startTime = Date.now()
@@ -127,7 +135,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         ? '\n\nWARNING: Previous click/deep_click actions failed. The target element is likely inside a CLOSED shadow DOM (invisible to DOM APIs). You MUST use click_xy with accurate pixel coordinates from the screenshot. Do NOT try click or deep_click again. A red coordinate grid is overlaid on the screenshot — use those x/y numbers for precise click_xy coordinates.'
         : ''
 
-      const instructionWithContext = instruction + failedContext + shadowHint
+      const instructionWithContext = instruction + failedContext + shadowHint + skillsInfo
 
       // 2. Ask Gemini for next action
       const result = await analyzeForAction(screenshot, accessTree, instructionWithContext, steps)
@@ -160,7 +168,59 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
 
       steps.push(step)
 
-      // 3. Execute action FIRST (even if done=true, Gemini often says
+      // 3a. Handle use_playbook — invoke a saved playbook mid-loop
+      if (step.action.type === 'use_playbook') {
+        const pbName = step.action.text
+        if (!pbName) {
+          consecutiveFailures++
+          steps.pop()
+          steps.push({ thought: 'use_playbook: missing playbook name', action: step.action, done: false })
+          continue
+        }
+
+        const pb = getPlaybook(pbName)
+        if (!pb) {
+          consecutiveFailures++
+          steps.pop()
+          steps.push({ thought: `use_playbook: "${pbName}" not found`, action: step.action, done: false })
+          continue
+        }
+
+        await updateStatus(
+          telegram, chatId, statusMessageId,
+          `📋 步驟 ${i + 1}/${maxSteps}: 使用 playbook "${pbName}"`,
+        )
+
+        // Dynamic import to avoid circular dependency (playbook-runner → web-agent)
+        const { runPlaybook } = await import('./playbook-runner.js')
+
+        const pbResult = await runPlaybook({
+          chatId,
+          playbook: pb,
+          newInstruction: instruction,
+          statusMessageId,
+          telegram,
+          abortSignal,
+          existingSession: session!,
+          skipNavigation: true,
+          disableFallback: true,
+        })
+
+        // Add playbook steps to history
+        steps.push(...pbResult.steps)
+
+        if (pbResult.success) {
+          consecutiveFailures = 0
+          await sessionWaitForSettle(session!)
+        } else {
+          consecutiveFailures++
+          hadAnyFailure = true
+        }
+        // Continue loop — agent takes new screenshot and decides next action
+        continue
+      }
+
+      // 3b. Execute action FIRST (even if done=true, Gemini often says
       //    "click submit, task complete" — we must execute before returning)
       if (step.action.type !== 'done') {
         await updateStatus(
@@ -251,7 +311,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
 
 // --- Action execution ---
 
-async function executeAction(
+export async function executeAction(
   session: import('./browser-session.js').BrowserSession,
   step: AgentStep,
 ): Promise<void> {
@@ -296,6 +356,7 @@ async function executeAction(
       break
 
     case 'done':
+    case 'use_playbook':
       break
 
     default:
@@ -305,7 +366,7 @@ async function executeAction(
 
 // --- Helpers ---
 
-function actionLabel(step: AgentStep): string {
+export function actionLabel(step: AgentStep): string {
   const { action } = step
   switch (action.type) {
     case 'click': return `點擊 ${action.selector ?? ''}`
@@ -315,6 +376,7 @@ function actionLabel(step: AgentStep): string {
     case 'press': return `按鍵 ${action.text ?? ''}`
     case 'scroll': return `捲動 ${action.text ?? 'down'}`
     case 'navigate': return `導航 ${action.text ?? ''}`
+    case 'use_playbook': return `使用 playbook "${action.text ?? ''}"`
     case 'done': return '完成'
     default: return action.type
   }
