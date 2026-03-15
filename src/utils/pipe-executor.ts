@@ -114,7 +114,7 @@ export function loadPipeConfig(): PipeConfig | null {
 
 // --- HTTP helper ---
 
-async function pipeRequest(
+export async function pipeRequest(
   method: 'GET' | 'POST',
   url: string,
   body?: Record<string, unknown>,
@@ -262,6 +262,36 @@ const services: Record<string, ServiceHandler> = {
     const data = result.data as { status: string; routes: string[]; timestamp: string }
     return `✅ CloudPipe 運行中\n服務: ${data.routes?.join(', ') || 'N/A'}\n時間: ${data.timestamp || 'N/A'}`
   },
+
+  async rawtxt(action, param, _config) {
+    // Direct call to RawTxt service (bypasses gateway body-forwarding bug)
+    const RAWTXT_BASE = 'http://localhost:4015'
+
+    switch (action) {
+      case 'create':
+      case '': {
+        if (!param) return '❌ 需要提供內容'
+        const result = await pipeRequest('POST', `${RAWTXT_BASE}/api/paste`, { content: param })
+        if (!result.ok) return `❌ RawTxt 建立失敗: ${JSON.stringify(result.data)}`
+        const body = result.data as { data?: { id?: string; url?: string; rawUrl?: string } }
+        const paste = body.data ?? {}
+        return paste.url ?? paste.rawUrl ?? `已建立 paste: ${paste.id ?? ''}`
+      }
+      case 'read': {
+        if (!param) return '❌ 需要提供 paste ID'
+        const result = await pipeRequest('GET', `${RAWTXT_BASE}/${param}/raw`)
+        if (!result.ok) return `❌ RawTxt 讀取失敗: ${JSON.stringify(result.data)}`
+        return typeof result.data === 'string' ? result.data : JSON.stringify(result.data)
+      }
+      case 'list': {
+        const result = await pipeRequest('GET', `${RAWTXT_BASE}/api/pastes`)
+        if (!result.ok) return `❌ RawTxt 查詢失敗: ${JSON.stringify(result.data)}`
+        return JSON.stringify(result.data, null, 2)
+      }
+      default:
+        return `❌ 未知 rawtxt 操作: ${action}\n可用: create, read, list`
+    }
+  },
 }
 
 // --- Response formatters ---
@@ -342,6 +372,25 @@ function formatPipelines(data: PipelineListResponse): string {
     lines.push(`• **${p.name || p.id}** — ${p.steps} steps`)
   }
   return lines.join('\n')
+}
+
+// --- Direct service call (used by chain plugin) ---
+
+export async function executePipeService(
+  service: string,
+  action: string,
+  param: string,
+): Promise<string> {
+  const config = loadPipeConfig()
+  if (!config) throw new Error('CloudPipe 未設定')
+
+  const handler = services[service]
+  if (!handler) {
+    const available = Object.keys(services).join(', ')
+    throw new Error(`未知服務: ${service}\n可用: ${available}`)
+  }
+
+  return handler(action, param, config)
 }
 
 // --- Send helper (Markdown → fallback plain text) ---

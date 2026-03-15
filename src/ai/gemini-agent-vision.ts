@@ -11,7 +11,7 @@ const TIMEOUT_MS = 30_000
 // --- Types ---
 
 export interface AgentAction {
-  readonly type: 'click' | 'click_xy' | 'deep_click' | 'fill' | 'press' | 'scroll' | 'navigate' | 'done'
+  readonly type: 'click' | 'click_xy' | 'deep_click' | 'fill' | 'press' | 'scroll' | 'navigate' | 'use_playbook' | 'done'
   readonly selector?: string
   readonly text?: string
   readonly x?: number
@@ -22,6 +22,8 @@ export interface AgentStep {
   readonly thought: string
   readonly action: AgentAction
   readonly done: boolean
+  /** True when this step came from a playbook replay (not a fresh Gemini call). */
+  readonly isReplay?: boolean
 }
 
 export interface GeminiAgentResult {
@@ -43,7 +45,7 @@ const AGENT_RESPONSE_SCHEMA = {
     action: {
       type: 'OBJECT' as const,
       properties: {
-        type: { type: 'STRING' as const, enum: ['click', 'click_xy', 'deep_click', 'fill', 'press', 'scroll', 'navigate', 'done'] },
+        type: { type: 'STRING' as const, enum: ['click', 'click_xy', 'deep_click', 'fill', 'press', 'scroll', 'navigate', 'use_playbook', 'done'] },
         selector: { type: 'STRING' as const, description: 'Element selector: role=button[name="X"], text="Y", or CSS selector' },
         text: { type: 'STRING' as const, description: 'Text to fill or key to press or URL to navigate to' },
         x: { type: 'NUMBER' as const, description: 'X coordinate for click_xy (0-1280)' },
@@ -182,6 +184,284 @@ export async function compareScreenshots(
     return JSON.parse(result.text) as ScreenshotDiff
   } catch {
     return { hasDiff: false, summary: `Invalid JSON: ${result.text.slice(0, 200)}` }
+  }
+}
+
+// --- Playbook fill value extraction ---
+
+export interface FillField {
+  readonly index: number
+  readonly selector: string
+  readonly originalValue: string
+  readonly fieldLabel?: string
+}
+
+export interface FillValueMapping {
+  readonly index: number
+  readonly value: string
+}
+
+const FILL_VALUES_SCHEMA = {
+  type: 'OBJECT' as const,
+  properties: {
+    values: {
+      type: 'ARRAY' as const,
+      items: {
+        type: 'OBJECT' as const,
+        properties: {
+          index: { type: 'NUMBER' as const, description: 'The field index from the input list' },
+          value: { type: 'STRING' as const, description: 'The new value to fill (from the instruction)' },
+        },
+        required: ['index', 'value'],
+      },
+    },
+  },
+  required: ['values'],
+}
+
+/**
+ * Single Gemini text call — extract fill values from a new instruction
+ * to replace original values in a playbook replay.
+ *
+ * Fields not mentioned in the instruction keep their original values.
+ */
+export async function extractFillValues(
+  instruction: string,
+  fields: readonly FillField[],
+): Promise<{ values: readonly FillValueMapping[]; error?: string }> {
+  if (!env.GEMINI_API_KEY) {
+    return { values: [], error: 'GEMINI_API_KEY 未設定' }
+  }
+
+  const fieldList = fields
+    .map((f) =>
+      `- index=${f.index}, selector="${f.selector}", originalValue="${f.originalValue}"${f.fieldLabel ? `, label="${f.fieldLabel}"` : ''}`,
+    )
+    .join('\n')
+
+  const prompt =
+    'You are a value extractor. Given a user instruction and a list of form fields (with their original values), ' +
+    'extract the NEW values the user wants to fill.\n\n' +
+    'User instruction: ' + instruction + '\n\n' +
+    'Fields:\n' + fieldList + '\n\n' +
+    'Rules:\n' +
+    '- Match instruction keywords to fields by label, selector, or context\n' +
+    '- If a field is not mentioned in the instruction, keep originalValue\n' +
+    '- Return ALL fields with their values (new or original)\n' +
+    '- Output JSON with a "values" array of { index, value } objects'
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: FILL_VALUES_SCHEMA,
+      maxOutputTokens: 1024,
+    },
+  }
+
+  const result = await callGeminiApi(body)
+  if (result.error) return { values: [], error: result.error }
+
+  try {
+    const parsed = JSON.parse(result.text) as { values: FillValueMapping[] }
+    return { values: parsed.values }
+  } catch {
+    return { values: [], error: `Invalid JSON: ${result.text.slice(0, 200)}` }
+  }
+}
+
+// --- Auto-split: analyze steps and group into logical playbooks ---
+
+export interface PlaybookGroup {
+  readonly name: string
+  readonly description: string
+  readonly startIndex: number
+  readonly endIndex: number
+}
+
+const AUTO_SPLIT_SCHEMA = {
+  type: 'OBJECT' as const,
+  properties: {
+    groups: {
+      type: 'ARRAY' as const,
+      items: {
+        type: 'OBJECT' as const,
+        properties: {
+          name: { type: 'STRING' as const, description: 'Short descriptive name for this group (use site domain as prefix, e.g. "codelove-登入")' },
+          description: { type: 'STRING' as const, description: 'What this group of steps accomplishes' },
+          startIndex: { type: 'NUMBER' as const, description: 'Start index (0-based, inclusive)' },
+          endIndex: { type: 'NUMBER' as const, description: 'End index (0-based, inclusive)' },
+        },
+        required: ['name', 'description', 'startIndex', 'endIndex'],
+      },
+    },
+  },
+  required: ['groups'],
+}
+
+/**
+ * Single Gemini text call — analyze completed agent steps and split them
+ * into logical groups, each becoming a separate playbook.
+ */
+export async function autoSplitSteps(
+  url: string,
+  instruction: string,
+  steps: readonly AgentStep[],
+): Promise<{ groups: readonly PlaybookGroup[]; error?: string }> {
+  if (!env.GEMINI_API_KEY) {
+    return { groups: [], error: 'GEMINI_API_KEY 未設定' }
+  }
+
+  const domain = extractDomain(url)
+  const stepList = steps
+    .map((s, i) =>
+      `${i}. [${s.action.type}] ${s.thought}${s.action.selector ? ` (selector: ${s.action.selector})` : ''}${s.action.text ? ` (text: "${s.action.text}")` : ''}`,
+    )
+    .join('\n')
+
+  const prompt =
+    'You are a workflow analyzer. Given a list of web automation steps, split them into logical task groups.\n\n' +
+    'URL: ' + url + '\n' +
+    'Original instruction: ' + instruction + '\n\n' +
+    'Steps:\n' + stepList + '\n\n' +
+    'Rules:\n' +
+    '- Group consecutive steps that form a logical unit (e.g. login, form submission, navigation)\n' +
+    '- Each group must be consecutive (no gaps between startIndex and endIndex)\n' +
+    '- Groups must cover ALL steps without overlap\n' +
+    '- Use "' + domain + '-" as name prefix (e.g. "' + domain + '-登入", "' + domain + '-發文")\n' +
+    '- Names should be short (2-4 Chinese characters after prefix)\n' +
+    '- Skip "done" steps in grouping\n' +
+    '- If all steps form one logical task, return a single group'
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: AUTO_SPLIT_SCHEMA,
+      maxOutputTokens: 1024,
+    },
+  }
+
+  const result = await callGeminiApi(body)
+  if (result.error) return { groups: [], error: result.error }
+
+  try {
+    const parsed = JSON.parse(result.text) as { groups: PlaybookGroup[] }
+    return { groups: parsed.groups }
+  } catch {
+    return { groups: [], error: `Invalid JSON: ${result.text.slice(0, 200)}` }
+  }
+}
+
+// --- Orchestrator: match instruction to existing playbooks ---
+
+export interface PlaybookSummary {
+  readonly name: string
+  readonly url: string
+  readonly instruction: string
+  readonly actionTypes: string
+  readonly fillFields: readonly string[]
+}
+
+export interface PlaybookPlan {
+  readonly playbookName: string
+  readonly fillInstruction: string
+}
+
+export interface OrchestrationPlan {
+  readonly matchedPlaybooks: readonly PlaybookPlan[]
+  readonly remainingInstruction: string
+}
+
+const ORCHESTRATION_SCHEMA = {
+  type: 'OBJECT' as const,
+  properties: {
+    matchedPlaybooks: {
+      type: 'ARRAY' as const,
+      items: {
+        type: 'OBJECT' as const,
+        properties: {
+          playbookName: { type: 'STRING' as const, description: 'Exact name of the matched playbook' },
+          fillInstruction: { type: 'STRING' as const, description: 'The part of user instruction relevant to this playbook (for fill value extraction)' },
+        },
+        required: ['playbookName', 'fillInstruction'],
+      },
+    },
+    remainingInstruction: { type: 'STRING' as const, description: 'Parts of the instruction not covered by any playbook (empty string if fully covered)' },
+  },
+  required: ['matchedPlaybooks', 'remainingInstruction'],
+}
+
+/**
+ * Single Gemini text call — match a user instruction against available playbooks.
+ * Returns an ordered execution plan of which playbooks to chain.
+ */
+export async function planPlaybookChain(
+  url: string,
+  instruction: string,
+  playbooks: readonly PlaybookSummary[],
+): Promise<{ plan: OrchestrationPlan | null; error?: string }> {
+  if (!env.GEMINI_API_KEY) {
+    return { plan: null, error: 'GEMINI_API_KEY 未設定' }
+  }
+
+  if (playbooks.length === 0) {
+    return { plan: null }
+  }
+
+  const playbookList = playbooks
+    .map((p) =>
+      `- name="${p.name}", url="${p.url}", originalInstruction="${p.instruction}", actions=[${p.actionTypes}], fillFields=[${p.fillFields.join(', ')}]`,
+    )
+    .join('\n')
+
+  const prompt =
+    'You are a task planner. Given a user instruction and a list of saved playbooks (recorded automation workflows), ' +
+    'determine which playbooks can be chained to fulfill the instruction.\n\n' +
+    'User wants to visit: ' + url + '\n' +
+    'User instruction: ' + instruction + '\n\n' +
+    'Available playbooks:\n' + playbookList + '\n\n' +
+    'Rules:\n' +
+    '- Only match playbooks whose URL domain matches the target URL domain\n' +
+    '- Order playbooks in logical execution sequence\n' +
+    '- For each matched playbook, extract the relevant part of the instruction as fillInstruction\n' +
+    '- If no playbooks match, return empty matchedPlaybooks array\n' +
+    '- If parts of the instruction are not covered by any playbook, put them in remainingInstruction\n' +
+    '- IMPORTANT: Consider prerequisites! If the task requires being logged in and a login playbook exists, include it FIRST even if the user did not explicitly mention logging in\n' +
+    '- Think about what state the page needs to be in for each task — login is almost always a prerequisite for actions like posting, editing, deleting\n' +
+    '- Only match if you are confident the playbook fits — do not force a match\n' +
+    '- playbookName must be the EXACT name from the list above'
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: ORCHESTRATION_SCHEMA,
+      maxOutputTokens: 1024,
+    },
+  }
+
+  const result = await callGeminiApi(body)
+  if (result.error) return { plan: null, error: result.error }
+
+  try {
+    const parsed = JSON.parse(result.text) as OrchestrationPlan
+    // No matches → return null
+    if (!parsed.matchedPlaybooks || parsed.matchedPlaybooks.length === 0) {
+      return { plan: null }
+    }
+    return { plan: parsed }
+  } catch {
+    return { plan: null, error: `Invalid JSON: ${result.text.slice(0, 200)}` }
+  }
+}
+
+function extractDomain(url: string): string {
+  try {
+    const hostname = new URL(url).hostname
+    return hostname.replace(/^www\./, '').split('.')[0]
+  } catch {
+    return 'site'
   }
 }
 

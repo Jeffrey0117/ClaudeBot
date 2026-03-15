@@ -4,6 +4,8 @@
  * One active agent per chatId. TTL cleanup for stale sessions.
  */
 
+import type { AgentStep } from '../../ai/gemini-agent-vision.js'
+
 /** Stale agent TTL: 5 minutes */
 const STALE_TTL_MS = 5 * 60 * 1000
 
@@ -54,4 +56,37 @@ export function cleanupStaleAgents(): void {
       activeAgents.delete(chatId)
     }
   }
+}
+
+// --- Last result cache (for /bv save) ---
+
+export interface LastAgentResult {
+  readonly url: string
+  readonly instruction: string
+  readonly steps: readonly AgentStep[]
+  readonly success: boolean
+  readonly timestamp: number
+}
+
+/** Last 5 minutes only — stale results are ignored. */
+const LAST_RESULT_TTL_MS = 5 * 60 * 1000
+
+const lastResults = new Map<number, LastAgentResult>()
+
+export function setLastResult(chatId: number, data: LastAgentResult): void {
+  lastResults.set(chatId, data)
+}
+
+export function getLastResult(chatId: number): LastAgentResult | null {
+  const result = lastResults.get(chatId)
+  if (!result) return null
+  if (Date.now() - result.timestamp > LAST_RESULT_TTL_MS) {
+    lastResults.delete(chatId)
+    return null
+  }
+  return result
+}
+
+export function clearLastResult(chatId: number): void {
+  lastResults.delete(chatId)
 }
