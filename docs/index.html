@@ -140,7 +140,7 @@
           <div class="text-sm text-slate-400 mt-1" data-i18n="hero_stat_backends">AI 後端</div>
         </div>
         <div class="stat-card bg-slate-50 rounded-xl px-6 py-5 text-center border border-slate-100 hover:border-slate-200 transition-colors">
-          <div class="font-display text-3xl font-bold text-ink">5</div>
+          <div class="font-display text-3xl font-bold text-ink">6</div>
           <div class="text-sm text-slate-400 mt-1" data-i18n="hero_stat_bots">同時 Bot</div>
         </div>
       </div>
@@ -560,6 +560,21 @@ npm run dev</code></pre>
                 <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_ctx">查看/管理上下文摘要</td>
                 <td class="px-5 py-2.5"><span class="category-badge" data-cat="ai" data-i18n="commands_cat_ai">AI 控制</span></td>
               </tr>
+              <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="ai">
+                <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/bv</code></td>
+                <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_bv">網頁視覺分析 (Playwright + Gemini)</td>
+                <td class="px-5 py-2.5"><span class="category-badge" data-cat="ai" data-i18n="commands_cat_ai">AI 控制</span></td>
+              </tr>
+              <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="ai">
+                <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/chain</code></td>
+                <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_chain">指令鏈自動化 (串聯 bv/pipe/cmd/notify)</td>
+                <td class="px-5 py-2.5"><span class="category-badge" data-cat="ai" data-i18n="commands_cat_ai">AI 控制</span></td>
+              </tr>
+              <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="ai">
+                <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/last</code></td>
+                <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_last">重送最近訊息 (/last2=上上條)</td>
+                <td class="px-5 py-2.5"><span class="category-badge" data-cat="ai" data-i18n="commands_cat_ai">AI 控制</span></td>
+              </tr>
 
               <!-- Remote -->
               <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="remote">
@@ -597,6 +612,41 @@ npm run dev</code></pre>
                 <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_ls">列出遠端目錄</td>
                 <td class="px-5 py-2.5"><span class="category-badge" data-cat="remote" data-i18n="commands_cat_remote">遠端</span></td>
               </tr>
+              <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="remote">
+                <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/rpair</code></td>
+                <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_rpair">重啟遠端 agent</td>
+                <td class="px-5 py-2.5"><span class="category-badge" data-cat="remote" data-i18n="commands_cat_remote">遠端</span></td>
+              </tr>
+              <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="remote">
+                <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/rlog</code></td>
+                <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_rlog">查看遠端 log</td>
+                <td class="px-5 py-2.5"><span class="category-badge" data-cat="remote" data-i18n="commands_cat_remote">遠端</span></td>
+              </tr>
+              <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="remote">
+                <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/downloads</code></td>
+                <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_downloads">列出遠端下載資料夾</td>
+                <td class="px-5 py-2.5"><span class="category-badge" data-cat="remote" data-i18n="commands_cat_remote">遠端</span></td>
+              </tr>
+              <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="remote">
+                <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/rcat</code></td>
+                <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_rcat">讀取遠端檔案內容</td>
+                <td class="px-5 py-2.5"><span class="category-badge" data-cat="remote" data-i18n="commands_cat_remote">遠端</span></td>
+              </tr>
+              <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="remote">
+                <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/rwrite</code></td>
+                <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_rwrite">寫入遠端檔案</td>
+                <td class="px-5 py-2.5"><span class="category-badge" data-cat="remote" data-i18n="commands_cat_remote">遠端</span></td>
+              </tr>
+              <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="remote">
+                <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/rinfo</code></td>
+                <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_rinfo">遠端系統資訊</td>
+                <td class="px-5 py-2.5"><span class="category-badge" data-cat="remote" data-i18n="commands_cat_remote">遠端</span></td>
+              </tr>
+              <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="remote">
+                <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/find</code></td>
+                <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_find">搜尋遠端檔案</td>
+                <td class="px-5 py-2.5"><span class="category-badge" data-cat="remote" data-i18n="commands_cat_remote">遠端</span></td>
+              </tr>
 
               <!-- Todo & Ideas -->
               <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="todo">
@@ -627,6 +677,16 @@ npm run dev</code></pre>
               <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="todo">
                 <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/save</code></td>
                 <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_save">儲存訊息 (書籤/釘選/AI記憶)</td>
+                <td class="px-5 py-2.5"><span class="category-badge" data-cat="todo" data-i18n="commands_cat_todo">待辦靈感</span></td>
+              </tr>
+              <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="todo">
+                <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/recall</code></td>
+                <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_recall">叫回書籤 (名稱)</td>
+                <td class="px-5 py-2.5"><span class="category-badge" data-cat="todo" data-i18n="commands_cat_todo">待辦靈感</span></td>
+              </tr>
+              <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="todo">
+                <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/unsave</code></td>
+                <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_unsave">刪除書籤</td>
                 <td class="px-5 py-2.5"><span class="category-badge" data-cat="todo" data-i18n="commands_cat_todo">待辦靈感</span></td>
               </tr>
 
@@ -664,6 +724,11 @@ npm run dev</code></pre>
               <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="bot">
                 <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/sysinfo</code></td>
                 <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_sysinfo">查看系統資訊</td>
+                <td class="px-5 py-2.5"><span class="category-badge" data-cat="bot" data-i18n="commands_cat_bot">Bot 管理</span></td>
+              </tr>
+              <tr class="border-b border-slate-50 hover:bg-slate-50/50" data-category="bot">
+                <td class="px-5 py-2.5"><code class="text-accent font-mono text-xs">/mdfix</code></td>
+                <td class="px-5 py-2.5 text-slate-600 text-[13px]" data-i18n="cmd_mdfix">Markdown 修正設定</td>
                 <td class="px-5 py-2.5"><span class="category-badge" data-cat="bot" data-i18n="commands_cat_bot">Bot 管理</span></td>
               </tr>
 
