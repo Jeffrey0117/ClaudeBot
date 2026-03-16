@@ -87,6 +87,10 @@ const envSchema = z.object({
     .string()
     .default('')
     .transform((val) => val.split(',').map((id) => parseInt(id.trim(), 10)).filter((n) => !isNaN(n) && n > 0)),
+  RELAY_TUNNEL: z
+    .string()
+    .default('')
+    .transform((val) => val.trim()),
 })
 
 export type Env = z.infer<typeof envSchema>

@@ -6,6 +6,7 @@ import {
   removePairing,
 } from '../../remote/pairing-store.js'
 import { getRelayPort } from '../../remote/relay-server.js'
+import { getTunnelUrl } from '../../remote/relay-tunnel.js'
 import { env } from '../../config/env.js'
 
 function getLocalIp(): string {
@@ -19,6 +20,18 @@ function getLocalIp(): string {
     }
   }
   return '你的IP'
+}
+
+function getWsUrl(): { wsUrl: string; isTunnel: boolean } {
+  const tunnelUrl = getTunnelUrl()
+  if (tunnelUrl) {
+    // Convert https://xxx → wss://xxx
+    const wsUrl = tunnelUrl.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://')
+    return { wsUrl, isTunnel: true }
+  }
+  const port = getRelayPort() || env.RELAY_PORT
+  const ip = getLocalIp()
+  return { wsUrl: `ws://${ip}:${port}`, isTunnel: false }
 }
 
 export async function pairCommand(ctx: BotContext): Promise<void> {
@@ -42,9 +55,7 @@ export async function pairCommand(ctx: BotContext): Promise<void> {
 
   // Generate new pairing code
   const code = createPairingCode(chatId, threadId)
-  const port = getRelayPort() || env.RELAY_PORT
-  const ip = getLocalIp()
-  const wsUrl = `ws://${ip}:${port}`
+  const { wsUrl, isTunnel } = getWsUrl()
 
   // First-time setup command (clone + install + run)
   const setupCmd = `git clone https://github.com/Jeffrey0117/ClaudeBot.git && cd ClaudeBot && npm install && npx tsx src/remote/agent.ts ${wsUrl} ${code}`
@@ -52,8 +63,11 @@ export async function pairCommand(ctx: BotContext): Promise<void> {
   // Reconnect command (already in ClaudeBot dir — pull latest first)
   const reconnectCmd = `git stash && git pull && npx tsx src/remote/agent.ts ${wsUrl} ${code}`
 
+  const tunnelNote = isTunnel ? '🌐 *公開 tunnel 已啟用* — 不同網路也能連\n\n' : ''
+
   await ctx.reply(
     `🔑 *配對碼: \`${code}\`*\n\n` +
+    tunnelNote +
     `👇 *首次* — 複製貼到 terminal:\n` +
     '```\n' +
     `${setupCmd}\n` +

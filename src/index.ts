@@ -3,6 +3,7 @@ import { env } from './config/env.js'
 import { scanProjects } from './config/projects.js'
 import { startDashboardServer } from './dashboard/server.js'
 import { startRelayServer } from './remote/relay-server.js'
+import { startRelayTunnel, stopRelayTunnel } from './remote/relay-tunnel.js'
 import { syncWorktreeOnStartup } from './git/worktree-sync.js'
 
 // P0: Catch unhandled errors — heartbeat keeps writing so watchdog can decide
@@ -46,10 +47,14 @@ async function main(): Promise<void> {
   // Start relay server for remote vibe-coding pairing
   if (isMainBot) {
     startRelayServer(env.RELAY_PORT)
+    if (env.RELAY_TUNNEL) {
+      await startRelayTunnel(env.RELAY_PORT, env.RELAY_TUNNEL)
+    }
   }
 
   const shutdown = (signal: string) => {
     console.log(`\n${signal} received. Shutting down...`)
+    stopRelayTunnel()
     bot.stop(signal)
     process.exit(0)
   }
