@@ -5,8 +5,7 @@ import {
   getPairing,
   removePairing,
 } from '../../remote/pairing-store.js'
-import { getRelayPort } from '../../remote/relay-server.js'
-import { getTunnelUrl } from '../../remote/relay-tunnel.js'
+import { getRelayPort, getPublicRelayUrl } from '../../remote/relay-server.js'
 import { env } from '../../config/env.js'
 
 function getLocalIp(): string {
@@ -22,16 +21,14 @@ function getLocalIp(): string {
   return '你的IP'
 }
 
-function getWsUrl(): { wsUrl: string; isTunnel: boolean } {
-  const tunnelUrl = getTunnelUrl()
-  if (tunnelUrl) {
-    // Convert https://xxx → wss://xxx
-    const wsUrl = tunnelUrl.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://')
-    return { wsUrl, isTunnel: true }
+function getRelayUrl(): { url: string; isPublic: boolean } {
+  const publicUrl = getPublicRelayUrl()
+  if (publicUrl) {
+    return { url: publicUrl, isPublic: true }
   }
   const port = getRelayPort() || env.RELAY_PORT
   const ip = getLocalIp()
-  return { wsUrl: `ws://${ip}:${port}`, isTunnel: false }
+  return { url: `ws://${ip}:${port}`, isPublic: false }
 }
 
 export async function pairCommand(ctx: BotContext): Promise<void> {
@@ -55,7 +52,7 @@ export async function pairCommand(ctx: BotContext): Promise<void> {
 
   // Generate new pairing code
   const code = createPairingCode(chatId, threadId)
-  const { wsUrl, isTunnel } = getWsUrl()
+  const { url: wsUrl, isPublic } = getRelayUrl()
 
   // First-time setup command (clone + install + run)
   const setupCmd = `git clone https://github.com/Jeffrey0117/ClaudeBot.git && cd ClaudeBot && npm install && npx tsx src/remote/agent.ts ${wsUrl} ${code}`
@@ -63,11 +60,12 @@ export async function pairCommand(ctx: BotContext): Promise<void> {
   // Reconnect command (already in ClaudeBot dir — pull latest first)
   const reconnectCmd = `git stash && git pull && npx tsx src/remote/agent.ts ${wsUrl} ${code}`
 
-  const tunnelNote = isTunnel ? '🌐 *公開 tunnel 已啟用* — 不同網路也能連\n\n' : ''
+  const networkNote = isPublic
+    ? '🌐 _公開 URL — 跨網路可用_'
+    : '🏠 _區網 URL — 需同個 WiFi（設 RELAY\\_TUNNEL=true 開啟跨網路）_'
 
   await ctx.reply(
     `🔑 *配對碼: \`${code}\`*\n\n` +
-    tunnelNote +
     `👇 *首次* — 複製貼到 terminal:\n` +
     '```\n' +
     `${setupCmd}\n` +
@@ -78,6 +76,7 @@ export async function pairCommand(ctx: BotContext): Promise<void> {
     '```\n\n' +
     `💡 指定專案目錄加在最後面，例如:\n` +
     `\`...${code} C:\\\\path\\\\to\\\\project\`\n\n` +
+    `${networkNote}\n` +
     `_配對碼 5 分鐘後過期_`,
     { parse_mode: 'Markdown' },
   )
