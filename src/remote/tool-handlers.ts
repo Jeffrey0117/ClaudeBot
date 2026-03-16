@@ -164,9 +164,13 @@ async function handleExecuteCommand(
     let totalSize = 0
     let truncated = false
 
+    // On Windows, prefer PowerShell if cmd.exe is not on PATH (e.g. restricted environments).
+    // Fall back to cmd.exe if PowerShell isn't available either.
+    const shellOption = IS_WIN ? process.env.ComSpec || 'cmd.exe' : true
+
     const child = spawn(command, {
       cwd,
-      shell: true,
+      shell: shellOption,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     })
