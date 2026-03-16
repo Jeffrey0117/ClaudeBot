@@ -290,9 +290,31 @@ function createWindow(): void {
   })
 }
 
+// --- CLI args: --url <relay> --code <pairing> → auto-connect ---
+
+function getCliArg(name: string): string | undefined {
+  const idx = process.argv.indexOf(`--${name}`)
+  if (idx === -1 || idx + 1 >= process.argv.length) return undefined
+  return process.argv[idx + 1]
+}
+
 // --- App lifecycle ---
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  createWindow()
+
+  // Auto-connect if --url and --code provided (from /pair chat command)
+  const cliUrl = getCliArg('url')
+  const cliCode = getCliArg('code')
+  if (isChatMode() && cliUrl && cliCode) {
+    chatRelayUrl = cliUrl
+    chatCode = cliCode
+    chatShouldReconnect = true
+    chatClientMsgId = 1
+    // Small delay so renderer is ready to receive status events
+    setTimeout(() => connectChat(cliUrl, cliCode), 500)
+  }
+})
 
 app.on('window-all-closed', () => {
   disconnect()
