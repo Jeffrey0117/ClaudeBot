@@ -39,6 +39,10 @@ const MAX_DELAY_MS = 60_000
 /** Port being tunneled (saved for reconnect) */
 let tunnelPort = 0
 
+/** Health check timer — detects stale tunnels where process is alive but URL expired */
+let healthCheckTimer: ReturnType<typeof setInterval> | null = null
+const HEALTH_CHECK_INTERVAL_MS = 120_000 // 2 minutes
+
 function writeSharedUrl(url: string): void {
   try {
     writeFileSync(sharedUrlFile, url, 'utf-8')
@@ -73,6 +77,7 @@ export function setPublicRelayUrl(url: string): void {
 /** Gracefully close tunnel and prevent reconnect. */
 export function closeTunnel(): void {
   shuttingDown = true
+  stopHealthCheck()
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
     reconnectTimer = null
@@ -100,7 +105,46 @@ function setTunnelUrl(url: string): void {
   publicUrl = wsUrl
   writeSharedUrl(wsUrl)
   reconnectAttempt = 0
+  startHealthCheck()
   console.log(`[tunnel] Public relay URL: ${wsUrl}`)
+}
+
+function startHealthCheck(): void {
+  stopHealthCheck()
+  healthCheckTimer = setInterval(checkTunnelHealth, HEALTH_CHECK_INTERVAL_MS)
+  healthCheckTimer.unref()
+}
+
+function stopHealthCheck(): void {
+  if (healthCheckTimer) {
+    clearInterval(healthCheckTimer)
+    healthCheckTimer = null
+  }
+}
+
+async function checkTunnelHealth(): Promise<void> {
+  if (!publicUrl || shuttingDown) return
+  const httpUrl = publicUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:')
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10_000)
+    const res = await fetch(httpUrl, { signal: controller.signal })
+    clearTimeout(timeout)
+    // 404 = tunnel URL expired, 502/503 = cloudflare can't reach backend
+    if (res.status === 404 || res.status >= 502) {
+      throw new Error(`tunnel returned ${res.status}`)
+    }
+  } catch (err) {
+    if (shuttingDown || reconnectTimer) return
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[tunnel] Health check failed: ${msg}, forcing reconnect...`)
+    stopHealthCheck()
+    killActiveBackend()
+    publicUrl = ''
+    clearSharedUrl()
+    reconnectAttempt = 0
+    scheduleReconnect()
+  }
 }
 
 function scheduleReconnect(): void {
@@ -144,7 +188,9 @@ function findCloudflared(): string {
 function startCloudflared(port: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const bin = findCloudflared()
-    const proc = spawn(bin, ['tunnel', '--url', `http://localhost:${port}`], {
+    // --config NUL: override default ~/.cloudflared/config.yml which may have
+    // ingress rules (e.g. catch-all http_status:404) that interfere with quick tunnels
+    const proc = spawn(bin, ['tunnel', '--config', 'NUL', '--url', `http://localhost:${port}`], {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
     })
