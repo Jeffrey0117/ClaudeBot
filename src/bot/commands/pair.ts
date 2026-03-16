@@ -6,6 +6,7 @@ import {
   removePairing,
 } from '../../remote/pairing-store.js'
 import { getRelayPort, getPublicRelayUrl } from '../../remote/relay-server.js'
+import { remoteToolCall } from '../../remote/relay-client.js'
 import { env } from '../../config/env.js'
 
 function getLocalIp(): string {
@@ -92,6 +93,45 @@ export async function pairCommand(ctx: BotContext): Promise<void> {
 }
 
 async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number | undefined): Promise<void> {
+  // Check if remote agent is already connected — auto-launch Electron on remote
+  const existing = getPairing(chatId, threadId)
+  if (existing?.connected) {
+    const chatCode = createPairingCode(chatId, threadId)
+    const { url: wsUrl } = getRelayUrl()
+
+    await ctx.reply('💬 正在遠端啟動桌面聊天客戶端...')
+
+    try {
+      // Fire-and-forget: Start-Process so it doesn't block the agent
+      await remoteToolCall(
+        existing.code,
+        'remote_execute_command',
+        {
+          command: `powershell -NoProfile -Command "Start-Process npx -ArgumentList 'electron','dist/remote/electron/main.js','--chat','--url','${wsUrl}','--code','${chatCode}' -WorkingDirectory (Get-Location).Path"`,
+          timeout: 15000,
+        },
+        15_000,
+      )
+      await ctx.reply(
+        `✅ 已在遠端開啟聊天視窗\n\n` +
+        `_配對碼 5 分鐘後過期_`,
+        { parse_mode: 'Markdown' },
+      )
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await ctx.reply(
+        `❌ 自動啟動失敗: ${msg}\n\n` +
+        `💡 手動啟動 — 在遠端 ClaudeBot 目錄貼上:\n` +
+        '```\n' +
+        `npx electron dist/remote/electron/main.js --chat --url ${wsUrl} --code ${chatCode}\n` +
+        '```',
+        { parse_mode: 'Markdown' },
+      )
+    }
+    return
+  }
+
+  // No remote agent connected — show manual instructions
   const code = createPairingCode(chatId, threadId)
   const { url: wsUrl, isPublic } = getRelayUrl()
 
