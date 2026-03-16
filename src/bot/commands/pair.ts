@@ -61,8 +61,8 @@ export async function pairCommand(ctx: BotContext): Promise<void> {
   const reconnectCmd = `git stash && git pull && npx tsx src/remote/agent.ts ${wsUrl} ${code}`
 
   const networkNote = isPublic
-    ? '🌐 _公開 URL — 跨網路可用_'
-    : '🏠 _區網 URL — 需同個 WiFi（設 RELAY\\_TUNNEL=true 開啟跨網路）_'
+    ? '🌐 公開 URL — 跨網路可用'
+    : '🏠 區網 URL — 需同個 WiFi（設 `RELAY_TUNNEL=true` 開啟跨網路）'
 
   await ctx.reply(
     `🔑 *配對碼: \`${code}\`*\n\n` +
