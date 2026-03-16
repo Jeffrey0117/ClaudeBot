@@ -72,10 +72,6 @@ const envSchema = z.object({
   BIAODIAN_PATH: z.string().default(''),
   RELAY_PORT: z.coerce.number().int().positive().default(9877),
   RELAY_PUBLIC_URL: z.string().default(''),
-  RELAY_TUNNEL: z
-    .enum(['true', 'false'])
-    .default('false')
-    .transform((val) => val === 'true'),
   REMOTE_ENABLED: z
     .enum(['true', 'false'])
     .default('false')

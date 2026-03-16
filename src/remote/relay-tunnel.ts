@@ -12,8 +12,14 @@ import { spawn, type ChildProcess } from 'node:child_process'
 let publicUrl = ''
 let tunnelProcess: ChildProcess | null = null
 
+/** Returns WebSocket URL (wss:// or ws://) for the tunnel, or '' if none. */
 export function getTunnelUrl(): string {
-  return publicUrl
+  return toWsUrl(publicUrl)
+}
+
+/** Convert http(s) URL to ws(s) URL for WebSocket usage. */
+function toWsUrl(url: string): string {
+  return url.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:')
 }
 
 /**
@@ -27,7 +33,7 @@ export async function startRelayTunnel(
   if (!tunnelConfig) return ''
 
   // User provided a URL directly — just use it
-  if (tunnelConfig.startsWith('http://') || tunnelConfig.startsWith('https://')) {
+  if (/^(https?|wss?):\/\//.test(tunnelConfig)) {
     publicUrl = tunnelConfig.replace(/\/$/, '')
     console.log(`[tunnel] Using user-provided URL: ${publicUrl}`)
     return publicUrl

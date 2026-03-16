@@ -47,8 +47,10 @@ async function main(): Promise<void> {
   // Start relay server for remote vibe-coding pairing
   if (isMainBot) {
     startRelayServer(env.RELAY_PORT)
-    if (env.RELAY_TUNNEL) {
-      await startRelayTunnel(env.RELAY_PORT, env.RELAY_TUNNEL)
+    // Tunnel priority: RELAY_PUBLIC_URL (manual) > RELAY_TUNNEL (auto/url) > none (LAN)
+    const tunnelConfig = env.RELAY_PUBLIC_URL || env.RELAY_TUNNEL
+    if (tunnelConfig) {
+      await startRelayTunnel(env.RELAY_PORT, tunnelConfig)
     }
   }
 
