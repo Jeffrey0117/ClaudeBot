@@ -201,6 +201,9 @@ function tryFlushByKey(key: string): void {
   }
 }
 
+/** Max age for a pending voice entry before force-deletion (prevents leak). */
+const PENDING_MAX_AGE_MS = 60_000
+
 function forceFlushByKey(key: string): void {
   const buf = buffers.get(key)
   if (!buf || buf.entries.size === 0) return
@@ -212,17 +215,30 @@ function forceFlushByKey(key: string): void {
 
   const sorted = [...buf.entries.keys()].sort((a, b) => a - b)
   const batch: BufferEntry[] = []
+  const now = Date.now()
 
   for (const msgId of sorted) {
     const entry = buf.entries.get(msgId)!
     if (entry.status === 'ready') {
       batch.push(entry)
+      buf.entries.delete(msgId)
+    } else if (entry.status === 'failed') {
+      buf.entries.delete(msgId)
+    } else if (entry.status === 'pending') {
+      // Force-delete stale pending entries to prevent memory leak
+      if (now - entry.timestamp > PENDING_MAX_AGE_MS) {
+        buf.entries.delete(msgId)
+        buf.voiceActive = Math.max(0, buf.voiceActive - 1)
+      }
+      // Otherwise keep — voice transcription may still be running
     }
   }
 
-  buf.entries.clear()
-  buf.voiceActive = 0
-  buffers.delete(key)
+  // Only clean up buffer if truly empty (no pending voice entries)
+  if (buf.entries.size === 0) {
+    buf.voiceActive = 0
+    buffers.delete(key)
+  }
 
   if (batch.length > 0) {
     flushEntries(batch)

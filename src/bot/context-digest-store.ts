@@ -85,7 +85,9 @@ const VALID_STATUSES = new Set(['proposal', 'question', 'options', 'done', 'erro
  * Returns the digest and the response text with [CTX] stripped.
  */
 export function extractDigest(text: string): { digest: ContextDigest | null; cleaned: string } {
-  const match = text.match(CTX_REGEX)
+  // trimEnd() handles trailing whitespace/newlines that would prevent $ anchor match
+  const trimmed = text.trimEnd()
+  const match = trimmed.match(CTX_REGEX)
   if (!match) {
     return { digest: null, cleaned: text }
   }
@@ -109,8 +111,8 @@ export function extractDigest(text: string): { digest: ContextDigest | null; cle
     ? { status, summary, pending, next, files }
     : null
 
-  // Strip the [CTX] block from the response
-  const cleaned = text.replace(CTX_REGEX, '').trimEnd()
+  // Strip the [CTX] block from the response (use trimmed to ensure match)
+  const cleaned = trimmed.replace(CTX_REGEX, '').trimEnd()
 
   return { digest, cleaned }
 }
