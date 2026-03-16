@@ -112,10 +112,22 @@ async function executeStep(
 ): Promise<string> {
   switch (type) {
     case 'bv': {
-      // Parse: first token is URL, rest is the instruction
+      // Try to parse first token as URL; if not valid, use Google search
       const spaceIdx = instruction.indexOf(' ')
-      const url = spaceIdx === -1 ? instruction : instruction.slice(0, spaceIdx)
-      const task = spaceIdx === -1 ? '看看這個頁面' : instruction.slice(spaceIdx + 1)
+      const firstToken = spaceIdx === -1 ? instruction : instruction.slice(0, spaceIdx)
+
+      let url = 'https://www.google.com'
+      let task = instruction
+      // Must look like a real domain (contain a dot), not natural language
+      const looksLikeUrl = firstToken.includes('.') || firstToken.startsWith('http') || firstToken === 'localhost'
+      if (looksLikeUrl) {
+        try {
+          const testUrl = /^https?:\/\//i.test(firstToken) ? firstToken : `https://${firstToken}`
+          new URL(testUrl)
+          url = testUrl
+          task = spaceIdx === -1 ? '看看這個頁面' : instruction.slice(spaceIdx + 1)
+        } catch { /* not a valid URL — keep Google defaults */ }
+      }
 
       const statusMsg = await telegram.sendMessage(chatId, '🌐 bv 啟動中...')
       const session = await createSession(chatId)
