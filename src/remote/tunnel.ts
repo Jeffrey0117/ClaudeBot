@@ -10,7 +10,7 @@
  * processes (e.g. bot5) can read the tunnel URL for /pair display.
  */
 
-import { readFileSync, writeFileSync, unlinkSync } from 'node:fs'
+import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 
@@ -134,9 +134,17 @@ function scheduleReconnect(): void {
 // Cloudflare Tunnel (primary — more stable)
 // ---------------------------------------------------------------------------
 
+function findCloudflared(): string {
+  // Check local binary first (project root), then PATH
+  const localBin = join(process.cwd(), 'cloudflared.exe')
+  if (existsSync(localBin)) return localBin
+  return 'cloudflared'
+}
+
 function startCloudflared(port: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('cloudflared', ['tunnel', '--url', `http://localhost:${port}`], {
+    const bin = findCloudflared()
+    const proc = spawn(bin, ['tunnel', '--url', `http://localhost:${port}`], {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
     })
