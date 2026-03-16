@@ -70,6 +70,7 @@ import { setAvailableCommands } from '../utils/system-prompt.js'
 import { scheduleRestartNotifications } from './restart-notifier.js'
 import { onPairingConnect, onPairingDisconnect } from '../remote/pairing-store.js'
 import { setUserProject } from './state.js'
+import { createTelegramProxy } from '../remote/telegram-proxy.js'
 
 let botInstance: Telegraf<BotContext> | null = null
 
@@ -158,6 +159,9 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ? { telegram: { apiRoot: env.TELEGRAM_API_BASE } }
     : {}
   const bot = new Telegraf<BotContext>(env.BOT_TOKEN, telegrafOptions)
+
+  // Wrap telegram API to intercept virtual chatId calls (Electron chat users)
+  bot.telegram = createTelegramProxy(bot.telegram)
 
   // Middleware (order matters)
   bot.use(errorHandler())
@@ -366,10 +370,10 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
       { parse_mode: 'Markdown' },
     ).catch(() => {})
   })
-  onPairingDisconnect((session) => {
+  onPairingDisconnect((session, _label, reason) => {
     bot.telegram.sendMessage(
       session.chatId,
-      '🔌 遠端已斷開連線',
+      `🔌 遠端已斷開 — ${reason ?? '連線中斷'}`,
     ).catch(() => {})
   })
 

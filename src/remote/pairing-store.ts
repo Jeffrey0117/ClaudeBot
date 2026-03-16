@@ -6,7 +6,7 @@
  */
 
 import { randomBytes } from 'node:crypto'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { env } from '../config/env.js'
 import { sessionKey } from '../bot/state.js'
@@ -17,7 +17,7 @@ const BOT_ID = env.BOT_TOKEN.slice(-6)
 const PAIRING_TTL_MS = 5 * 60 * 1000 // 5 minutes
 const STORE_PATH = path.resolve('data', 'pairings.json')
 
-type PairingEventFn = (session: PairingSession, label: string) => void
+type PairingEventFn = (session: PairingSession, label: string, reason?: string) => void
 let onConnectFn: PairingEventFn = () => {}
 let onDisconnectFn: PairingEventFn = () => {}
 
@@ -67,7 +67,9 @@ function readStore(): StoreData {
 
 function writeStore(data: StoreData): void {
   ensureDir()
-  writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), 'utf-8')
+  const tmp = `${STORE_PATH}.tmp`
+  writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8')
+  renameSync(tmp, STORE_PATH)
 }
 
 function isExpired(session: PairingSession): boolean {
@@ -161,7 +163,7 @@ export function markConnected(code: string, label: string): boolean {
   return true
 }
 
-export function markDisconnected(code: string): void {
+export function markDisconnected(code: string, reason?: string): void {
   const store = readStore()
   const key = store.codeIndex[code]
   if (!key) return
@@ -170,7 +172,7 @@ export function markDisconnected(code: string): void {
   const pairings = { ...store.pairings, [key]: { ...session, connected: false } }
   writeStore({ pairings, codeIndex: store.codeIndex })
   if (key.startsWith(`${BOT_ID}:`)) {
-    onDisconnectFn(session, session.label)
+    onDisconnectFn(session, session.label, reason ?? '連線中斷')
   }
 }
 

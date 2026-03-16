@@ -25,7 +25,15 @@ import type {
   ToolCallRequest,
   ToolCallResult,
   ToolCallError,
+  AgentShutdown,
+  ElectronChatRegister,
+  ElectronChatRegistered,
+  ChatMessage,
+  ChatCallback,
 } from './protocol.js'
+import { getOrCreateVirtualChat } from './virtual-chat-store.js'
+import { registerVirtualChat, unregisterVirtualChat } from './telegram-proxy.js'
+import { handleElectronChatMessage, handleElectronChatCallback } from './electron-chat-bridge.js'
 
 interface PairedAgent {
   readonly ws: WebSocket
@@ -46,6 +54,9 @@ const proxies = new Map<string, Set<PairedProxy>>()
 
 /** Route tool results to the proxy that sent the request: code → (requestId → proxy ws) */
 const requestOrigins = new Map<string, Map<number, WebSocket>>()
+
+/** Agents that sent a graceful shutdown message: code → reason */
+const gracefulShutdowns = new Map<string, string>()
 
 /** Rate limiting: IP → { attempts, lastAttempt } */
 const rateLimits = new Map<string, { attempts: number; resetAt: number }>()
@@ -146,6 +157,14 @@ function handleProxyConnect(ws: WebSocket, code: string): void {
 }
 
 function handleAgentMessage(_ws: WebSocket, code: string, msg: RelayInbound): void {
+  // Graceful shutdown notification from agent
+  if (msg.type === 'agent_shutdown') {
+    const reason = (msg as AgentShutdown).reason || '手動關閉'
+    gracefulShutdowns.set(code, reason)
+    console.log(`[relay] Agent graceful shutdown: code=${code} reason=${reason}`)
+    return
+  }
+
   // Route tool_result / tool_error to the ORIGINATING proxy only
   if (msg.type === 'tool_result' || msg.type === 'tool_error') {
     // Check if this is a bot-initiated call first
@@ -172,11 +191,11 @@ const botPendingCalls = new Map<number, { resolve: (result: string) => void; tim
  * Call a tool on a remote agent directly from the bot (not via MCP proxy).
  * Used for /projects, /chat, etc. on remote-only users.
  */
-export function callAgentTool(
+function callAgentToolOnce(
   code: string,
   tool: string,
   args: Record<string, unknown>,
-  timeoutMs = 10_000,
+  timeoutMs: number,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const agent = agents.get(code)
@@ -195,6 +214,25 @@ export function callAgentTool(
 
     send(agent.ws, { type: 'tool_call', id, tool, args })
   })
+}
+
+/** Retry wrapper: retries once on timeout, does NOT retry on disconnect errors. */
+export async function callAgentTool(
+  code: string,
+  tool: string,
+  args: Record<string, unknown>,
+  timeoutMs = 10_000,
+): Promise<string> {
+  try {
+    return await callAgentToolOnce(code, tool, args, timeoutMs)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    // Only retry on timeout — disconnect errors won't succeed on retry
+    if (msg.includes('timeout')) {
+      return callAgentToolOnce(code, tool, args, timeoutMs)
+    }
+    throw err
+  }
 }
 
 /** Route bot-initiated tool results (called from handleAgentMessage) */
@@ -249,8 +287,9 @@ export function startRelayServer(port: number): void {
   }
 
   wss.on('connection', (ws, req) => {
-    let role: 'unknown' | 'agent' | 'proxy' = 'unknown'
+    let role: 'unknown' | 'agent' | 'proxy' | 'electron_chat' = 'unknown'
     let assignedCode = ''
+    let assignedVirtualChatId = 0
     const ip = req.socket.remoteAddress ?? 'unknown'
 
     ws.on('message', (raw) => {
@@ -276,7 +315,13 @@ export function startRelayServer(port: number): void {
           handleProxyConnect(ws, msg.code)
           return
         }
-        send(ws, { type: 'error', error: 'First message must be agent_register or proxy_connect' })
+        if (msg.type === 'electron_chat_register') {
+          role = 'electron_chat'
+          const chatMsg = msg as ElectronChatRegister
+          handleElectronChatRegister(ws, chatMsg.code, chatMsg.clientId, ip)
+          return
+        }
+        send(ws, { type: 'error', error: 'First message must be agent_register, proxy_connect, or electron_chat_register' })
         ws.close()
         return
       }
@@ -287,14 +332,57 @@ export function startRelayServer(port: number): void {
       if (role === 'agent') {
         handleAgentMessage(ws, assignedCode, msg)
       }
+
+      if (role === 'electron_chat') {
+        if (msg.type === 'chat_message') {
+          handleElectronChatMessage(ws, assignedVirtualChatId, msg as ChatMessage).catch((err) => {
+            console.error(`[relay] Chat message error:`, err instanceof Error ? err.message : err)
+          })
+        } else if (msg.type === 'chat_callback') {
+          handleElectronChatCallback(ws, assignedVirtualChatId, msg as ChatCallback).catch((err) => {
+            console.error(`[relay] Chat callback error:`, err instanceof Error ? err.message : err)
+          })
+        }
+      }
     })
+
+    function handleElectronChatRegister(chatWs: WebSocket, code: string, clientId: string, chatIp: string): void {
+      const session = findByCode(code)
+      if (!session) {
+        if (isRateLimited(chatIp)) {
+          send(chatWs, { type: 'error', error: 'Too many attempts. Try again later.' })
+          chatWs.close()
+          return
+        }
+        send(chatWs, { type: 'error', error: 'Invalid pairing code' })
+        chatWs.close()
+        return
+      }
+
+      const virtualChatId = getOrCreateVirtualChat(clientId, code)
+      assignedCode = code
+      assignedVirtualChatId = virtualChatId
+
+      registerVirtualChat(virtualChatId, chatWs, code)
+
+      const resp: ElectronChatRegistered = {
+        type: 'electron_chat_registered',
+        virtualChatId,
+      }
+      chatWs.send(JSON.stringify(resp))
+      console.log(`[relay] Electron chat registered: clientId=${clientId.slice(0, 8)}... chatId=${virtualChatId} from=${chatIp}`)
+    }
 
     ws.on('close', () => {
       if (role === 'agent' && assignedCode) {
         const current = agents.get(assignedCode)
         if (current?.ws === ws) {
           agents.delete(assignedCode)
-          markDisconnected(assignedCode)
+
+          // Check if this was a graceful shutdown
+          const gracefulReason = gracefulShutdowns.get(assignedCode)
+          gracefulShutdowns.delete(assignedCode)
+          markDisconnected(assignedCode, gracefulReason)
 
           // Reject all pending proxy requests for this agent
           const origins = requestOrigins.get(assignedCode)
@@ -312,8 +400,13 @@ export function startRelayServer(port: number): void {
             botPendingCalls.delete(id)
           }
 
-          console.log(`[relay] Agent disconnected: code=${assignedCode}`)
+          console.log(`[relay] Agent disconnected: code=${assignedCode} reason=${gracefulReason ?? '連線中斷'}`)
         }
+      }
+
+      if (role === 'electron_chat' && assignedVirtualChatId) {
+        unregisterVirtualChat(assignedVirtualChatId)
+        console.log(`[relay] Electron chat disconnected: chatId=${assignedVirtualChatId}`)
       }
     })
 
