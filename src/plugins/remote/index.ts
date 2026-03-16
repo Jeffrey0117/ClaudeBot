@@ -8,7 +8,7 @@ import type { ToolCallRequest, ToolCallResult, ToolCallError } from '../../remot
 
 // --- Relay client ---
 
-const TOOL_TIMEOUT_MS = 15_000
+const TOOL_TIMEOUT_MS = 30_000
 const CONNECT_TIMEOUT_MS = 5_000
 
 interface RelayClient {
