@@ -590,23 +590,29 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       }, TIMEOUT_MS)
 
       // Update status message with elapsed time + tool progress
-      let lastStatusText = ''
+      // Throttle: only update when tool count changes or 5s elapsed since last update
+      let lastToolCount = 0
+      let lastUpdateTime = 0
       const updateStatus = (): void => {
         if (ctx.resolved || !statusMsg) return
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(0)
+        const now = Date.now()
+        const hasNewTool = ctx.toolCount > lastToolCount
+        // Skip if no new tool and updated within last 5s
+        if (!hasNewTool && now - lastUpdateTime < 5_000) return
+        lastToolCount = ctx.toolCount
+        lastUpdateTime = now
+        const elapsed = ((now - startTime) / 1000).toFixed(0)
         const toolInfo = ctx.toolCount > 0
           ? `\n\u{1F527} Tools: ${ctx.toolCount} (${[...new Set(toolNames)].slice(-4).join(', ')})`
           : ''
-        const status = `\u{1F680} *[${tag}]* ${elapsed}s | \`${aiLabel}\`${toolInfo}`
-        if (status === lastStatusText) return
-        lastStatusText = status
         telegram.editMessageText(
           item.chatId, statusMsg.message_id, undefined,
-          status, { parse_mode: 'Markdown' }
+          `\u{1F680} *[${tag}]* ${elapsed}s | \`${aiLabel}\`${toolInfo}`,
+          { parse_mode: 'Markdown' }
         ).catch(() => {})
       }
 
-      const tickInterval = setInterval(updateStatus, 3000)
+      const tickInterval = setInterval(updateStatus, 5000)
 
       // Long-running task reminder (120s)
       const LONG_RUN_MS = 120_000

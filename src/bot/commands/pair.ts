@@ -18,7 +18,7 @@ function getLocalIp(): string {
       }
     }
   }
-  return '你的IP'
+  return 'localhost'
 }
 
 function getRelayUrl(): { url: string; isPublic: boolean } {
@@ -107,6 +107,7 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
     '```\n' +
     `${electronCmd}\n` +
     '```\n\n' +
+    `💡 首次需先 \`npm install\` 裝 electron\n\n` +
     `${networkNote}\n` +
     `_配對碼 5 分鐘後過期_`,
     { parse_mode: 'Markdown' },

@@ -205,3 +205,16 @@ export function rotateSession(backend: AIBackend, projectPath: string): number {
   saveSessions()
   return count
 }
+
+/** Periodic cleanup: remove orphaned tracking entries for expired/deleted sessions. */
+function cleanupOrphanedEntries(): void {
+  for (const key of [...lastActivity.keys()]) {
+    if (!mySessions.has(key)) {
+      lastActivity.delete(key)
+      promptCounts.delete(key)
+    }
+  }
+}
+
+const cleanupTimer = setInterval(cleanupOrphanedEntries, 30 * 60 * 1000)
+cleanupTimer.unref()
