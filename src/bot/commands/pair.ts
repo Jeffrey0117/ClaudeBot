@@ -5,7 +5,7 @@ import {
   getPairing,
   removePairing,
 } from '../../remote/pairing-store.js'
-import { getRelayPort } from '../../remote/relay-server.js'
+import { getRelayPort, getPublicRelayUrl } from '../../remote/relay-server.js'
 import { env } from '../../config/env.js'
 
 function getLocalIp(): string {
@@ -19,6 +19,16 @@ function getLocalIp(): string {
     }
   }
   return '你的IP'
+}
+
+function getRelayUrl(): { url: string; isPublic: boolean } {
+  const publicUrl = getPublicRelayUrl()
+  if (publicUrl) {
+    return { url: publicUrl, isPublic: true }
+  }
+  const port = getRelayPort() || env.RELAY_PORT
+  const ip = getLocalIp()
+  return { url: `ws://${ip}:${port}`, isPublic: false }
 }
 
 export async function pairCommand(ctx: BotContext): Promise<void> {
@@ -42,15 +52,17 @@ export async function pairCommand(ctx: BotContext): Promise<void> {
 
   // Generate new pairing code
   const code = createPairingCode(chatId, threadId)
-  const port = getRelayPort() || env.RELAY_PORT
-  const ip = getLocalIp()
-  const wsUrl = `ws://${ip}:${port}`
+  const { url: wsUrl, isPublic } = getRelayUrl()
 
   // First-time setup command (clone + install + run)
   const setupCmd = `git clone https://github.com/Jeffrey0117/ClaudeBot.git && cd ClaudeBot && npm install && npx tsx src/remote/agent.ts ${wsUrl} ${code}`
 
   // Reconnect command (already in ClaudeBot dir — pull latest first)
   const reconnectCmd = `git stash && git pull && npx tsx src/remote/agent.ts ${wsUrl} ${code}`
+
+  const networkNote = isPublic
+    ? '🌐 _公開 URL — 跨網路可用_'
+    : '🏠 _區網 URL — 需同個 WiFi（設 RELAY\\_TUNNEL=true 開啟跨網路）_'
 
   await ctx.reply(
     `🔑 *配對碼: \`${code}\`*\n\n` +
@@ -64,6 +76,7 @@ export async function pairCommand(ctx: BotContext): Promise<void> {
     '```\n\n' +
     `💡 指定專案目錄加在最後面，例如:\n` +
     `\`...${code} C:\\\\path\\\\to\\\\project\`\n\n` +
+    `${networkNote}\n` +
     `_配對碼 5 分鐘後過期_`,
     { parse_mode: 'Markdown' },
   )

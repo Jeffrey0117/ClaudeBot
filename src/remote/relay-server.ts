@@ -15,6 +15,8 @@ import {
   markDisconnected,
   resetAllConnectedFlags,
 } from './pairing-store.js'
+import { env } from '../config/env.js'
+import { startTunnel, setPublicRelayUrl, getPublicRelayUrl } from './tunnel.js'
 import type {
   RelayInbound,
   AgentRegistered,
@@ -209,6 +211,9 @@ function tryRouteBotResult(msg: ToolCallResult | ToolCallError): boolean {
   return true
 }
 
+/** Get the public URL for remote agents (tunnel or manual override). */
+export { getPublicRelayUrl } from './tunnel.js'
+
 export function startRelayServer(port: number): void {
   relayPort = port
 
@@ -232,6 +237,16 @@ export function startRelayServer(port: number): void {
       }
     }
   }, PING_INTERVAL_MS)
+
+  // Setup public URL: manual override > auto-tunnel > none (LAN fallback)
+  if (env.RELAY_PUBLIC_URL) {
+    setPublicRelayUrl(env.RELAY_PUBLIC_URL)
+    console.log(`[relay] Public URL (manual): ${env.RELAY_PUBLIC_URL}`)
+  } else if (env.RELAY_TUNNEL) {
+    startTunnel(port).catch((err) => {
+      console.error(`[relay] Failed to start tunnel: ${err instanceof Error ? err.message : err}`)
+    })
+  }
 
   wss.on('connection', (ws, req) => {
     let role: 'unknown' | 'agent' | 'proxy' = 'unknown'
