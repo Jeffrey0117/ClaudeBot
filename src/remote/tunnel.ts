@@ -144,6 +144,7 @@ function startCloudflared(port: number): Promise<string> {
     cfProcess = proc
     activeBackend = 'cloudflared'
     let resolved = false
+    let gotUrl = false
 
     // cloudflared prints the URL in stderr
     const urlRegex = /https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/
@@ -154,6 +155,7 @@ function startCloudflared(port: number): Promise<string> {
       const match = line.match(urlRegex)
       if (match) {
         resolved = true
+        gotUrl = true
         resolve(match[0])
       }
     }
@@ -178,7 +180,9 @@ function startCloudflared(port: number): Promise<string> {
         reject(new Error(`cloudflared exited with code ${code}`))
         return
       }
-      // Process died after URL was obtained → reconnect
+      // Only reconnect if cloudflared was actually working (got a URL)
+      // If it failed with ENOENT, the fallback to localtunnel handles it
+      if (!gotUrl) return
       if (!shuttingDown) {
         console.error(`[tunnel] cloudflared process exited (code ${code}), scheduling reconnect...`)
         publicUrl = ''
