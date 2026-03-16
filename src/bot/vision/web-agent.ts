@@ -18,11 +18,13 @@ import {
   sessionFill,
   sessionPress,
   sessionScroll,
+  sessionUpload,
   sessionWaitForSettle,
 } from './browser-session.js'
-import { isSsrfBlocked } from './ssrf-guard.js'
+import { isSsrfBlocked, resolveUrl } from './ssrf-guard.js'
 import { analyzeForAction, type AgentStep } from '../../ai/gemini-agent-vision.js'
 import type { PlaybookSummary } from '../../ai/gemini-agent-vision.js'
+import { getBvFiles, type BvFile } from './bv-file-store.js'
 import { updateAgentStep, clearActiveAgent } from './web-agent-store.js'
 import { getPlaybook, buildSkillsPrompt } from './playbook-store.js'
 
@@ -42,6 +44,8 @@ export interface AgentLoopOptions {
   readonly existingSession?: import('./browser-session.js').BrowserSession
   /** Available playbook skills for this domain (injected into Gemini prompt). */
   readonly playbookSkills?: readonly PlaybookSummary[]
+  /** Files uploaded by the user, available for the upload action. */
+  readonly availableFiles?: readonly BvFile[]
 }
 
 export interface AgentLoopResult {
@@ -62,10 +66,17 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     abortSignal,
     existingSession,
     playbookSkills,
+    availableFiles,
   } = options
 
   // Inject playbook skills awareness into the instruction
   const skillsInfo = playbookSkills ? buildSkillsPrompt(playbookSkills) : ''
+
+  // Inject available files info so Gemini knows it can use the upload action
+  const filesInfo = availableFiles && availableFiles.length > 0
+    ? '\n\nAvailable files for upload (use the "upload" action with selector pointing to <input type="file">):\n' +
+      availableFiles.map((f, i) => `- File ${i + 1}: "${f.originalName}" (${f.mimeType})`).join('\n')
+    : ''
 
   const steps: AgentStep[] = []
   const startTime = Date.now()
@@ -90,6 +101,11 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     }
 
     for (let i = 0; i < maxSteps; i++) {
+      // Check if browser/page died
+      if (session.page.isClosed()) {
+        return buildResult(steps, finalScreenshot, false, '瀏覽器頁面已關閉')
+      }
+
       // Check abort
       if (abortSignal?.aborted) {
         return buildResult(steps, finalScreenshot, false, '已取消')
@@ -135,7 +151,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         ? '\n\nWARNING: Previous click/deep_click actions failed. The target element is likely inside a CLOSED shadow DOM (invisible to DOM APIs). You MUST use click_xy with accurate pixel coordinates from the screenshot. Do NOT try click or deep_click again. A red coordinate grid is overlaid on the screenshot — use those x/y numbers for precise click_xy coordinates.'
         : ''
 
-      const instructionWithContext = instruction + failedContext + shadowHint + skillsInfo
+      const instructionWithContext = instruction + failedContext + shadowHint + skillsInfo + filesInfo
 
       // 2. Ask Gemini for next action
       const result = await analyzeForAction(screenshot, accessTree, instructionWithContext, steps)
@@ -268,6 +284,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
           continue
         }
 
+        // Human-like random delay between actions (300-800ms)
+        await new Promise(r => setTimeout(r, 300 + Math.random() * 500))
         // Wait for page to settle
         await sessionWaitForSettle(session)
       }
@@ -349,11 +367,25 @@ export async function executeAction(
       await sessionScroll(session, action.text ?? 'down')
       break
 
-    case 'navigate':
-      if (!action.text) throw new Error('navigate 需要 URL')
-      if (isSsrfBlocked(action.text)) throw new Error('不允許存取內部網路位址')
-      await sessionNavigate(session, action.text)
+    case 'upload': {
+      if (!action.selector) throw new Error('upload 需要 selector (file input)')
+      const files = getBvFiles(session.chatId)
+      if (files.length === 0) throw new Error('沒有可用的上傳檔案。請先傳圖片給 bot。')
+      const uploadPath = files[files.length - 1].path
+      await sessionUpload(session, action.selector, uploadPath)
       break
+    }
+
+    case 'navigate': {
+      if (!action.text) throw new Error('navigate 需要 URL')
+      // Resolve relative URLs (e.g. "/dashboard", "codelove.tw/path") against current page
+      const currentUrl = session.page.url()
+      const resolved = resolveUrl(action.text, currentUrl)
+      if (!resolved) throw new Error(`無法解析 URL: ${action.text}`)
+      if (isSsrfBlocked(resolved)) throw new Error('不允許存取內部網路位址')
+      await sessionNavigate(session, resolved)
+      break
+    }
 
     case 'done':
     case 'use_playbook':
@@ -375,6 +407,7 @@ export function actionLabel(step: AgentStep): string {
     case 'fill': return `填入 "${action.text ?? ''}" → ${action.selector ?? ''}`
     case 'press': return `按鍵 ${action.text ?? ''}`
     case 'scroll': return `捲動 ${action.text ?? 'down'}`
+    case 'upload': return `上傳檔案 → ${action.selector ?? ''}`
     case 'navigate': return `導航 ${action.text ?? ''}`
     case 'use_playbook': return `使用 playbook "${action.text ?? ''}"`
     case 'done': return '完成'

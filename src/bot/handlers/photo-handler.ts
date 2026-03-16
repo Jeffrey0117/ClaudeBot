@@ -6,6 +6,7 @@ import { enqueue } from '../../claude/queue.js'
 import { downloadImage } from '../../utils/image-downloader.js'
 import { getPairing } from '../../remote/pairing-store.js'
 import { remoteToolCall } from '../../remote/relay-client.js'
+import { addBvFile } from '../vision/bv-file-store.js'
 
 const IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
@@ -54,6 +55,15 @@ export async function photoHandler(ctx: BotContext): Promise<void> {
     const fileLink = await ctx.telegram.getFileLink(fileId)
     const extension = getExtension(fileLink.href)
     const imagePath = await downloadImage(fileLink.href, extension)
+
+    // Store for /bv web agent upload (separate copy — AI queue may clean up its own)
+    const bvCopyPath = await downloadImage(fileLink.href, extension)
+    addBvFile(chatId, {
+      path: bvCopyPath,
+      originalName: `photo.${extension}`,
+      mimeType: `image/${extension === 'jpg' ? 'jpeg' : extension}`,
+      timestamp: Date.now(),
+    })
 
     enqueue({
       chatId,
@@ -112,6 +122,15 @@ export async function documentHandler(ctx: BotContext): Promise<void> {
     const fileLink = await ctx.telegram.getFileLink(fileId)
     const extension = getExtensionFromMime(mimeType!)
     const imagePath = await downloadImage(fileLink.href, extension)
+
+    // Store for /bv web agent upload
+    const bvCopyPath = await downloadImage(fileLink.href, extension)
+    addBvFile(chatId, {
+      path: bvCopyPath,
+      originalName: fileName ?? `image.${extension}`,
+      mimeType: mimeType!,
+      timestamp: Date.now(),
+    })
 
     enqueue({
       chatId,

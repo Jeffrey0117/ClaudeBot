@@ -38,8 +38,25 @@ export async function getBrowser(): Promise<import('playwright').Browser> {
     args: [
       '--disable-blink-features=AutomationControlled',
       '--no-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-infobars',
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
+      '--disable-backgrounding-occluded-windows',
+      '--window-size=1280,720',
+      // Stability
+      '--disable-extensions',
+      '--disable-crash-reporter',
+      '--disable-breakpad',
     ],
   })
+
+  // Handle browser process dying — prevent unhandled rejection from crashing the bot
+  browser.on('disconnected', () => {
+    console.error('[browser-pool] Browser disconnected unexpectedly')
+    browser = null
+  })
+
   resetIdleTimer()
   return browser
 }

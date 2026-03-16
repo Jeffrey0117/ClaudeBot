@@ -13,8 +13,31 @@ process.on('unhandledRejection', (reason) => {
 })
 
 process.on('uncaughtException', (error) => {
+  const msg = error instanceof Error ? error.message : String(error)
   console.error('[fatal] Uncaught exception:', error)
-  // Stack may be corrupted — exit immediately, let launcher respawn
+
+  // Playwright browser crashes are recoverable — don't kill the bot
+  const isPlaywrightCrash = msg.includes('Target closed') ||
+    msg.includes('browser has been closed') ||
+    msg.includes('Browser closed') ||
+    msg.includes('Protocol error') ||
+    msg.includes('Target page, context or browser has been closed') ||
+    msg.includes('Page crashed') ||
+    msg.includes('Execution context was destroyed') ||
+    msg.includes('Navigation failed') ||
+    msg.includes('frame was detached') ||
+    msg.includes('Frame was detached') ||
+    msg.includes('net::ERR_') ||
+    msg.includes('Session closed') ||
+    msg.includes('Connection closed') ||
+    msg.includes('Timeout') ||
+    msg.includes('截圖逾時')
+  if (isPlaywrightCrash) {
+    console.error('[fatal] Playwright crash — suppressed, bot continues')
+    return
+  }
+
+  // Other exceptions: stack may be corrupted — exit, let launcher respawn
   process.exit(1)
 })
 

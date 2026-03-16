@@ -5,7 +5,7 @@
  *   /bv                          → usage help
  *   /bv <url>                    → one-shot screenshot + Gemini analysis
  *   /bv <url> <指令>              → agent loop (screenshot → analyze → act → repeat)
- *   /bv <指令>                    → continuation: follow-up on existing session
+ *   /bv <指令>                    → continuation (if session) or Google search (if no session)
  *   /bv cancel                   → cancel active agent
  *   /bv save <name>              → save last result as playbook
  *   /bv play <name> [instruction] → replay a saved playbook
@@ -26,6 +26,7 @@ import {
   setLastResult,
   getLastResult,
 } from '../vision/web-agent-store.js'
+import { getBvFiles, clearBvFiles } from '../vision/bv-file-store.js'
 import {
   savePlaybook,
   getPlaybook,
@@ -82,9 +83,10 @@ export async function browseVisionCommand(ctx: BotContext): Promise<void> {
       '*截圖分析:*\n' +
       '`/bv <URL>` — 截圖 → Gemini 分析\n\n' +
       '*網頁自動化:*\n' +
-      '`/bv <URL> <指令>` — Agent 自動執行任務\n\n' +
+      '`/bv <URL> <指令>` — Agent 自動執行任務\n' +
+      '`/bv <指令>` — 不給網址，自動 Google 搜尋\n\n' +
       '*連續指令:*\n' +
-      '`/bv <指令>` — 在目前頁面繼續操作\n\n' +
+      '`/bv <指令>` — 有 session 時：繼續操作\n\n' +
       '*Playbook \\(動作回放\\):*\n' +
       '`/bv save` — AI 自動拆分儲存 playbook\n' +
       '`/bv save <名稱>` — 手動儲存為單一 playbook\n' +
@@ -138,14 +140,17 @@ export async function browseVisionCommand(ctx: BotContext): Promise<void> {
   // Parse URL and optional instruction
   const { url, instruction } = parseArgs(args)
 
-  // No valid URL → treat entire args as follow-up instruction (continuation mode)
+  // No valid URL → continuation mode OR URL-less search mode
   if (!url) {
     const existingSession = getSession(chatId)
-    if (!existingSession) {
-      await ctx.reply('💤 沒有進行中的瀏覽器 session。\n請先用 `/bv <URL> <指令>` 開始。', { parse_mode: 'Markdown' })
+    if (existingSession) {
+      // Continuation: follow-up on existing session
+      await handleContinuationMode(ctx, chatId, existingSession, args)
       return
     }
-    await handleContinuationMode(ctx, chatId, existingSession, args)
+
+    // URL-less mode: open Google and let Gemini search + navigate
+    await handleAgentMode(ctx, chatId, 'https://www.google.com', args)
     return
   }
 
@@ -166,9 +171,16 @@ export async function browseVisionCommand(ctx: BotContext): Promise<void> {
 function parseArgs(args: string): { url: string | null; instruction: string } {
   // Try to extract URL from the beginning
   const parts = args.split(/\s+/)
-  let rawUrl = parts[0]
+  const firstToken = parts[0]
+
+  // Must look like a real domain: contain a dot (google.com, shop.tw)
+  // or be localhost / IP address. Without a dot, it's natural language, not a URL.
+  if (!firstToken.includes('.') && !firstToken.startsWith('http') && firstToken !== 'localhost') {
+    return { url: null, instruction: '' }
+  }
 
   // Auto-prepend https://
+  let rawUrl = firstToken
   if (!/^https?:\/\//i.test(rawUrl)) {
     rawUrl = `https://${rawUrl}`
   }
@@ -258,6 +270,7 @@ async function handleContinuationMode(
   })
 
   try {
+    const userFiles = getBvFiles(chatId)
     const result = await runAgentLoop({
       chatId,
       url: pageUrl,
@@ -266,7 +279,11 @@ async function handleContinuationMode(
       telegram: ctx.telegram,
       abortSignal: abortController.signal,
       existingSession,
+      availableFiles: userFiles.length > 0 ? userFiles : undefined,
     })
+
+    // Clear bv files after successful agent run
+    if (result.success) clearBvFiles(chatId)
 
     // Cache result for /bv save
     setLastResult(chatId, {
@@ -369,6 +386,7 @@ async function handleAgentMode(
 
     // --- No playbook match — full agent loop (with playbook skills awareness) ---
     const domainSkills = getSkillsForDomain(url)
+    const userFiles = getBvFiles(chatId)
     const result = await runAgentLoop({
       chatId,
       url,
@@ -377,7 +395,11 @@ async function handleAgentMode(
       telegram: ctx.telegram,
       abortSignal: abortController.signal,
       playbookSkills: domainSkills.length > 0 ? domainSkills : undefined,
+      availableFiles: userFiles.length > 0 ? userFiles : undefined,
     })
+
+    // Clear bv files after successful agent run
+    if (result.success) clearBvFiles(chatId)
 
     // Cache result for /bv save
     setLastResult(chatId, {

@@ -11,7 +11,7 @@ const TIMEOUT_MS = 30_000
 // --- Types ---
 
 export interface AgentAction {
-  readonly type: 'click' | 'click_xy' | 'deep_click' | 'fill' | 'press' | 'scroll' | 'navigate' | 'use_playbook' | 'done'
+  readonly type: 'click' | 'click_xy' | 'deep_click' | 'fill' | 'press' | 'scroll' | 'navigate' | 'upload' | 'use_playbook' | 'done'
   readonly selector?: string
   readonly text?: string
   readonly x?: number
@@ -45,7 +45,7 @@ const AGENT_RESPONSE_SCHEMA = {
     action: {
       type: 'OBJECT' as const,
       properties: {
-        type: { type: 'STRING' as const, enum: ['click', 'click_xy', 'deep_click', 'fill', 'press', 'scroll', 'navigate', 'use_playbook', 'done'] },
+        type: { type: 'STRING' as const, enum: ['click', 'click_xy', 'deep_click', 'fill', 'press', 'scroll', 'navigate', 'upload', 'use_playbook', 'done'] },
         selector: { type: 'STRING' as const, description: 'Element selector: role=button[name="X"], text="Y", or CSS selector' },
         text: { type: 'STRING' as const, description: 'Text to fill or key to press or URL to navigate to' },
         x: { type: 'NUMBER' as const, description: 'X coordinate for click_xy (0-1280)' },
@@ -95,12 +95,20 @@ function buildAgentPrompt(
     '- Set done=true when the task is complete or you cannot proceed\n' +
     '- If an element was not found in a previous step, try a different selector\n' +
     '- Do NOT fill password fields unless the instruction explicitly asks for it\n' +
-    '- IMPORTANT: If you encounter a BLOCKING CAPTCHA that requires solving (image selection puzzle, "I\'m not a robot" checkbox you must click), set done=true. But do NOT stop just because you see a reCAPTCHA badge/logo in the corner — many sites include invisible reCAPTCHA that does not block the flow.\n' +
+    '- CAPTCHA HANDLING: Do NOT give up when you see a CAPTCHA. Instead, TRY to solve it:\n' +
+    '  * "I\'m not a robot" checkbox → click it using click_xy on the checkbox center\n' +
+    '  * Image selection CAPTCHA ("select all traffic lights") → analyze the grid images carefully, click each matching image tile one by one, then click Verify/Submit\n' +
+    '  * Slider CAPTCHA → locate the slider handle and drag it (click_xy on handle, then describe the drag direction in thought)\n' +
+    '  * Text CAPTCHA → read the distorted text and fill it into the input field\n' +
+    '  * After clicking the checkbox or completing the puzzle, wait for the page to update and continue with the original task\n' +
+    '  * Only set done=true if you have TRIED solving the CAPTCHA and it keeps reappearing after 3+ attempts\n' +
+    '  * Do NOT stop just because you see a reCAPTCHA badge/logo in the corner — many sites include invisible reCAPTCHA that does not block the flow\n' +
     '- IMPORTANT: Selectors MUST use the role= prefix for ARIA roles, e.g. role=combobox[name="Search"], role=button[name="Submit"]\n' +
     '- IMPORTANT: For text selectors, use ONLY the clickable element\'s own text, NOT surrounding text\n' +
     '- CRITICAL: If an element is VISIBLE in the screenshot but NOT in the accessibility tree, it is likely inside a closed shadow DOM or iframe. You MUST use click_xy with pixel coordinates. Do NOT use click or deep_click — they will fail because the element does not exist in the accessible DOM. Modals, login forms, and popups often use closed shadow DOM.\n' +
     '- CRITICAL: When using click_xy, carefully estimate the CENTER of the target element from the screenshot. The viewport is 1280x720. If a red coordinate grid overlay is visible in the screenshot, use those numbers to precisely locate elements. Read the x values at the top and y values on the left.\n' +
     '- For deep_click actions, provide the visible text in text field — this walks the DOM to find and click by text content\n' +
+    '- For upload actions, provide the selector of the <input type="file"> element. The system will automatically attach the user\'s file. Use text field to describe which file to use if multiple are available.\n' +
     '- Action priority when element is visible but click fails: 1) click_xy (best for shadow DOM), 2) deep_click (walks DOM), 3) click with different selector\n' +
     '- If click_xy hits the wrong element, adjust coordinates by looking at the screenshot more carefully. Do NOT keep retrying the same coordinates.'
   )
@@ -509,6 +517,9 @@ async function callGeminiApi(
 
     if (!text) {
       const reason = data.candidates?.[0]?.finishReason
+      if (reason === 'SAFETY' || (!reason && !data.candidates?.[0]?.content)) {
+        return { text: '', error: 'Gemini 安全過濾器擋掉了這個頁面（可能包含敏感內容）' }
+      }
       return { text: '', error: `Gemini 無回覆 (finishReason: ${reason ?? 'unknown'})` }
     }
 
