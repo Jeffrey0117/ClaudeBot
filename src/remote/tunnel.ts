@@ -17,6 +17,19 @@ import localtunnel from 'localtunnel'
 let publicUrl = ''
 const sharedUrlFile = join(process.cwd(), 'data', '.relay-url')
 
+/** When true, suppress reconnect on intentional close */
+let shuttingDown = false
+
+/** Current tunnel instance for graceful close */
+let activeTunnel: Awaited<ReturnType<typeof localtunnel>> | null = null
+
+/** Reconnect state */
+let reconnectAttempt = 0
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+const MAX_RECONNECT_ATTEMPTS = 10
+const BASE_DELAY_MS = 3_000
+const MAX_DELAY_MS = 60_000
+
 function writeSharedUrl(url: string): void {
   try {
     writeFileSync(sharedUrlFile, url, 'utf-8')
@@ -48,18 +61,62 @@ export function setPublicRelayUrl(url: string): void {
   writeSharedUrl(url)
 }
 
+/** Gracefully close tunnel and prevent reconnect. */
+export function closeTunnel(): void {
+  shuttingDown = true
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+  if (activeTunnel) {
+    activeTunnel.close()
+    activeTunnel = null
+  }
+  publicUrl = ''
+  clearSharedUrl()
+}
+
+function scheduleReconnect(port: number): void {
+  if (shuttingDown) return
+  if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+    console.error(`[tunnel] Gave up after ${MAX_RECONNECT_ATTEMPTS} reconnect attempts`)
+    publicUrl = ''
+    clearSharedUrl()
+    return
+  }
+
+  const delay = Math.min(BASE_DELAY_MS * 2 ** reconnectAttempt, MAX_DELAY_MS)
+  reconnectAttempt++
+  console.error(`[tunnel] Reconnecting in ${(delay / 1000).toFixed(0)}s (attempt ${reconnectAttempt}/${MAX_RECONNECT_ATTEMPTS})...`)
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    startTunnel(port).catch((err) => {
+      console.error(`[tunnel] Reconnect failed: ${err instanceof Error ? err.message : err}`)
+      scheduleReconnect(port)
+    })
+  }, delay)
+}
+
 export async function startTunnel(port: number): Promise<string> {
   const tunnel = await localtunnel({ port })
+  activeTunnel = tunnel
 
   // localtunnel gives https:// URL, convert to wss:// for WebSocket
   const wsUrl = tunnel.url.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:')
   publicUrl = wsUrl
   writeSharedUrl(wsUrl)
 
+  // Successful connect — reset backoff counter
+  reconnectAttempt = 0
+
   tunnel.on('close', () => {
-    console.error('[tunnel] Tunnel closed unexpectedly, remote agents may disconnect')
+    activeTunnel = null
+    if (shuttingDown) return
+    console.error('[tunnel] Tunnel closed unexpectedly, scheduling reconnect...')
     publicUrl = ''
     clearSharedUrl()
+    scheduleReconnect(port)
   })
 
   tunnel.on('error', (err: Error) => {
