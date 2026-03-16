@@ -95,7 +95,7 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
   const code = createPairingCode(chatId, threadId)
   const { url: wsUrl, isPublic } = getRelayUrl()
 
-  const electronCmd = `npx electron src/remote/electron/main.ts --chat --url ${wsUrl} --code ${code}`
+  const electronCmd = `git pull && npx electron src/remote/electron/main.ts --chat --url ${wsUrl} --code ${code}`
 
   const networkNote = isPublic
     ? '🌐 公開 URL — 跨網路可用'
