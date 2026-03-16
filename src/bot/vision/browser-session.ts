@@ -66,9 +66,58 @@ export async function createSession(chatId: number): Promise<BrowserSession> {
     userAgent: USER_AGENT,
   })
 
+  // --- Stealth: reduce bot detection fingerprint ---
+  await page.addInitScript(`
+    // Remove webdriver flag
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+
+    // Fake plugins (empty = obvious bot)
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [
+        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+      ],
+    });
+
+    // Fake languages
+    Object.defineProperty(navigator, 'languages', { get: () => ['zh-TW', 'zh', 'en-US', 'en'] });
+
+    // Fake chrome object
+    if (!window.chrome) {
+      window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
+    }
+
+    // Fake permissions query
+    const origQuery = window.navigator.permissions?.query;
+    if (origQuery) {
+      window.navigator.permissions.query = (params) => {
+        if (params.name === 'notifications') {
+          return Promise.resolve({ state: 'prompt', onchange: null });
+        }
+        return origQuery.call(window.navigator.permissions, params);
+      };
+    }
+  `)
+
   // Auto-accept native dialogs (alert, confirm, prompt)
   page.on('dialog', (dialog) => {
     dialog.accept().catch(() => {})
+  })
+
+  // Prevent Chromium crash from killing the bot process
+  page.on('crash', () => {
+    console.error(`[browser-session] Page crashed for chat ${chatId}, cleaning up`)
+    closeSession(chatId).catch(() => {})
+  })
+
+  page.on('close', () => {
+    // Page closed externally (browser died, etc.) — clean up session map
+    const entry = sessions.get(chatId)
+    if (entry?.session.page === page) {
+      clearTimeout(entry.idleTimer)
+      sessions.delete(chatId)
+    }
   })
 
   const session: BrowserSession = {
@@ -117,7 +166,12 @@ export async function sessionScreenshot(session: BrowserSession, withGrid = fals
       })()
     `).catch(() => { /* ignore if evaluate fails (closed shadow DOM page) */ })
   }
-  const buffer = await session.page.screenshot({ fullPage: false })
+  const buffer = await Promise.race([
+    session.page.screenshot({ fullPage: false }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('截圖逾時 (15s)')), 15_000),
+    ),
+  ])
   if (withGrid) {
     // Remove grid after screenshot
     await session.page.evaluate(`
@@ -202,7 +256,29 @@ export async function sessionFill(session: BrowserSession, selector: string, tex
 
 export async function sessionClickXY(session: BrowserSession, x: number, y: number): Promise<void> {
   resetSessionIdle(session.chatId)
+  // Human-like: move mouse gradually then click (reduces bot detection)
+  await humanMouseMove(session.page, x, y)
   await session.page.mouse.click(x, y)
+}
+
+/** Simulate human mouse movement — move in small steps with random delays. */
+async function humanMouseMove(page: Page, targetX: number, targetY: number): Promise<void> {
+  const steps = 8 + Math.floor(Math.random() * 6) // 8-13 intermediate points
+  // Get current position (default to random corner if unknown)
+  const startX = 100 + Math.random() * 200
+  const startY = 100 + Math.random() * 200
+
+  for (let i = 1; i <= steps; i++) {
+    const progress = i / steps
+    // Ease-in-out curve for natural acceleration/deceleration
+    const ease = progress < 0.5
+      ? 2 * progress * progress
+      : 1 - Math.pow(-2 * progress + 2, 2) / 2
+    const x = startX + (targetX - startX) * ease + (Math.random() - 0.5) * 4
+    const y = startY + (targetY - startY) * ease + (Math.random() - 0.5) * 4
+    await page.mouse.move(x, y)
+    await new Promise(r => setTimeout(r, 15 + Math.random() * 30))
+  }
 }
 
 /** Try deep click, swallowing errors so the caller can fall through. */
@@ -265,6 +341,21 @@ export async function sessionDeepClick(session: BrowserSession, text: string): P
   } catch {
     return false
   }
+}
+
+export async function sessionUpload(
+  session: BrowserSession,
+  selector: string,
+  filePath: string,
+): Promise<void> {
+  resetSessionIdle(session.chatId)
+  // Security: only allow files from the claudebot-images temp directory
+  if (!filePath.includes('claudebot-images')) {
+    throw new Error('只允許上傳暫存目錄的檔案')
+  }
+  const { locator } = await findElement(session.page, selector)
+  if (!locator) throw new Error(`元素不存在: ${selector}`)
+  await locator.first().setInputFiles(filePath, { timeout: ACTION_TIMEOUT_MS })
 }
 
 export async function sessionPress(session: BrowserSession, key: string): Promise<void> {
