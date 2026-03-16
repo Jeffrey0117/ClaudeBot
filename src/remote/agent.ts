@@ -14,8 +14,10 @@
 import { WebSocket } from 'ws'
 import { resolve } from 'node:path'
 import { createToolDispatcher } from './tool-handlers.js'
+import { appendAuditEntry, rotateAuditLog } from './audit-log.js'
 import type {
   AgentRegister,
+  AgentShutdown,
   ToolCallRequest,
   ToolCallResult,
   ToolCallError,
@@ -26,7 +28,6 @@ import type {
 const RELAY_URL = process.argv[2]
 const PAIRING_CODE = process.argv[3]
 const BASE_DIR = resolve(process.argv[4] || process.cwd())
-const RECONNECT_DELAY_MS = 3_000
 
 if (!RELAY_URL || !PAIRING_CODE) {
   console.error('Usage: npx tsx src/remote/agent.ts <relay-url> <code> [base-dir]')
@@ -35,6 +36,22 @@ if (!RELAY_URL || !PAIRING_CODE) {
 }
 
 const toolDispatcher = createToolDispatcher(BASE_DIR)
+
+// --- Reconnect with exponential backoff ---
+
+const BASE_DELAY_MS = 3_000
+const MAX_DELAY_MS = 30_000
+let reconnectAttempt = 0
+
+function getReconnectDelay(): number {
+  const delay = Math.min(BASE_DELAY_MS * 2 ** reconnectAttempt, MAX_DELAY_MS)
+  reconnectAttempt++
+  return delay
+}
+
+function resetReconnectBackoff(): void {
+  reconnectAttempt = 0
+}
 
 // --- WebSocket connection ---
 
@@ -78,6 +95,7 @@ function connect(): void {
 
     if (msg.type === 'agent_registered') {
       ws = socket
+      resetReconnectBackoff()
       console.log('✅ Connected and paired!')
       console.log('')
       console.log(`Working directory: ${BASE_DIR}`)
@@ -98,16 +116,21 @@ function connect(): void {
       const argsPreview = Object.values(req.args).map(String).join(', ').slice(0, 60)
       console.log(`🔧 ${toolShort}(${argsPreview})`)
 
+      const startMs = Date.now()
       try {
         const result = await toolDispatcher.dispatch(req.tool, req.args)
         const resp: ToolCallResult = { id: req.id, type: 'tool_result', result }
         socket.send(JSON.stringify(resp))
-        console.log(`   ✓ done (${result.length} chars)`)
+        const durationMs = Date.now() - startMs
+        console.log(`   ✓ done (${result.length} chars, ${durationMs}ms)`)
+        appendAuditEntry({ ts: new Date().toISOString(), tool: toolShort, argsPreview, ok: true, durationMs })
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err)
         const resp: ToolCallError = { id: req.id, type: 'tool_error', error }
         socket.send(JSON.stringify(resp))
-        console.log(`   ✗ error: ${error}`)
+        const durationMs = Date.now() - startMs
+        console.log(`   ✗ error: ${error} (${durationMs}ms)`)
+        appendAuditEntry({ ts: new Date().toISOString(), tool: toolShort, argsPreview, ok: false, durationMs, error })
       }
     }
   })
@@ -116,8 +139,9 @@ function connect(): void {
     ws = null
     clearInterval(livenessCheck)
     if (shouldReconnect) {
-      console.log(`🔌 Disconnected. Reconnecting in ${RECONNECT_DELAY_MS / 1000}s...`)
-      setTimeout(connect, RECONNECT_DELAY_MS)
+      const delay = getReconnectDelay()
+      console.log(`🔌 Disconnected. Reconnecting in ${(delay / 1000).toFixed(0)}s...`)
+      setTimeout(connect, delay)
     }
   })
 
@@ -138,16 +162,51 @@ console.log(`║  Dir:    ${(BASE_DIR.length > 28 ? '...' + BASE_DIR.slice(-25) 
 console.log('╚══════════════════════════════════════╝')
 console.log('')
 
+rotateAuditLog()
 connect()
 
 // --- Graceful shutdown ---
 
 function shutdown(): void {
   shouldReconnect = false
-  if (ws) ws.close()
-  console.log('\nShutting down.')
-  process.exit(0)
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const msg: AgentShutdown = { type: 'agent_shutdown', reason: '手動關閉' }
+    ws.send(JSON.stringify(msg))
+  }
+  // Allow 200ms for TCP flush before closing
+  setTimeout(() => {
+    if (ws) ws.close()
+    console.log('\nShutting down.')
+    process.exit(0)
+  }, 200)
 }
 
 process.on('SIGINT', shutdown)
 process.on('SIGTERM', shutdown)
+
+// --- Error resilience ---
+
+const NETWORK_ERROR_PATTERNS = [
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EPIPE',
+  'ECONNREFUSED',
+  'WebSocket',
+  'socket hang up',
+  'read ECONNRESET',
+]
+
+process.on('uncaughtException', (err) => {
+  const msg = err.message || ''
+  const isNetworkError = NETWORK_ERROR_PATTERNS.some((p) => msg.includes(p))
+  if (isNetworkError) {
+    console.error(`[agent] Suppressed network error: ${msg}`)
+    return
+  }
+  console.error('[agent] Fatal uncaught exception:', err)
+  process.exit(1)
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[agent] Unhandled rejection:', reason)
+})

@@ -36,6 +36,14 @@ export async function pairCommand(ctx: BotContext): Promise<void> {
   if (!chatId) return
 
   const threadId = ctx.message?.message_thread_id
+  const text = (ctx.message && 'text' in ctx.message) ? ctx.message.text ?? '' : ''
+  const arg = text.split(/\s+/)[1]?.toLowerCase()
+
+  // /pair chat → Electron chat client shortcut
+  if (arg === 'chat') {
+    return pairChatCommand(ctx, chatId, threadId)
+  }
+
   const existing = getPairing(chatId, threadId)
 
   // Already paired and connected
@@ -76,6 +84,29 @@ export async function pairCommand(ctx: BotContext): Promise<void> {
     '```\n\n' +
     `💡 指定專案目錄加在最後面，例如:\n` +
     `\`...${code} C:\\\\path\\\\to\\\\project\`\n\n` +
+    `💬 桌面聊天客戶端: \`/pair chat\`\n\n` +
+    `${networkNote}\n` +
+    `_配對碼 5 分鐘後過期_`,
+    { parse_mode: 'Markdown' },
+  )
+}
+
+async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number | undefined): Promise<void> {
+  const code = createPairingCode(chatId, threadId)
+  const { url: wsUrl, isPublic } = getRelayUrl()
+
+  const electronCmd = `npx electron src/remote/electron/main.ts --chat --url ${wsUrl} --code ${code}`
+
+  const networkNote = isPublic
+    ? '🌐 公開 URL — 跨網路可用'
+    : '🏠 區網 URL — 需同個 WiFi'
+
+  await ctx.reply(
+    `💬 *桌面聊天客戶端*\n\n` +
+    `在 ClaudeBot 目錄下貼上:\n` +
+    '```\n' +
+    `${electronCmd}\n` +
+    '```\n\n' +
     `${networkNote}\n` +
     `_配對碼 5 分鐘後過期_`,
     { parse_mode: 'Markdown' },

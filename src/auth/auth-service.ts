@@ -1,5 +1,6 @@
 import bcrypt from 'bcrypt'
 import { env } from '../config/env.js'
+import { isVirtualChat } from '../remote/virtual-chat-store.js'
 
 const authenticatedChats = new Set<number>()
 
@@ -35,10 +36,12 @@ export function isAuthenticated(chatId: number): boolean {
 }
 
 export function isChatAllowed(chatId: number): boolean {
+  if (isVirtualChat(chatId)) return true // Electron virtual user (paired via code)
   return env.ALLOWED_CHAT_IDS.includes(chatId) || env.REMOTE_CHAT_IDS.includes(chatId)
 }
 
 /** Remote-only users: can only use pairing, blocked from local projects/admin commands */
 export function isRemoteOnly(chatId: number): boolean {
+  if (isVirtualChat(chatId)) return true // Electron = remote-only
   return env.REMOTE_CHAT_IDS.includes(chatId) && !env.ALLOWED_CHAT_IDS.includes(chatId)
 }

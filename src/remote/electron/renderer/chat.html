@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+  <title>ClaudeBot Chat</title>
+  <link rel="stylesheet" href="chat.css">
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <h1>ClaudeBot</h1>
+    </div>
+    <div class="header-right">
+      <span class="status-dot disconnected" id="status-dot"></span>
+      <span id="status-text">Disconnected</span>
+    </div>
+  </div>
+
+  <!-- Connection panel (shown when disconnected) -->
+  <div class="connect-panel" id="connect-panel">
+    <div class="form-group">
+      <label for="relay-url">Server</label>
+      <input type="text" id="relay-url" placeholder="ws://1.2.3.4:9877" value="ws://localhost:9877">
+    </div>
+    <div class="form-group">
+      <label for="pairing-code">Pairing Code</label>
+      <input type="text" id="pairing-code" placeholder="6-digit code" maxlength="6" autocomplete="off">
+    </div>
+    <button id="btn-connect" class="btn-primary">Connect</button>
+  </div>
+
+  <!-- Chat panel (shown when connected) -->
+  <div class="chat-panel hidden" id="chat-panel">
+    <div class="messages" id="messages"></div>
+
+    <div class="typing-indicator hidden" id="typing-indicator">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+    </div>
+
+    <div class="input-bar">
+      <input type="text" id="message-input" placeholder="輸入訊息..." autocomplete="off">
+      <button id="btn-send">送出</button>
+    </div>
+  </div>
+
+  <script src="chat-renderer.js"></script>
+</body>
+</html>

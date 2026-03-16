@@ -32,6 +32,13 @@ export interface RelayError {
   readonly error: string
 }
 
+// --- Agent shutdown notification ---
+
+export interface AgentShutdown {
+  readonly type: 'agent_shutdown'
+  readonly reason: string
+}
+
 // --- Tool call forwarding (unchanged, used after handshake) ---
 
 export interface ToolCallRequest {
@@ -53,10 +60,37 @@ export interface ToolCallError {
   readonly error: string
 }
 
+// --- Electron chat protocol (re-exported from chat-protocol.ts) ---
+
+export type {
+  ChatMessage,
+  ChatCallback,
+  ChatResponse,
+  ChatEdit,
+  ChatDelete,
+  ChatStatus,
+  ElectronChatRegister,
+  ElectronChatRegistered,
+  ChatInbound,
+  ChatOutbound,
+} from './chat-protocol.js'
+
 // --- Union types ---
 
-/** Messages the relay receives */
-export type RelayInbound = AgentRegister | ProxyConnect | ToolCallRequest | ToolCallResult | ToolCallError
+/** Messages the relay receives (includes Electron chat handshake + messages) */
+export type RelayInbound =
+  | AgentRegister | ProxyConnect | AgentShutdown
+  | ToolCallRequest | ToolCallResult | ToolCallError
+  | import('./chat-protocol.js').ElectronChatRegister
+  | import('./chat-protocol.js').ChatMessage
+  | import('./chat-protocol.js').ChatCallback
 
 /** Messages the relay sends back */
-export type RelayOutbound = AgentRegistered | ProxyConnected | RelayError | ToolCallRequest | ToolCallResult | ToolCallError
+export type RelayOutbound =
+  | AgentRegistered | ProxyConnected | RelayError
+  | ToolCallRequest | ToolCallResult | ToolCallError
+  | import('./chat-protocol.js').ElectronChatRegistered
+  | import('./chat-protocol.js').ChatResponse
+  | import('./chat-protocol.js').ChatEdit
+  | import('./chat-protocol.js').ChatDelete
+  | import('./chat-protocol.js').ChatStatus
