@@ -214,7 +214,8 @@ export function getBotConnectedPairings(): readonly PairingSession[] {
 }
 
 /** Reset all connected flags on startup — stale flags from a crashed relay are lies.
- *  Agents will reconnect and markConnected() sets them back to true. */
+ *  Agents will reconnect and markConnected() sets them back to true.
+ *  Refresh createdAt so codes don't expire before agents can reconnect. */
 export function resetAllConnectedFlags(): number {
   const store = readStore()
   const connectedKeys = Object.entries(store.pairings)
@@ -222,8 +223,9 @@ export function resetAllConnectedFlags(): number {
     .map(([k]) => k)
   if (connectedKeys.length === 0) return 0
   const pairings = { ...store.pairings }
+  const now = Date.now()
   for (const key of connectedKeys) {
-    pairings[key] = { ...pairings[key], connected: false }
+    pairings[key] = { ...pairings[key], connected: false, createdAt: now }
   }
   writeStore({ ...store, pairings })
   return connectedKeys.length
