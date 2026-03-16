@@ -4,17 +4,13 @@
  * Text messages → ordered-message-buffer → queue (same path as Telegram messages)
  * Commands → getCoreCommandHandler / dispatchPluginCommand via createFakeContext
  * Callbacks → callback-handler via fake callback context
+ *
+ * IMPORTANT: All imports from bot/ and plugins/ are LAZY (dynamic import)
+ * to avoid circular dependency: relay-server → bridge → bot → pair → relay-server
  */
 
 import type { WebSocket } from 'ws'
 import type { ChatMessage, ChatCallback } from './chat-protocol.js'
-import { autoAuth } from '../auth/auth-service.js'
-import { getUserState } from '../bot/state.js'
-import { addText } from '../bot/ordered-message-buffer.js'
-import { createFakeContext } from '../utils/fake-context.js'
-import { getCoreCommandHandler, getBotInstance } from '../bot/bot.js'
-import { isPluginCommand, dispatchPluginCommand } from '../plugins/loader.js'
-import { getPluginModule } from '../plugins/loader.js'
 
 /**
  * Allowlist of commands Electron chat users can use.
@@ -51,7 +47,11 @@ export async function handleElectronChatMessage(
   const text = msg.text.trim()
   if (!text) return
 
-  // Auto-auth virtual user
+  // Lazy imports to break circular dependency
+  const { autoAuth } = await import('../auth/auth-service.js')
+  const { getBotInstance, getCoreCommandHandler } = await import('../bot/bot.js')
+  const { createFakeContext } = await import('../utils/fake-context.js')
+
   autoAuth(virtualChatId)
 
   const bot = getBotInstance()
@@ -83,6 +83,7 @@ export async function handleElectronChatMessage(
     }
 
     // Try plugin command
+    const { isPluginCommand, dispatchPluginCommand } = await import('../plugins/loader.js')
     if (isPluginCommand(cmdName)) {
       const ctx = createFakeContext({
         chatId: virtualChatId,
@@ -101,6 +102,7 @@ export async function handleElectronChatMessage(
   }
 
   // Regular text message — needs project selected
+  const { getUserState } = await import('../bot/state.js')
   const state = getUserState(virtualChatId)
   if (!state.selectedProject) {
     sendText(ws, '⚠️ 請先用 /projects 選擇專案')
@@ -109,6 +111,7 @@ export async function handleElectronChatMessage(
 
   // Allot gate for remote projects
   if (state.selectedProject.name === 'remote') {
+    const { getPluginModule } = await import('../plugins/loader.js')
     const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
     if (allotMod?.tryReserve) {
       const check = (allotMod.tryReserve as (c: number, t: number | undefined) => { allowed: boolean; reason?: string })(virtualChatId, undefined)
@@ -120,6 +123,7 @@ export async function handleElectronChatMessage(
   }
 
   // Feed into ordered message buffer (same path as Telegram text messages)
+  const { addText } = await import('../bot/ordered-message-buffer.js')
   addText(virtualChatId, msg.messageId, undefined, text, '')
 }
 
@@ -131,6 +135,10 @@ export async function handleElectronChatCallback(
   virtualChatId: number,
   msg: ChatCallback,
 ): Promise<void> {
+  const { autoAuth } = await import('../auth/auth-service.js')
+  const { getBotInstance } = await import('../bot/bot.js')
+  const { createFakeContext } = await import('../utils/fake-context.js')
+
   autoAuth(virtualChatId)
 
   const bot = getBotInstance()
@@ -179,12 +187,10 @@ export async function handleElectronChatCallback(
   })
 
   try {
-    // First try plugin callbacks
     const { dispatchPluginCallback } = await import('../plugins/loader.js')
     const pluginHandled = await dispatchPluginCallback(ctx, msg.data)
     if (pluginHandled) return
 
-    // Import and call the callback handler
     const { callbackHandler } = await import('../bot/handlers/callback-handler.js')
     await callbackHandler(ctx)
   } catch (err) {
