@@ -121,6 +121,11 @@ export async function startTunnel(port: number): Promise<string> {
 
   tunnel.on('error', (err: Error) => {
     console.error('[tunnel] Tunnel error:', err.message)
+    // Force reconnect on error — tunnel may be in zombie state (502)
+    if (!shuttingDown && activeTunnel) {
+      console.error('[tunnel] Error detected, forcing reconnect...')
+      activeTunnel.close()
+    }
   })
 
   console.log(`[tunnel] Public relay URL: ${wsUrl}`)
