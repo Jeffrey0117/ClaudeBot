@@ -105,13 +105,13 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
       // Launch Electron via run-electron.cjs wrapper.
       // IMPORTANT: Pass URL/code via env vars, NOT argv.
       // Chromium crashes when argv contains wss:// or https:// URLs.
-      const launchCmd = `set CLAUDEBOT_URL=${wsUrl}&& set CLAUDEBOT_CODE=${chatCode}&& node run-electron.cjs dist/remote/electron/main.cjs --chat`
+      const launchCmd = `set CLAUDEBOT_URL=${wsUrl}&& set CLAUDEBOT_CODE=${chatCode}&& node run-electron.cjs --detach dist/remote/electron/main.cjs --chat`
 
       await remoteToolCall(
         existing.code,
         'remote_execute_command',
-        { command: launchCmd, timeout: 15000 },
-        15_000,
+        { command: launchCmd, timeout: 10_000 },
+        10_000,
       )
       await ctx.reply(
         `✅ 已在遠端開啟聊天視窗\n\n` +

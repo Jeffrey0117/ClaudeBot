@@ -13,10 +13,23 @@ if (!existsSync(pathFile)) {
 
 const relPath = readFileSync(pathFile, 'utf-8').trim()
 const bin = join(root, 'node_modules', 'electron', 'dist', relPath)
-const args = process.argv.slice(2)
+const detach = process.argv.includes('--detach')
+const args = process.argv.slice(2).filter((a) => a !== '--detach')
 
 console.log(`Electron: ${bin}`)
 console.log(`Args: ${args.join(' ')}`)
+
+if (detach) {
+  // Fire-and-forget: spawn detached, unref, exit immediately
+  const child = spawn(bin, args, {
+    cwd: root,
+    detached: true,
+    stdio: 'ignore',
+  })
+  child.unref()
+  console.log(`Electron launched (detached, pid ${child.pid})`)
+  process.exit(0)
+}
 
 const child = spawn(bin, args, {
   cwd: root,
