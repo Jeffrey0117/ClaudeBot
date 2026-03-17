@@ -8,9 +8,20 @@
 
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { resolve } from 'node:path'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { WebSocket } from 'ws'
+
+// --- Crash diagnostics (stderr visible in terminal) ---
+
+process.on('uncaughtException', (err) => {
+  console.error(`[electron] uncaughtException: ${err.message}`)
+  console.error(err.stack)
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error(`[electron] unhandledRejection:`, reason)
+})
 import type { ToolDispatcher } from '../tool-handlers.js'
 import type {
   AgentRegister,
@@ -269,6 +280,15 @@ function isChatMode(): boolean {
 
 function createWindow(): void {
   const chatMode = isChatMode()
+  const cwd = process.cwd()
+
+  const preloadPath = resolve(cwd, 'src', 'remote', 'electron', 'preload.cjs')
+  const htmlFile = chatMode ? 'chat.html' : 'index.html'
+  const htmlPath = resolve(cwd, 'src', 'remote', 'electron', 'renderer', htmlFile)
+
+  console.error(`[electron] mode=${chatMode ? 'chat' : 'agent'} cwd=${cwd}`)
+  console.error(`[electron] preload=${preloadPath} exists=${existsSync(preloadPath)}`)
+  console.error(`[electron] html=${htmlPath} exists=${existsSync(htmlPath)}`)
 
   mainWindow = new BrowserWindow({
     width: chatMode ? 420 : 600,
@@ -276,16 +296,20 @@ function createWindow(): void {
     title: chatMode ? 'ClaudeBot Chat' : 'ClaudeBot Remote Agent',
     resizable: true,
     webPreferences: {
-      preload: resolve(process.cwd(), 'src', 'remote', 'electron', 'preload.cjs'),
+      preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
     },
   })
 
-  const htmlFile = chatMode ? 'chat.html' : 'index.html'
-  const htmlPath = resolve(process.cwd(), 'src', 'remote', 'electron', 'renderer', htmlFile)
-  mainWindow.loadFile(htmlPath)
+  mainWindow.loadFile(htmlPath).catch((err) => {
+    console.error(`[electron] loadFile failed: ${err.message}`)
+  })
+
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc) => {
+    console.error(`[electron] did-fail-load: ${code} ${desc}`)
+  })
 
   mainWindow.on('closed', () => {
     mainWindow = null
@@ -302,12 +326,16 @@ function getCliArg(name: string): string | undefined {
 
 // --- App lifecycle ---
 
+console.error(`[electron] starting... argv=${process.argv.join(' ')}`)
+
 app.whenReady().then(() => {
+  console.error('[electron] app ready, creating window...')
   createWindow()
 
   // Auto-connect if --url and --code provided (from /pair chat command)
   const cliUrl = getCliArg('url')
   const cliCode = getCliArg('code')
+  console.error(`[electron] cli: url=${cliUrl ?? 'none'} code=${cliCode ?? 'none'} chat=${isChatMode()}`)
   if (isChatMode() && cliUrl && cliCode) {
     chatRelayUrl = cliUrl
     chatCode = cliCode
@@ -316,9 +344,13 @@ app.whenReady().then(() => {
     // Small delay so renderer is ready to receive IPC events
     setTimeout(() => connectChat(cliUrl, cliCode), 100)
   }
+}).catch((err) => {
+  console.error(`[electron] app.whenReady() failed: ${err.message}`)
+  process.exit(1)
 })
 
 app.on('window-all-closed', () => {
+  console.error('[electron] all windows closed, quitting.')
   disconnect()
   disconnectChat()
   app.quit()
