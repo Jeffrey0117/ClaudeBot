@@ -31,7 +31,7 @@ import type {
   ChatMessage,
   ChatCallback,
 } from './protocol.js'
-import { getOrCreateVirtualChat } from './virtual-chat-store.js'
+import { getOrCreateVirtualChat, isCodeUsedByVirtualChat } from './virtual-chat-store.js'
 import { registerVirtualChat, unregisterVirtualChat } from './telegram-proxy.js'
 import { handleElectronChatMessage, handleElectronChatCallback } from './electron-chat-bridge.js'
 import { setUserProject } from '../bot/state.js'
@@ -88,7 +88,11 @@ function isRateLimited(ip: string): boolean {
 
 function handleAgentRegister(ws: WebSocket, code: string, ip: string): void {
   const session = findByCode(code)
-  if (!session) {
+
+  // Allow registration if code is in pairing-store OR used by an Electron virtual chat.
+  // Electron chat embeds an agent, but its code can become stale when /pair re-runs
+  // (pairing-store deletes old codes). The virtual-chat-store retains the code.
+  if (!session && !isCodeUsedByVirtualChat(code)) {
     // Only rate-limit INVALID codes — valid reconnects should always work
     if (isRateLimited(ip)) {
       send(ws, { type: 'error', error: 'Too many attempts. Try again later.' })
@@ -108,7 +112,10 @@ function handleAgentRegister(ws: WebSocket, code: string, ip: string): void {
 
   agents.set(code, { ws, code, connectedAt: Date.now() })
 
-  markConnected(code, 'remote agent')
+  // Only mark connected in pairing-store if the code exists there
+  if (session) {
+    markConnected(code, 'remote agent')
+  }
 
   send(ws, { type: 'agent_registered' })
   console.log(`[relay] Agent registered: code=${code} from=${ip}`)
@@ -349,7 +356,9 @@ export function startRelayServer(port: number): void {
 
     function handleElectronChatRegister(chatWs: WebSocket, code: string, clientId: string, chatIp: string): void {
       const session = findByCode(code)
-      if (!session) {
+      // Allow reconnection if code exists in pairing-store OR is a known Electron code
+      // (pairing-store codes get recycled on /pair re-run, but virtual-chat-store retains them)
+      if (!session && !isCodeUsedByVirtualChat(code)) {
         if (isRateLimited(chatIp)) {
           send(chatWs, { type: 'error', error: 'Too many attempts. Try again later.' })
           chatWs.close()

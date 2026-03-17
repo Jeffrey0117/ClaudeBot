@@ -132,9 +132,10 @@ export function runClaude(options: RunOptions): void {
     parts.push(pinnedContext)
   }
 
-  // Inject remote pairing context — for paired Telegram users AND virtual Electron chats
-  if (env.REMOTE_ENABLED && options.chatId) {
-    const pairing = getPairing(options.chatId, options.threadId)
+  // Inject remote pairing context — Telegram users need REMOTE_ENABLED,
+  // but Electron virtual chats are ALWAYS remote by definition
+  if (options.chatId) {
+    const pairing = env.REMOTE_ENABLED ? getPairing(options.chatId, options.threadId) : null
     const isRemote = pairing?.connected === true || isVirtualChat(options.chatId)
     if (isRemote) {
       parts.push(
@@ -243,8 +244,9 @@ export function runClaude(options: RunOptions): void {
   }
 
   // Determine if this is a remote session (paired Telegram user OR virtual Electron chat)
-  const isRemoteSession = env.REMOTE_ENABLED && options.chatId && (
-    getPairing(options.chatId, options.threadId)?.connected === true ||
+  // Virtual Electron chats are ALWAYS remote — no REMOTE_ENABLED gate needed
+  const isRemoteSession = options.chatId && (
+    (env.REMOTE_ENABLED && getPairing(options.chatId, options.threadId)?.connected === true) ||
     isVirtualChat(options.chatId)
   )
 

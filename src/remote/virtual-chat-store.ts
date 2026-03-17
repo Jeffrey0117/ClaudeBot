@@ -107,3 +107,9 @@ export function getVirtualChatPairingCode(chatId: number): string | null {
   }
   return null
 }
+
+/** Check if a pairing code is referenced by any virtual chat (Electron embedded agent). */
+export function isCodeUsedByVirtualChat(code: string): boolean {
+  const data = store.load()
+  return Object.values(data).some((entry) => entry.pairingCode === code)
+}

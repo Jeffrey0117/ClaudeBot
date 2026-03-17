@@ -358,7 +358,7 @@ function getParam(name: string): string | undefined {
 
 elog(`[electron] starting... argv=${process.argv.join(' ')}`)
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   elog('[electron] app ready, creating window...')
   createWindow()
 
@@ -371,8 +371,19 @@ app.whenReady().then(() => {
     chatCode = cliCode
     chatShouldReconnect = true
     chatClientMsgId = 1
+
+    // Chat mode also needs agent connection for remote tool execution.
+    // Without this, Claude has no remote_* tools and can't operate on this machine.
+    const { createToolDispatcher } = await import('../tool-handlers.js')
+    toolDispatcher = createToolDispatcher(process.cwd())
+    shouldReconnect = true
+    elog('[electron] chat mode: also starting agent for tool execution')
+
     // Small delay so renderer is ready to receive IPC events
-    setTimeout(() => connectChat(cliUrl, cliCode), 100)
+    setTimeout(() => {
+      connectChat(cliUrl, cliCode)
+      connectToRelay(cliUrl, cliCode)
+    }, 100)
   }
 }).catch((err) => {
   elog(`[electron] app.whenReady() failed: ${err.message}`)
