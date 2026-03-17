@@ -289,13 +289,20 @@ function isChatMode(): boolean {
   return process.argv.includes('--chat')
 }
 
+/** Resolve an asset file: try __dirname first (dist/), fall back to src/ (dev) */
+function resolveAsset(...parts: string[]): string {
+  const distPath = resolve(__dirname, ...parts)
+  if (existsSync(distPath)) return distPath
+  return resolve(process.cwd(), 'src', 'remote', 'electron', ...parts)
+}
+
 function createWindow(): void {
   const chatMode = isChatMode()
   const cwd = process.cwd()
 
-  const preloadPath = resolve(cwd, 'src', 'remote', 'electron', 'preload.cjs')
+  const preloadPath = resolveAsset('preload.cjs')
   const htmlFile = chatMode ? 'chat.html' : 'index.html'
-  const htmlPath = resolve(cwd, 'src', 'remote', 'electron', 'renderer', htmlFile)
+  const htmlPath = resolveAsset('renderer', htmlFile)
 
   elog(`[electron] mode=${chatMode ? 'chat' : 'agent'} cwd=${cwd}`)
   elog(`[electron] preload=${preloadPath} exists=${existsSync(preloadPath)}`)
