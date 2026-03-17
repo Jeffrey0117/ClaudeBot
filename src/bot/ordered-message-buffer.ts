@@ -112,11 +112,11 @@ function flushEntries(entries: readonly BufferEntry[]): void {
 
   const state = getUserState(chatId, threadId)
 
-  // Resolve project: local selection or remote pairing fallback
+  // Resolve project: local selection → remote pairing → general fallback
   const pairing = !state.selectedProject ? getPairing(chatId, threadId) : null
   const project = state.selectedProject
     ?? (pairing?.connected ? { name: 'remote', path: process.cwd() } : null)
-  if (!project) return
+    ?? { name: 'general', path: process.cwd() }
 
   // Allot gate: check quota for remote requests
   if (project.name === 'remote') {
@@ -267,7 +267,7 @@ export function addText(
   replyQuote: string,
 ): QueueStatus | null {
   const state = getUserState(chatId, threadId)
-  if (!state.selectedProject) return null
+  const project = state.selectedProject ?? { name: 'general', path: process.cwd() }
 
   const key = bufferKey(chatId, threadId)
   const buf = getOrCreate(key)
@@ -283,8 +283,6 @@ export function addText(
   })
 
   resetTimer(key, buf)
-
-  const project = state.selectedProject
   return {
     isProcessing: isProcessing(project.path),
     queueLength: getQueueLength(project.path),

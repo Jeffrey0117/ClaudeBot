@@ -17,7 +17,6 @@ import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { promisify } from 'node:util'
 import type { BotContext } from '../../types/context.js'
-import { getUserState } from '../state.js'
 import { transcribeAudio, isSherpaAvailable, PYTHON_EXE } from '../../asr/sherpa-client.js'
 import ffmpegPath from 'ffmpeg-static'
 import { env } from '../../config/env.js'
@@ -25,7 +24,6 @@ import { getAsrMode, consumeAsrMode } from '../asr-store.js'
 import { addVoice, getVoiceActive } from '../ordered-message-buffer.js'
 import { extractReplyQuote } from './reply-quote.js'
 import { telegramFetch } from '../../utils/telegram-fetch.js'
-import { getPairing } from '../../remote/pairing-store.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -228,11 +226,6 @@ export async function voiceHandler(ctx: BotContext): Promise<void> {
 
   console.error(`[voice] handler entered: chatId=${chatId}, asrMode=${asrMode}`)
 
-  if (!hasProjectOrAsrMode(chatId, threadId, asrMode)) {
-    await ctx.reply('用 /projects 選擇專案，或 /chat 進入通用對話模式。')
-    return
-  }
-
   // ASR-only mode — bypass buffer, process directly
   if (asrMode !== 'off') {
     const ackMsg = await ctx.reply('🎙️ 處理中...')
@@ -246,8 +239,7 @@ export async function voiceHandler(ctx: BotContext): Promise<void> {
   }
 
   // Normal mode — register in ordered buffer, then process in background
-  const state = getUserState(chatId, threadId)
-  if (!state.selectedProject && !getPairing(chatId, threadId)?.connected) return
+  // (no project = general mode fallback, handled by buffer flush)
 
   const replyQuote = await extractReplyQuote(ctx)
 
@@ -266,17 +258,6 @@ export async function voiceHandler(ctx: BotContext): Promise<void> {
   ).catch((err) => {
     console.error('[voice] background error:', err)
   })
-}
-
-/** Quick check: ASR mode on, or selected project, or active remote pairing. */
-function hasProjectOrAsrMode(
-  chatId: number, threadId: number | undefined, asrMode: string,
-): boolean {
-  if (asrMode !== 'off') return true
-  const state = getUserState(chatId, threadId)
-  if (state.selectedProject) return true
-  const pairing = getPairing(chatId, threadId)
-  return pairing?.connected === true
 }
 
 /** ASR-only mode: transcribe and reply directly, no buffer. */

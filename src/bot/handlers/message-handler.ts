@@ -224,20 +224,9 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
     return
   }
 
-  // No project selected — bypass buffer, show help
-  if (!state.selectedProject) {
-    await ctx.reply(
-      '*ClaudeBot* — Claude Code 遙端控制\n\n'
-      + '📂 /projects — 選擇專案來操作程式碼\n'
-      + '💬 /chat — 通用對話模式\n'
-      + '⚡ `@chat 你的問題` — 快速提問\n'
-      + '❓ /help — 查看所有指令',
-      { parse_mode: 'Markdown' }
-    )
-    return
-  }
-
-  const project = state.selectedProject
+  // No project selected — auto-enter general mode
+  const project: ProjectInfo = state.selectedProject
+    ?? { name: 'general', path: process.cwd() }
 
   // Steer mode: message starts with "!" to cancel current and replace
   if (text.startsWith('!') && isProcessing(project.path)) {
