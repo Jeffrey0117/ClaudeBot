@@ -7,6 +7,7 @@ import { getAISessionId } from '../../ai/session-store.js'
 import { enqueue, isProcessing } from '../../claude/queue.js'
 import { cancelAnyRunning } from '../../ai/registry.js'
 import { transcribeVoiceFile } from './voice-handler.js'
+import { extractReplyQuote } from './reply-quote.js'
 import { scanProjects, resolveWorktreePath } from '../../config/projects.js'
 import { updateBotBio, pinProjectStatus } from '../bio-updater.js'
 import { recordActivity } from '../../plugins/stats/activity-logger.js'
@@ -63,31 +64,7 @@ function extractMentionText(ctx: BotContext, rawText: string): string | null {
   return (before + after).trim()
 }
 
-async function extractReplyQuote(ctx: BotContext): Promise<string> {
-  const reply = ctx.message && 'reply_to_message' in ctx.message
-    ? ctx.message.reply_to_message
-    : undefined
-  if (!reply) return ''
-
-  // Text or caption
-  const replyText = reply && 'text' in reply ? reply.text : ''
-  const caption = reply && 'caption' in reply ? reply.caption : ''
-  const textContent = replyText || caption || ''
-
-  if (textContent) {
-    return `> [引用訊息]\n> ${textContent.split('\n').join('\n> ')}\n\n`
-  }
-
-  // Voice message — transcribe it
-  if ('voice' in reply && reply.voice) {
-    const voiceResult = await transcribeVoiceFile(reply.voice.file_id, ctx.telegram)
-    if (voiceResult.text) {
-      return `> [引用語音]\n> ${voiceResult.text.split('\n').join('\n> ')}\n\n`
-    }
-  }
-
-  return ''
-}
+// extractReplyQuote moved to reply-quote.ts to avoid circular imports
 
 /**
  * Detect if user's message mentions a known project name.
@@ -143,12 +120,16 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
   if (chatMatch) {
     const chatPrompt = chatMatch[1].replace(/^\(|\)$/g, '').trim()
     if (chatPrompt) {
-      const generalProject = { name: 'general', path: process.cwd() }
-      const sessionId = getAISessionId(resolveBackend(state.ai.backend), generalProject.path)
+      // Use remote project if paired, otherwise general
+      const chatPairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId) : null
+      const chatProject = chatPairing?.connected
+        ? { name: 'remote', path: process.cwd() }
+        : { name: 'general', path: process.cwd() }
+      const sessionId = getAISessionId(resolveBackend(state.ai.backend), chatProject.path)
       enqueue({
         chatId,
         prompt: replyQuote + chatPrompt,
-        project: generalProject,
+        project: chatProject,
         ai: state.ai,
         sessionId,
         imagePaths: [],
@@ -157,9 +138,9 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
     }
   }
 
-  // Remote pairing active — bypass project selection, use CWD as project
+  // Remote pairing active — takes priority over local project selection
   const pairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId) : null
-  if (!state.selectedProject && pairing?.connected) {
+  if (pairing?.connected) {
     // Allot gate: check quota before enqueue (plugin may not be loaded)
     const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
     if (allotMod?.tryReserve) {
@@ -179,6 +160,30 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
     }
 
     const remoteProject = { name: 'remote', path: process.cwd() }
+
+    // Steer mode: "!" prefix cancels current remote process and replaces
+    if (text.startsWith('!') && isProcessing(remoteProject.path)) {
+      const steerText = text.slice(1).trim()
+      if (!steerText) {
+        await ctx.reply('用法: !<訊息> 取消目前並傳送新提示')
+        return
+      }
+      clearBuffer(chatId, threadId)
+      cancelAnyRunning(remoteProject.path)
+      const sessionId = getAISessionId(resolveBackend(state.ai.backend), remoteProject.path)
+      enqueue({
+        chatId,
+        threadId,
+        prompt: replyQuote + steerText,
+        project: remoteProject,
+        ai: state.ai,
+        sessionId,
+        imagePaths: [],
+      })
+      await ctx.reply('🔄 [remote] 已轉向 — 取消目前，處理新提示')
+      return
+    }
+
     const sessionId = getAISessionId(resolveBackend(state.ai.backend), remoteProject.path)
     enqueue({
       chatId,

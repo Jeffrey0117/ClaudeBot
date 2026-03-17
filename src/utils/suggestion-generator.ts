@@ -6,7 +6,7 @@ function resolveClaudeCli(): { cmd: string; prefix: readonly string[] } {
     return { cmd: 'claude', prefix: [] }
   }
   try {
-    const cmdPath = execSync('where claude.cmd', { encoding: 'utf-8' }).trim().split('\n')[0].trim()
+    const cmdPath = execSync('where claude.cmd', { encoding: 'utf-8', windowsHide: true }).trim().split('\n')[0].trim()
     const dir = path.dirname(cmdPath)
     const cliJs = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js')
     return { cmd: process.execPath, prefix: [cliJs] }

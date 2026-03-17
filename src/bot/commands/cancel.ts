@@ -1,13 +1,21 @@
 import type { BotContext } from '../../types/context.js'
 import { cancelAnyRunning, isAnyRunning } from '../../ai/registry.js'
 import { getUserState } from '../state.js'
+import { getPairing } from '../../remote/pairing-store.js'
+import { env } from '../../config/env.js'
 
 export async function cancelCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
   if (!chatId) return
 
-  const state = getUserState(chatId)
-  const project = state.selectedProject
+  const threadId = ctx.message?.message_thread_id
+  const state = getUserState(chatId, threadId)
+
+  // Remote pairing uses process.cwd() as project path (same as message-handler.ts)
+  const pairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId) : null
+  const project = pairing?.connected
+    ? { name: 'remote', path: process.cwd() }
+    : state.selectedProject
 
   if (project && isAnyRunning(project.path)) {
     const cancelled = cancelAnyRunning(project.path)

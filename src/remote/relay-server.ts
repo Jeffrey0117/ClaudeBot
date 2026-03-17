@@ -280,8 +280,23 @@ export function startRelayServer(port: number): void {
         if (current?.ws === ws) {
           agents.delete(assignedCode)
           markDisconnected(assignedCode)
-          // Clean up request origins for this code
-          requestOrigins.delete(assignedCode)
+
+          // Reject all pending proxy requests for this agent
+          const origins = requestOrigins.get(assignedCode)
+          if (origins) {
+            for (const [id, proxyWs] of origins) {
+              send(proxyWs, { type: 'tool_error', id, error: 'Agent disconnected' })
+            }
+            requestOrigins.delete(assignedCode)
+          }
+
+          // Reject all pending bot-initiated calls for this agent
+          for (const [id, pending] of botPendingCalls) {
+            clearTimeout(pending.timer)
+            pending.resolve('Error: Agent disconnected')
+            botPendingCalls.delete(id)
+          }
+
           console.log(`[relay] Agent disconnected: code=${assignedCode}`)
         }
       }

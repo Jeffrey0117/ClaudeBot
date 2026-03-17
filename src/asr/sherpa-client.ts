@@ -20,7 +20,7 @@ const TIMEOUT_MS = 60_000
 /** Try running a command — returns true if it exits successfully. */
 function canRun(cmd: string, args: readonly string[]): boolean {
   try {
-    execSync(`"${cmd}" ${args.join(' ')}`, { stdio: 'pipe', timeout: 5_000 })
+    execSync(`"${cmd}" ${args.join(' ')}`, { stdio: 'pipe', timeout: 5_000, windowsHide: true })
     return true
   } catch {
     return false
@@ -150,7 +150,7 @@ function resolveServerPath(): string {
   try {
     execSync(
       'git clone https://github.com/Jeffrey0117/Sherpa_ASR.git',
-      { cwd: join(process.cwd(), '..'), stdio: 'pipe' },
+      { cwd: join(process.cwd(), '..'), stdio: 'pipe', windowsHide: true },
     )
     const clonedPath = join(cloneDir, 'sherpa_server.py')
     if (existsSync(clonedPath)) return clonedPath
@@ -175,6 +175,7 @@ function ensureProcess(): void {
     shell: false,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+    windowsHide: true,
   })
 
   proc.on('error', (err) => {

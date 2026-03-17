@@ -2,6 +2,8 @@ import type { BotContext } from '../../types/context.js'
 import { getContext, clearContext } from '../context-digest-store.js'
 import { reloadAllSpecs } from '../../utils/system-prompt.js'
 import { getUserState } from '../state.js'
+import { getPairing } from '../../remote/pairing-store.js'
+import { env } from '../../config/env.js'
 
 export async function ctxCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -10,7 +12,13 @@ export async function ctxCommand(ctx: BotContext): Promise<void> {
   const text = ctx.message && 'text' in ctx.message ? ctx.message.text : ''
   const args = text.replace(/^\/ctx\s*/i, '').trim().toLowerCase()
 
-  const project = getUserState(chatId).selectedProject
+  const threadId = ctx.message?.message_thread_id
+  const state = getUserState(chatId, threadId)
+
+  const pairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId) : null
+  const project = pairing?.connected
+    ? { name: 'remote', path: process.cwd() }
+    : state.selectedProject
 
   // /ctx reload — hot-reload all spec files
   if (args === 'reload') {

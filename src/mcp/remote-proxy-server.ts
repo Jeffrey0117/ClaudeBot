@@ -261,6 +261,96 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['path', 'base64'],
       },
     },
+    {
+      name: 'ab_open',
+      description: 'Navigate to a URL using agent-browser on the remote computer',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          url: { type: 'string', description: 'URL to navigate to' },
+        },
+        required: ['url'],
+      },
+    },
+    {
+      name: 'ab_snapshot',
+      description:
+        'Get accessibility tree snapshot of the current page on the remote browser (interactive elements with role, name, and ref)',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
+    {
+      name: 'ab_click',
+      description: 'Click an element by its ref attribute on the remote browser (e.g. "e5" from snapshot)',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          ref: { type: 'string', description: 'Element ref from snapshot (e.g. "e5")' },
+        },
+        required: ['ref'],
+      },
+    },
+    {
+      name: 'ab_fill',
+      description: 'Clear and fill an input field by ref on the remote browser',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          ref: { type: 'string', description: 'Element ref from snapshot (e.g. "e5")' },
+          text: { type: 'string', description: 'Text to fill into the field' },
+        },
+        required: ['ref', 'text'],
+      },
+    },
+    {
+      name: 'ab_press',
+      description: 'Press a key on the remote browser (Enter, Escape, Tab, etc.)',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          key: { type: 'string', description: 'Key to press (e.g. "Enter", "Escape", "Tab")' },
+        },
+        required: ['key'],
+      },
+    },
+    {
+      name: 'ab_screenshot',
+      description: 'Take a PNG screenshot of the current page on the remote browser',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
+    {
+      name: 'ab_back',
+      description: 'Go back in browser history on the remote browser',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
+    {
+      name: 'ab_get_url',
+      description: 'Get the current page URL from the remote browser',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
+    {
+      name: 'ab_connect_browser',
+      description:
+        'Connect agent-browser to the user\'s Chrome (with login state/cookies). ' +
+        'Kills Chrome and restarts it with CDP debugging port. ' +
+        'MUST call this before operating on sites that require login (Gmail, GitHub, etc.). ' +
+        'After this, all ab_* tools will control the user\'s actual Chrome.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {},
+      },
+    },
   ],
 }))
 
@@ -268,13 +358,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params
   const a = (args ?? {}) as Record<string, unknown>
 
-  // Use longer timeout for execute_command if custom timeout specified
+  // Timeout: browser ops get 45s, execute_command gets custom, others default
   const customTimeout = name === 'remote_execute_command' && a.timeout
     ? Math.min(Number(a.timeout) + 5_000, 305_000) // agent timeout + 5s buffer
+    : name === 'ab_connect_browser' ? 30_000
+    : name.startsWith('ab_') ? 75_000 // 60s agent-browser + 15s relay buffer
     : undefined
 
   try {
     const result = await forwardToolCall(name, a, customTimeout)
+
+    // ab_screenshot returns JSON image envelope from N-side
+    if (name === 'ab_screenshot') {
+      try {
+        const parsed = JSON.parse(result) as { type?: string; base64?: string }
+        if (parsed.type === 'image' && parsed.base64) {
+          return { content: [{ type: 'image', data: parsed.base64, mimeType: 'image/png' }] }
+        }
+      } catch { /* fall through to text */ }
+    }
+
     return { content: [{ type: 'text', text: result }] }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)

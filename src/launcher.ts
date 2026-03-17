@@ -49,7 +49,7 @@ try {
     if (process.platform === 'win32') {
       // taskkill /T kills the entire process tree (launcher + all child bots)
       try {
-        execSync(`taskkill /F /T /PID ${oldPid}`, { stdio: 'ignore' })
+        execSync(`taskkill /F /T /PID ${oldPid}`, { stdio: 'ignore', windowsHide: true })
       } catch { /* already dead */ }
     } else {
       process.kill(oldPid, 'SIGTERM')
@@ -74,10 +74,10 @@ let sleepGuard: ChildProcess | null = null
 if (process.env.PREVENT_SLEEP === 'true' && process.platform === 'win32') {
   // Disable standby & hibernate via powercfg for BOTH AC and DC (best-effort, non-fatal)
   try {
-    execSync('powercfg /change standby-timeout-ac 0', { stdio: 'ignore' })
-    execSync('powercfg /change standby-timeout-dc 0', { stdio: 'ignore' })
-    execSync('powercfg /change hibernate-timeout-ac 0', { stdio: 'ignore' })
-    execSync('powercfg /change hibernate-timeout-dc 0', { stdio: 'ignore' })
+    execSync('powercfg /change standby-timeout-ac 0', { stdio: 'ignore', windowsHide: true })
+    execSync('powercfg /change standby-timeout-dc 0', { stdio: 'ignore', windowsHide: true })
+    execSync('powercfg /change hibernate-timeout-ac 0', { stdio: 'ignore', windowsHide: true })
+    execSync('powercfg /change hibernate-timeout-dc 0', { stdio: 'ignore', windowsHide: true })
     console.log('[sleep-guard] powercfg: disabled AC+DC standby + hibernate timeouts')
   } catch {
     console.warn('[sleep-guard] powercfg failed (non-fatal) — continuing with API guard only')
@@ -87,7 +87,7 @@ if (process.env.PREVENT_SLEEP === 'true' && process.platform === 'win32') {
   try {
     execSync(
       'powershell -NoProfile -Command "Get-NetAdapter -Physical | Where-Object Status -eq \'Up\' | ForEach-Object { Set-NetAdapterPowerManagement -Name $_.Name -WakeOnMagicPacket Disabled -WakeOnPattern Disabled -DeviceSleepOnDisconnect Disabled -ErrorAction SilentlyContinue; powercfg /setdcvalueindex SCHEME_CURRENT 19cbb8fa-5279-450e-9fac-8a3d5fedd0c1 12bbebe6-58d6-4636-95bb-3217ef867c1a 0; powercfg /setacvalueindex SCHEME_CURRENT 19cbb8fa-5279-450e-9fac-8a3d5fedd0c1 12bbebe6-58d6-4636-95bb-3217ef867c1a 0; powercfg /setactive SCHEME_CURRENT }"',
-      { stdio: 'ignore' },
+      { stdio: 'ignore', windowsHide: true },
     )
     console.log('[sleep-guard] Wi-Fi adapter power management: disabled')
   } catch {
@@ -120,6 +120,7 @@ while ($true) {
   function spawnSleepGuard(): void {
     sleepGuard = spawn('powershell', ['-NoProfile', '-Command', psScript], {
       stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
     })
 
     sleepGuard.stdout?.on('data', (chunk: Buffer) => {
@@ -196,6 +197,7 @@ function spawnBot(envFile: string): void {
     cwd: root,
     shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   })
 
   child.on('error', (err) => {
