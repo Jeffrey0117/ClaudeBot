@@ -14,36 +14,61 @@ body {
   overflow: hidden;
 }
 
-/* --- Header --- */
+/* --- Titlebar --- */
 
-.header {
+.titlebar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 20px;
+  height: 36px;
   background: #f5f5f0;
   border-bottom: 3px solid #000;
   flex-shrink: 0;
+  -webkit-app-region: drag;
 }
 
-.header h1 {
-  font-size: 18px;
+.titlebar-drag {
+  flex: 1;
+  padding-left: 12px;
+}
+
+.titlebar-title {
+  font-size: 12px;
   font-weight: 800;
-  color: #000;
-  letter-spacing: 1px;
-  text-transform: uppercase;
+  letter-spacing: 2px;
 }
 
-.header-right {
+.titlebar-status {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 11px;
+  gap: 6px;
+  font-size: 10px;
   color: #999;
+  margin-right: 8px;
   text-transform: uppercase;
   letter-spacing: 1px;
   font-weight: 700;
+  -webkit-app-region: no-drag;
 }
+
+.titlebar-controls {
+  display: flex;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.titlebar-btn:hover { background: #ddd; }
+.titlebar-btn.close:hover { background: #e81123; color: #fff; }
+.titlebar-btn.active { color: #0066cc; }
 
 .status-dot {
   width: 8px;
@@ -169,9 +194,10 @@ body {
   font-size: 13px;
   line-height: 1.6;
   word-wrap: break-word;
-  white-space: pre-wrap;
   font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
 }
+
+.bubble-row.user .bubble { white-space: pre-wrap; }
 
 .bubble-row.user .bubble {
   background: #000;
@@ -186,6 +212,90 @@ body {
   border: 3px solid #000;
   border-radius: 12px;
   border-bottom-left-radius: 2px;
+}
+
+/* --- Markdown in bubbles --- */
+
+.bubble h1, .bubble h2, .bubble h3 {
+  margin: 8px 0 4px;
+  line-height: 1.3;
+}
+
+.bubble h1 { font-size: 16px; }
+.bubble h2 { font-size: 14px; }
+.bubble h3 { font-size: 13px; }
+
+.bubble p { margin: 4px 0; }
+
+.bubble code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.bubble pre {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 10px 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 6px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.bubble pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.bubble ul, .bubble ol {
+  padding-left: 20px;
+  margin: 4px 0;
+}
+
+.bubble li { margin: 2px 0; }
+
+.bubble a {
+  color: #0066cc;
+  text-decoration: underline;
+}
+
+.bubble blockquote {
+  border-left: 3px solid #ccc;
+  padding-left: 10px;
+  margin: 6px 0;
+  color: #666;
+}
+
+.bubble table {
+  border-collapse: collapse;
+  margin: 6px 0;
+  font-size: 12px;
+}
+
+.bubble th, .bubble td {
+  border: 1px solid #ddd;
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.bubble th {
+  background: #f0f0f0;
+  font-weight: 700;
+}
+
+/* --- Media in bubbles --- */
+
+.bubble-media {
+  max-width: 100%;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-top: 6px;
+  display: block;
 }
 
 /* --- Buttons (inline keyboard) --- */
@@ -330,4 +440,66 @@ body {
 
 .messages::-webkit-scrollbar-thumb:hover {
   background: #999;
+}
+
+/* --- Compact Mode --- */
+
+body.compact .connect-panel,
+body.compact .typing-indicator { display: none !important; }
+
+body.compact .messages {
+  padding: 8px 12px;
+  gap: 6px;
+}
+
+body.compact .bubble { padding: 6px 10px; font-size: 12px; }
+
+body.compact .titlebar { border-bottom: none; }
+
+body.compact .input-bar {
+  border-top: 2px solid #000;
+  padding: 8px 12px;
+}
+
+body.compact .input-bar input { font-size: 12px; padding: 6px 10px; }
+
+/* --- Command Palette --- */
+
+.input-bar { position: relative; }
+
+.command-palette {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 2px solid #000;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.cmd-item {
+  padding: 8px 14px;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+}
+
+.cmd-item:hover, .cmd-item.active { background: #f0f0f0; }
+.cmd-item:first-child { border-radius: 6px 6px 0 0; }
+
+.cmd-name {
+  font-weight: 700;
+  color: #000;
+  min-width: 80px;
+}
+
+.cmd-desc {
+  color: #888;
+  font-size: 11px;
 }

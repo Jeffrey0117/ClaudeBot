@@ -81,7 +81,7 @@ function connect(): void {
 
   socket.on('open', () => {
     lastPing = Date.now()
-    const msg: AgentRegister = { type: 'agent_register', code: PAIRING_CODE }
+    const msg: AgentRegister = { type: 'agent_register', code: PAIRING_CODE, baseDir: BASE_DIR }
     socket.send(JSON.stringify(msg))
   })
 

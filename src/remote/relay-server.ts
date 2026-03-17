@@ -40,6 +40,7 @@ interface PairedAgent {
   readonly ws: WebSocket
   readonly code: string
   readonly connectedAt: number
+  readonly baseDir?: string
 }
 
 interface PairedProxy {
@@ -86,7 +87,7 @@ function isRateLimited(ip: string): boolean {
   return entry.attempts > MAX_ATTEMPTS_PER_MINUTE
 }
 
-function handleAgentRegister(ws: WebSocket, code: string, ip: string): void {
+function handleAgentRegister(ws: WebSocket, code: string, ip: string, baseDir?: string): void {
   const session = findByCode(code)
 
   // Allow registration if code is in pairing-store OR used by an Electron virtual chat.
@@ -110,7 +111,7 @@ function handleAgentRegister(ws: WebSocket, code: string, ip: string): void {
     prev.ws.close()
   }
 
-  agents.set(code, { ws, code, connectedAt: Date.now() })
+  agents.set(code, { ws, code, connectedAt: Date.now(), baseDir })
 
   // Only mark connected in pairing-store if the code exists there
   if (session) {
@@ -257,6 +258,11 @@ function tryRouteBotResult(msg: ToolCallResult | ToolCallError): boolean {
   return true
 }
 
+/** Get the base directory reported by a connected agent. */
+export function getAgentBaseDir(code: string): string | undefined {
+  return agents.get(code)?.baseDir
+}
+
 /** Get the public URL for remote agents (tunnel or manual override). */
 export { getPublicRelayUrl } from './tunnel.js'
 
@@ -314,7 +320,7 @@ export function startRelayServer(port: number): void {
         if (msg.type === 'agent_register') {
           role = 'agent'
           assignedCode = msg.code
-          handleAgentRegister(ws, msg.code, ip)
+          handleAgentRegister(ws, msg.code, ip, (msg as import('./protocol.js').AgentRegister).baseDir)
           return
         }
         if (msg.type === 'proxy_connect') {

@@ -87,7 +87,7 @@ function connectToRelay(relayUrl: string, code: string): void {
   const socket = new WebSocket(relayUrl)
 
   socket.on('open', () => {
-    const msg: AgentRegister = { type: 'agent_register', code }
+    const msg: AgentRegister = { type: 'agent_register', code, baseDir: process.cwd() }
     socket.send(JSON.stringify(msg))
   })
 
@@ -289,6 +289,31 @@ ipcMain.handle('send-callback', (_event, data: string, msgId: number) => {
   }))
 })
 
+// --- Window control IPC handlers ---
+
+ipcMain.handle('window-minimize', () => mainWindow?.minimize())
+ipcMain.handle('window-close', () => mainWindow?.close())
+
+ipcMain.handle('toggle-always-on-top', () => {
+  if (!mainWindow) return false
+  const next = !mainWindow.isAlwaysOnTop()
+  mainWindow.setAlwaysOnTop(next)
+  return next
+})
+
+let isCompact = false
+const FULL_SIZE = { width: 420, height: 640 }
+const COMPACT_SIZE = { width: 340, height: 280 }
+
+ipcMain.handle('toggle-compact', () => {
+  if (!mainWindow) return false
+  isCompact = !isCompact
+  const size = isCompact ? COMPACT_SIZE : FULL_SIZE
+  mainWindow.setSize(size.width, size.height)
+  mainWindow.setResizable(!isCompact)
+  return isCompact
+})
+
 // --- Window ---
 
 function isChatMode(): boolean {
@@ -319,6 +344,7 @@ function createWindow(): void {
     height: chatMode ? 640 : 500,
     title: chatMode ? 'ClaudeBot Chat' : 'ClaudeBot Remote Agent',
     resizable: true,
+    ...(chatMode ? { frame: false, titleBarStyle: 'hidden' as const } : {}),
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

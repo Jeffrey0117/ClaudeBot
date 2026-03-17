@@ -2,18 +2,24 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:">
   <title>ClaudeBot Chat</title>
   <link rel="stylesheet" href="chat.css">
 </head>
 <body>
-  <div class="header">
-    <div class="header-left">
-      <h1>ClaudeBot</h1>
+  <div class="titlebar">
+    <div class="titlebar-drag">
+      <span class="titlebar-title">CLAUDEBOT</span>
     </div>
-    <div class="header-right">
+    <div class="titlebar-status">
       <span class="status-dot disconnected" id="status-dot"></span>
       <span id="status-text">Disconnected</span>
+    </div>
+    <div class="titlebar-controls">
+      <button id="btn-pin" class="titlebar-btn" title="Always on Top">&#x1F4CC;</button>
+      <button id="btn-compact" class="titlebar-btn" title="Compact Mode">&#x25FB;</button>
+      <button id="btn-minimize" class="titlebar-btn">&#x2500;</button>
+      <button id="btn-close" class="titlebar-btn close">&#x2715;</button>
     </div>
   </div>
 
@@ -44,6 +50,8 @@
     </div>
   </div>
 
+  <script src="marked.min.js"></script>
+  <script src="purify.min.js"></script>
   <script src="chat-renderer.js"></script>
 </body>
 </html>

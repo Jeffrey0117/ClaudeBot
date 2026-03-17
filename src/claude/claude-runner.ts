@@ -11,7 +11,7 @@ import { buildContextInjection } from '../bot/context-digest-store.js'
 import { getSystemPrompt } from '../utils/system-prompt.js'
 import { env } from '../config/env.js'
 import { getPairing } from '../remote/pairing-store.js'
-import { getRelayPort } from '../remote/relay-server.js'
+import { getRelayPort, getAgentBaseDir } from '../remote/relay-server.js'
 import { generateRemoteMcpConfig, cleanupRemoteMcpConfig } from '../remote/mcp-config-generator.js'
 import { isVirtualChat, getVirtualChatPairingCode } from '../remote/virtual-chat-store.js'
 
@@ -138,8 +138,19 @@ export function runClaude(options: RunOptions): void {
     const pairing = env.REMOTE_ENABLED ? getPairing(options.chatId, options.threadId) : null
     const isRemote = pairing?.connected === true || isVirtualChat(options.chatId)
     if (isRemote) {
+      // Look up agent baseDir for remote prompt context
+      let remoteBaseDir: string | undefined
+      const pairingForBaseDir = env.REMOTE_ENABLED ? getPairing(options.chatId!, options.threadId) : null
+      if (pairingForBaseDir?.connected) {
+        remoteBaseDir = getAgentBaseDir(pairingForBaseDir.code)
+      } else if (isVirtualChat(options.chatId!)) {
+        const vcCode = getVirtualChatPairingCode(options.chatId!)
+        if (vcCode) remoteBaseDir = getAgentBaseDir(vcCode)
+      }
+
       parts.push(
         `[遠端配對模式]\n` +
+        (remoteBaseDir ? `遠端工作目錄: ${remoteBaseDir}\n` : '') +
         `你已配對一台遠端電腦，所有操作都針對遠端。使用 remote_* MCP 工具：\n` +
         `\n` +
         `檔案操作：\n` +

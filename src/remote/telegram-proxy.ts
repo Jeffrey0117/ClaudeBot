@@ -155,17 +155,50 @@ export function createTelegramProxy(
         }
       }
 
-      // sendPhoto, sendDocument — not yet supported for Electron chat
-      if (prop === 'sendPhoto' || prop === 'sendDocument' || prop === 'sendVideo' || prop === 'sendAudio') {
-        return (chatId: number, ...args: unknown[]) => {
-          if (!isVirtualChat(chatId)) return original.call(target, chatId, ...args)
-          // Send a text placeholder for unsupported media types
+      // sendPhoto — extract image URL or base64 for Electron rendering
+      if (prop === 'sendPhoto') {
+        return (chatId: number, photo: unknown, extra?: Record<string, unknown>) => {
+          if (!isVirtualChat(chatId)) return original.call(target, chatId, photo, extra)
+
           const messageId = allocateMsgId(chatId)
           if (messageId === 0) return Promise.resolve({ message_id: 0 })
+
+          let mediaUrl: string | undefined
+          if (typeof photo === 'string') {
+            // URL string
+            mediaUrl = photo
+          } else if (Buffer.isBuffer(photo)) {
+            mediaUrl = `data:image/png;base64,${photo.toString('base64')}`
+          } else if (photo && typeof photo === 'object' && 'source' in photo) {
+            const src = (photo as { source: unknown }).source
+            if (Buffer.isBuffer(src)) {
+              mediaUrl = `data:image/png;base64,${src.toString('base64')}`
+            }
+          }
+
+          const caption = typeof extra?.caption === 'string' ? extra.caption : ''
           const msg: ChatResponse = {
             type: 'chat_response',
             messageId,
-            text: '[媒體檔案暫不支援在桌面客戶端顯示]',
+            text: caption || '',
+            ...(mediaUrl ? { mediaUrl, mediaType: 'image' as const } : {}),
+          }
+          sendToClient(chatId, msg)
+          return Promise.resolve({ message_id: messageId })
+        }
+      }
+
+      // sendDocument, sendVideo, sendAudio — text placeholder (files may be too large)
+      if (prop === 'sendDocument' || prop === 'sendVideo' || prop === 'sendAudio') {
+        return (chatId: number, ...args: unknown[]) => {
+          if (!isVirtualChat(chatId)) return original.call(target, chatId, ...args)
+          const messageId = allocateMsgId(chatId)
+          if (messageId === 0) return Promise.resolve({ message_id: 0 })
+          const mediaName = prop === 'sendDocument' ? '文件' : prop === 'sendVideo' ? '影片' : '音訊'
+          const msg: ChatResponse = {
+            type: 'chat_response',
+            messageId,
+            text: `[${mediaName}檔案暫不支援在桌面客戶端顯示]`,
           }
           sendToClient(chatId, msg)
           return Promise.resolve({ message_id: messageId })

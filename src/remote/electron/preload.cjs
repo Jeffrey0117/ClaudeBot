@@ -59,4 +59,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('chat:status', handler)
     return () => ipcRenderer.removeListener('chat:status', handler)
   },
+
+  // --- Window controls ---
+  minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
+  closeWindow: () => ipcRenderer.invoke('window-close'),
+  toggleAlwaysOnTop: () => ipcRenderer.invoke('toggle-always-on-top'),
+  toggleCompact: () => ipcRenderer.invoke('toggle-compact'),
 })

@@ -27,6 +27,8 @@ export interface ChatResponse {
   readonly text: string
   readonly parseMode?: 'Markdown' | 'HTML'
   readonly buttons?: ReadonlyArray<ReadonlyArray<{ readonly text: string; readonly data: string }>>
+  readonly mediaUrl?: string
+  readonly mediaType?: 'image' | 'video' | 'audio' | 'document'
 }
 
 export interface ChatEdit {

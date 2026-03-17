@@ -24,3 +24,4 @@ claudebot-plugins/
 .backups/
 tmp-*
 test-*
+*.tsbuildinfo

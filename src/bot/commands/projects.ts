@@ -5,6 +5,7 @@ import { buildProjectKeyboard } from '../../telegram/keyboard-builder.js'
 import { isRemoteOnly } from '../../auth/auth-service.js'
 import { getPairing } from '../../remote/pairing-store.js'
 import { callAgentTool } from '../../remote/relay-server.js'
+import { isVirtualChat, getVirtualChatPairingCode } from '../../remote/virtual-chat-store.js'
 
 export async function projectsCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -14,13 +15,21 @@ export async function projectsCommand(ctx: BotContext): Promise<void> {
 
   // Remote-only users: list projects from their agent's base-dir
   if (isRemoteOnly(chatId)) {
-    const pairing = getPairing(chatId, threadId)
-    if (!pairing?.connected) {
+    let code: string | null = null
+
+    if (isVirtualChat(chatId)) {
+      code = getVirtualChatPairingCode(chatId)
+    } else {
+      const pairing = getPairing(chatId, threadId)
+      if (pairing?.connected) code = pairing.code
+    }
+
+    if (!code) {
       await ctx.reply('\u{26A0}\u{FE0F} \u{8ACB}\u{5148} /pair \u{9023}\u{7DDA}\u{4F60}\u{7684}\u{96FB}\u{8166}')
       return
     }
     try {
-      const result = await callAgentTool(pairing.code, 'remote_list_projects', {})
+      const result = await callAgentTool(code, 'remote_list_projects', {})
       const names: string[] = JSON.parse(result)
       if (names.length === 0) {
         await ctx.reply('\u{1F4C1} \u{627E}\u{4E0D}\u{5230}\u{5C08}\u{6848}\u{8CC7}\u{6599}\u{593E}')
