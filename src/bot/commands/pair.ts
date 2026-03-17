@@ -104,15 +104,21 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
     try {
       // Use dedicated spawn_detached tool — no shell escaping issues,
       // works on any OS, and the process outlives the agent command.
-      const electronArgs = JSON.stringify([
-        'electron', 'dist/remote/electron/main.cjs',
-        '--chat', '--url', wsUrl, '--code', chatCode,
-      ])
+      // On Windows, use node_modules/.bin/electron.cmd directly to avoid npx overhead.
+      const isWin = process.platform === 'win32'
+      const electronCmd = isWin
+        ? 'node_modules\\.bin\\electron.cmd'
+        : 'npx'
+      const electronArgs = JSON.stringify(
+        isWin
+          ? ['dist/remote/electron/main.cjs', '--chat', '--url', wsUrl, '--code', chatCode]
+          : ['electron', '--', 'dist/remote/electron/main.cjs', '--chat', '--url', wsUrl, '--code', chatCode],
+      )
 
       await remoteToolCall(
         existing.code,
         'remote_spawn_detached',
-        { command: 'npx', args: electronArgs },
+        { command: electronCmd, args: electronArgs },
         15_000,
       )
       await ctx.reply(
