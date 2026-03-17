@@ -105,7 +105,7 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
       // Use dedicated spawn_detached tool — no shell escaping issues,
       // works on any OS, and the process outlives the agent command.
       const electronArgs = JSON.stringify([
-        'electron', 'dist/remote/electron/main.js',
+        'electron', 'dist/remote/electron/main.cjs',
         '--chat', '--url', wsUrl, '--code', chatCode,
       ])
 
@@ -126,7 +126,7 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
         `❌ 自動啟動失敗: ${msg}\n\n` +
         `💡 手動啟動 — 在遠端 ClaudeBot 目錄貼上:\n` +
         '```\n' +
-        `npx electron dist/remote/electron/main.js --chat --url ${wsUrl} --code ${chatCode}\n` +
+        `npx electron dist/remote/electron/main.cjs --chat --url ${wsUrl} --code ${chatCode}\n` +
         '```',
         { parse_mode: 'Markdown' },
       )
@@ -138,7 +138,7 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
   const code = createPairingCode(chatId, threadId)
   const { url: wsUrl, isPublic } = getRelayUrl()
 
-  const electronCmd = `git pull && npm run build && npx electron dist/remote/electron/main.js --chat --url ${wsUrl} --code ${code}`
+  const electronCmd = `git pull && npm run build && npx electron dist/remote/electron/main.cjs --chat --url ${wsUrl} --code ${code}`
 
   const networkNote = isPublic
     ? '🌐 公開 URL — 跨網路可用'
