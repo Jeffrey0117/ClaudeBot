@@ -98,3 +98,12 @@ export function isVirtualChat(chatId: number): boolean {
   ensureLoaded()
   return virtualChatIds.has(chatId)
 }
+
+/** Look up the original agent pairing code for a virtual chatId. */
+export function getVirtualChatPairingCode(chatId: number): string | null {
+  const data = store.load()
+  for (const entry of Object.values(data)) {
+    if (entry.virtualChatId === chatId) return entry.pairingCode
+  }
+  return null
+}

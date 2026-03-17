@@ -96,7 +96,8 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
   // Check if remote agent is already connected — auto-launch Electron on remote
   const existing = getPairing(chatId, threadId)
   if (existing?.connected) {
-    const chatCode = createPairingCode(chatId, threadId)
+    // Reuse the agent's existing code — don't overwrite the pairing
+    const chatCode = existing.code
     const { url: wsUrl } = getRelayUrl()
 
     await ctx.reply('💬 正在遠端啟動桌面聊天客戶端...')
@@ -106,7 +107,7 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
       // IMPORTANT: Pass URL/code via env vars, NOT argv.
       // Chromium crashes when argv contains wss:// or https:// URLs.
       // "start "" /b" runs the command in background so remote_execute_command returns immediately
-      const launchCmd = `set CLAUDEBOT_URL=${wsUrl}&& set CLAUDEBOT_CODE=${chatCode}&& start "" /b node run-electron.cjs dist/remote/electron/main.cjs --chat`
+      const launchCmd = `start "" /b cmd /c "set CLAUDEBOT_URL=${wsUrl}&& set CLAUDEBOT_CODE=${chatCode}&& node run-electron.cjs dist/remote/electron/main.cjs --chat"`
 
       await remoteToolCall(
         existing.code,

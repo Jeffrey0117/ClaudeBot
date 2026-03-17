@@ -366,8 +366,8 @@ export function startRelayServer(port: number): void {
 
       registerVirtualChat(virtualChatId, chatWs, code)
 
-      // Auto-set to general chat mode so Electron user can chat immediately
-      setUserProject(virtualChatId, { name: 'general', path: process.cwd() })
+      // Auto-set to remote mode so Claude has remote tools (MCP) for the Electron user's machine
+      setUserProject(virtualChatId, { name: 'remote', path: process.cwd() })
 
       const resp: ElectronChatRegistered = {
         type: 'electron_chat_registered',
