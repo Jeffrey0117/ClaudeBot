@@ -159,10 +159,9 @@ export function markConnected(code: string, label: string): boolean {
   const updated = { ...session, connected: true, label }
   const pairings = { ...store.pairings, [key]: updated }
   writeStore({ pairings, codeIndex: store.codeIndex })
-  // Relay server only runs in main bot — fire callback for ALL pairings
-  // so the main bot sends Telegram notifications regardless of which bot created the pairing.
-  // sendMessage to unknown chatIds fails silently (.catch(() => {})).
   onConnectFn(updated, label)
+  // Send notification directly using stored botToken — bypass callback chain issues
+  sendPairingNotification(updated, label)
   return true
 }
 
@@ -175,6 +174,47 @@ export function markDisconnected(code: string, reason?: string): void {
   const pairings = { ...store.pairings, [key]: { ...session, connected: false } }
   writeStore({ pairings, codeIndex: store.codeIndex })
   onDisconnectFn(session, session.label, reason ?? '連線中斷')
+  // Send notification directly using stored botToken
+  sendDisconnectNotification(session, reason ?? '連線中斷')
+}
+
+/** Send connect/disconnect notifications using the pairing's stored botToken. */
+function sendPairingNotification(session: PairingSession, label: string): void {
+  const token = session.botToken
+  if (!token) {
+    console.error(`[pair-notify] no botToken for chatId=${session.chatId}, skipping notification`)
+    return
+  }
+  const botId = token.split(':')[0]
+  console.error(`[pair-notify] CONNECT chatId=${session.chatId} botId=${botId} label=${label}`)
+  fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: session.chatId,
+      text: `🔗 *遠端已連線* — ${label}\n_已自動切換到遠端模式，可以開始操作了_\n💡 _用 /projects 選擇遠端專案_`,
+      parse_mode: 'Markdown',
+    }),
+    signal: AbortSignal.timeout(5_000),
+  }).then((r) => {
+    if (!r.ok) console.error(`[pair-notify] Telegram API error: ${r.status}`)
+  }).catch((err) => {
+    console.error(`[pair-notify] fetch error: ${err instanceof Error ? err.message : err}`)
+  })
+}
+
+function sendDisconnectNotification(session: PairingSession, reason: string): void {
+  const token = session.botToken
+  if (!token) return
+  fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: session.chatId,
+      text: `🔌 遠端已斷開 — ${reason}`,
+    }),
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => {})
 }
 
 export function removePairing(

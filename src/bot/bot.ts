@@ -359,36 +359,10 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   // After restart, notify users who had active projects with a "Continue?" button
   scheduleRestartNotifications(bot)
 
-  // Notify Telegram when remote pairing connects/disconnects.
-  // Use session.botToken (raw HTTP) so notification comes from the bot that created the pairing,
-  // not the main bot running the relay server.
-  onPairingConnect((session, label) => {
-    // Auto-switch to remote project so user doesn't have to /projects manually
+  // Auto-switch to remote project when pairing connects.
+  // Notification is now sent directly in pairing-store.ts using the stored botToken.
+  onPairingConnect((session) => {
     setUserProject(session.chatId, { name: 'remote', path: 'remote:remote' }, session.threadId)
-
-    const token = session.botToken || env.BOT_TOKEN
-    fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: session.chatId,
-        text: `🔗 *遠端已連線* — ${label}\n_已自動切換到遠端模式，可以開始操作了_\n💡 _用 /projects 選擇遠端專案_`,
-        parse_mode: 'Markdown',
-      }),
-      signal: AbortSignal.timeout(5_000),
-    }).catch(() => {})
-  })
-  onPairingDisconnect((session, _label, reason) => {
-    const token = session.botToken || env.BOT_TOKEN
-    fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: session.chatId,
-        text: `🔌 遠端已斷開 — ${reason ?? '連線中斷'}`,
-      }),
-      signal: AbortSignal.timeout(5_000),
-    }).catch(() => {})
   })
 
   return bot
