@@ -55,6 +55,34 @@ let ws: WebSocket | null = null
 let shouldReconnect = false
 let toolDispatcher: ToolDispatcher | null = null
 
+// --- Electron config (projectsBaseDir etc.) ---
+
+const CONFIG_PATH = resolve(process.cwd(), 'data', 'electron-config.json')
+
+interface ElectronConfig {
+  readonly projectsBaseDir?: string
+}
+
+function loadConfig(): ElectronConfig {
+  try {
+    return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'))
+  } catch {
+    return {}
+  }
+}
+
+function saveConfig(patch: Partial<ElectronConfig>): ElectronConfig {
+  const current = loadConfig()
+  const updated = { ...current, ...patch }
+  mkdirSync(resolve(process.cwd(), 'data'), { recursive: true })
+  writeFileSync(CONFIG_PATH, JSON.stringify(updated, null, 2), 'utf-8')
+  return updated
+}
+
+function getProjectsBaseDir(): string {
+  return loadConfig().projectsBaseDir ?? process.cwd()
+}
+
 // Chat mode state
 let chatWs: WebSocket | null = null
 let chatShouldReconnect = false
@@ -301,6 +329,20 @@ ipcMain.handle('toggle-always-on-top', () => {
   return next
 })
 
+ipcMain.handle('set-projects-dir', async (_event, dir: string) => {
+  const resolvedDir = resolve(dir)
+  saveConfig({ projectsBaseDir: resolvedDir })
+  // Recreate tool dispatcher with new base dir
+  const { createToolDispatcher } = await import('../tool-handlers.js')
+  toolDispatcher = createToolDispatcher(resolvedDir)
+  elog(`[electron] projectsBaseDir set to: ${resolvedDir}`)
+  return resolvedDir
+})
+
+ipcMain.handle('get-projects-dir', () => {
+  return getProjectsBaseDir()
+})
+
 let isCompact = false
 const FULL_SIZE = { width: 420, height: 640 }
 const COMPACT_SIZE = { width: 340, height: 280 }
@@ -400,10 +442,11 @@ app.whenReady().then(async () => {
 
     // Chat mode also needs agent connection for remote tool execution.
     // Without this, Claude has no remote_* tools and can't operate on this machine.
+    const projDir = getProjectsBaseDir()
     const { createToolDispatcher } = await import('../tool-handlers.js')
-    toolDispatcher = createToolDispatcher(process.cwd())
+    toolDispatcher = createToolDispatcher(projDir)
     shouldReconnect = true
-    elog('[electron] chat mode: also starting agent for tool execution')
+    elog(`[electron] chat mode: agent baseDir=${projDir}`)
 
     // Small delay so renderer is ready to receive IPC events
     setTimeout(() => {

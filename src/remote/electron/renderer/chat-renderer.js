@@ -167,9 +167,24 @@ function removeBubble(id) {
 
 // --- Event Handlers ---
 
-function sendMessage() {
+async function sendMessage() {
   const text = messageInput.value.trim()
   if (!text) return
+
+  // Local-only commands (not sent to bot)
+  if (text.startsWith('/setbase')) {
+    const dir = text.slice('/setbase'.length).trim()
+    messageInput.value = ''
+    if (!dir) {
+      const current = await api.getProjectsDir()
+      appendBubble(localMsgId++, `專案資料夾: \`${current}\`\n\n用法: \`/setbase <路徑>\``, 'bot')
+    } else {
+      const resolved = await api.setProjectsDir(dir)
+      appendBubble(localMsgId++, `專案資料夾已設定: \`${resolved}\`\n使用 \`/projects\` 瀏覽專案`, 'bot')
+    }
+    messageInput.focus()
+    return
+  }
 
   const id = localMsgId++
   appendBubble(id, text, 'user')
@@ -288,6 +303,7 @@ const COMMANDS = [
   { cmd: '/model',    desc: '切換模型' },
   { cmd: '/projects', desc: '瀏覽與選擇專案' },
   { cmd: '/select',   desc: '快速切換專案' },
+  { cmd: '/setbase',  desc: '設定專案資料夾路徑' },
   { cmd: '/chat',     desc: '通用對話模式' },
   { cmd: '/pair',     desc: '配對遠端電腦' },
   { cmd: '/unpair',   desc: '斷開遠端配對' },

@@ -60,6 +60,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('chat:status', handler)
   },
 
+  // --- Settings ---
+  setProjectsDir: (dir) => ipcRenderer.invoke('set-projects-dir', dir),
+  getProjectsDir: () => ipcRenderer.invoke('get-projects-dir'),
+
   // --- Window controls ---
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
   closeWindow: () => ipcRenderer.invoke('window-close'),
