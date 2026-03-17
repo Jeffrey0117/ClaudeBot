@@ -102,18 +102,14 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
     await ctx.reply('💬 正在遠端啟動桌面聊天客戶端...')
 
     try {
-      // Use dedicated spawn_detached tool — no shell escaping issues,
-      // works on any OS, and the process outlives the agent command.
-      // On Windows, use node_modules/.bin/electron.cmd directly to avoid npx overhead.
-      const isWin = process.platform === 'win32'
-      const electronCmd = isWin
-        ? 'node_modules\\.bin\\electron.cmd'
-        : 'npx'
-      const electronArgs = JSON.stringify(
-        isWin
-          ? ['dist/remote/electron/main.cjs', '--chat', '--url', wsUrl, '--code', chatCode]
-          : ['electron', '--', 'dist/remote/electron/main.cjs', '--chat', '--url', wsUrl, '--code', chatCode],
-      )
+      // Launch Electron directly via its binary — avoids npx/.cmd wrappers
+      // that break GUI apps under detached+shell on Windows.
+      // node_modules/electron/dist/electron.exe works cross-platform.
+      const electronCmd = 'node_modules/electron/dist/electron.exe'
+      const electronArgs = JSON.stringify([
+        'dist/remote/electron/main.cjs',
+        '--chat', '--url', wsUrl, '--code', chatCode,
+      ])
 
       await remoteToolCall(
         existing.code,
