@@ -102,12 +102,11 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
     await ctx.reply('💬 正在遠端啟動桌面聊天客戶端...')
 
     try {
-      // Use a tiny Node.js launcher script that:
-      // 1. Resolves electron.exe from node_modules/electron/path.txt
-      // 2. Spawns it detached with stderr → data/electron-launch.log
-      // 3. Exits immediately (so remote_execute_command returns quickly)
-      // This avoids all the Windows shell/detach/GUI session issues.
-      const launchCmd = `node dist/remote/electron/launch-electron.cjs dist/remote/electron/main.cjs --chat --url ${wsUrl} --code ${chatCode}`
+      // Launch Electron via run-electron.cjs wrapper.
+      // IMPORTANT: Pass URL/code via env vars, NOT argv.
+      // Chromium crashes when argv contains wss:// or https:// URLs.
+      // "start "" /b" runs the command in background so remote_execute_command returns immediately
+      const launchCmd = `set CLAUDEBOT_URL=${wsUrl}&& set CLAUDEBOT_CODE=${chatCode}&& start "" /b node run-electron.cjs dist/remote/electron/main.cjs --chat`
 
       await remoteToolCall(
         existing.code,
@@ -126,7 +125,7 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
         `❌ 自動啟動失敗: ${msg}\n\n` +
         `💡 手動啟動 — 在遠端 ClaudeBot 目錄貼上:\n` +
         '```\n' +
-        `npx electron dist/remote/electron/main.cjs --chat --url ${wsUrl} --code ${chatCode}\n` +
+        `set CLAUDEBOT_URL=${wsUrl}&& set CLAUDEBOT_CODE=${chatCode}&& node run-electron.cjs dist/remote/electron/main.cjs --chat\n` +
         '```',
         { parse_mode: 'Markdown' },
       )
@@ -138,7 +137,7 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
   const code = createPairingCode(chatId, threadId)
   const { url: wsUrl, isPublic } = getRelayUrl()
 
-  const electronCmd = `git pull && npm run build && npx electron dist/remote/electron/main.cjs --chat --url ${wsUrl} --code ${code}`
+  const electronCmd = `git pull\nnpm run build\nset CLAUDEBOT_URL=${wsUrl}&& set CLAUDEBOT_CODE=${code}&& node run-electron.cjs dist/remote/electron/main.cjs --chat`
 
   const networkNote = isPublic
     ? '🌐 公開 URL — 跨網路可用'

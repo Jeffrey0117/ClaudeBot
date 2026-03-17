@@ -8,19 +8,36 @@
 
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { resolve } from 'node:path'
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { WebSocket } from 'ws'
 
-// --- Crash diagnostics (stderr visible in terminal) ---
+// --- GPU workaround: remote desktop / VM environments hang on GPU init ---
+app.disableHardwareAcceleration()
+app.commandLine.appendSwitch('disable-gpu')
+app.commandLine.appendSwitch('no-sandbox')
+app.commandLine.appendSwitch('disable-software-rasterizer')
+
+// --- File-based diagnostics (stderr may be swallowed by Electron/npx) ---
+
+const LOG_PATH = resolve(process.cwd(), 'data', 'electron-debug.log')
+function elog(msg: string): void {
+  const line = `[${new Date().toISOString()}] ${msg}\n`
+  try {
+    mkdirSync(resolve(process.cwd(), 'data'), { recursive: true })
+    appendFileSync(LOG_PATH, line, 'utf-8')
+  } catch { /* best effort */ }
+  console.error(msg)
+}
+
+elog(`[electron] === STARTUP === pid=${process.pid} argv=${process.argv.join(' ')}`)
 
 process.on('uncaughtException', (err) => {
-  console.error(`[electron] uncaughtException: ${err.message}`)
-  console.error(err.stack)
+  elog(`[electron] uncaughtException: ${err.message}\n${err.stack}`)
 })
 
 process.on('unhandledRejection', (reason) => {
-  console.error(`[electron] unhandledRejection:`, reason)
+  elog(`[electron] unhandledRejection: ${reason}`)
 })
 import type { ToolDispatcher } from '../tool-handlers.js'
 import type {
@@ -278,17 +295,24 @@ function isChatMode(): boolean {
   return process.argv.includes('--chat')
 }
 
+/** Resolve an asset file: try __dirname first (dist/), fall back to src/ (dev) */
+function resolveAsset(...parts: string[]): string {
+  const distPath = resolve(__dirname, ...parts)
+  if (existsSync(distPath)) return distPath
+  return resolve(process.cwd(), 'src', 'remote', 'electron', ...parts)
+}
+
 function createWindow(): void {
   const chatMode = isChatMode()
   const cwd = process.cwd()
 
-  const preloadPath = resolve(cwd, 'src', 'remote', 'electron', 'preload.cjs')
+  const preloadPath = resolveAsset('preload.cjs')
   const htmlFile = chatMode ? 'chat.html' : 'index.html'
-  const htmlPath = resolve(cwd, 'src', 'remote', 'electron', 'renderer', htmlFile)
+  const htmlPath = resolveAsset('renderer', htmlFile)
 
-  console.error(`[electron] mode=${chatMode ? 'chat' : 'agent'} cwd=${cwd}`)
-  console.error(`[electron] preload=${preloadPath} exists=${existsSync(preloadPath)}`)
-  console.error(`[electron] html=${htmlPath} exists=${existsSync(htmlPath)}`)
+  elog(`[electron] mode=${chatMode ? 'chat' : 'agent'} cwd=${cwd}`)
+  elog(`[electron] preload=${preloadPath} exists=${existsSync(preloadPath)}`)
+  elog(`[electron] html=${htmlPath} exists=${existsSync(htmlPath)}`)
 
   mainWindow = new BrowserWindow({
     width: chatMode ? 420 : 600,
@@ -304,11 +328,11 @@ function createWindow(): void {
   })
 
   mainWindow.loadFile(htmlPath).catch((err) => {
-    console.error(`[electron] loadFile failed: ${err.message}`)
+    elog(`[electron] loadFile failed: ${err.message}`)
   })
 
   mainWindow.webContents.on('did-fail-load', (_e, code, desc) => {
-    console.error(`[electron] did-fail-load: ${code} ${desc}`)
+    elog(`[electron] did-fail-load: ${code} ${desc}`)
   })
 
   mainWindow.on('closed', () => {
@@ -316,9 +340,15 @@ function createWindow(): void {
   })
 }
 
-// --- CLI args: --url <relay> --code <pairing> → auto-connect ---
+// --- Connection params: env vars (preferred) or CLI args ---
+// IMPORTANT: Chromium crashes when argv contains wss:// or https:// URLs,
+// so we pass connection params via environment variables instead.
 
-function getCliArg(name: string): string | undefined {
+function getParam(name: string): string | undefined {
+  // Env var takes priority (set by launch-electron.cjs / pair command)
+  const envKey = `CLAUDEBOT_${name.toUpperCase()}`
+  if (process.env[envKey]) return process.env[envKey]
+  // Fallback: CLI arg (only safe for non-URL values)
   const idx = process.argv.indexOf(`--${name}`)
   if (idx === -1 || idx + 1 >= process.argv.length) return undefined
   return process.argv[idx + 1]
@@ -326,16 +356,16 @@ function getCliArg(name: string): string | undefined {
 
 // --- App lifecycle ---
 
-console.error(`[electron] starting... argv=${process.argv.join(' ')}`)
+elog(`[electron] starting... argv=${process.argv.join(' ')}`)
 
 app.whenReady().then(() => {
-  console.error('[electron] app ready, creating window...')
+  elog('[electron] app ready, creating window...')
   createWindow()
 
-  // Auto-connect if --url and --code provided (from /pair chat command)
-  const cliUrl = getCliArg('url')
-  const cliCode = getCliArg('code')
-  console.error(`[electron] cli: url=${cliUrl ?? 'none'} code=${cliCode ?? 'none'} chat=${isChatMode()}`)
+  // Auto-connect if url and code provided (from /pair chat command)
+  const cliUrl = getParam('url')
+  const cliCode = getParam('code')
+  elog(`[electron] cli: url=${cliUrl ?? 'none'} code=${cliCode ?? 'none'} chat=${isChatMode()}`)
   if (isChatMode() && cliUrl && cliCode) {
     chatRelayUrl = cliUrl
     chatCode = cliCode
@@ -345,12 +375,12 @@ app.whenReady().then(() => {
     setTimeout(() => connectChat(cliUrl, cliCode), 100)
   }
 }).catch((err) => {
-  console.error(`[electron] app.whenReady() failed: ${err.message}`)
+  elog(`[electron] app.whenReady() failed: ${err.message}`)
   process.exit(1)
 })
 
 app.on('window-all-closed', () => {
-  console.error('[electron] all windows closed, quitting.')
+  elog('[electron] all windows closed, quitting.')
   disconnect()
   disconnectChat()
   app.quit()

@@ -34,6 +34,7 @@ import type {
 import { getOrCreateVirtualChat } from './virtual-chat-store.js'
 import { registerVirtualChat, unregisterVirtualChat } from './telegram-proxy.js'
 import { handleElectronChatMessage, handleElectronChatCallback } from './electron-chat-bridge.js'
+import { setUserProject } from '../bot/state.js'
 
 interface PairedAgent {
   readonly ws: WebSocket
@@ -364,6 +365,9 @@ export function startRelayServer(port: number): void {
       assignedVirtualChatId = virtualChatId
 
       registerVirtualChat(virtualChatId, chatWs, code)
+
+      // Auto-set to general chat mode so Electron user can chat immediately
+      setUserProject(virtualChatId, { name: 'general', path: process.cwd() })
 
       const resp: ElectronChatRegistered = {
         type: 'electron_chat_registered',
