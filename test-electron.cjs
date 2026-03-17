@@ -93,39 +93,42 @@ for (const [label, p] of checks) {
   existsSync(p) ? ok(label) : fail(label)
 }
 
-// 6. Try actually spawning electron with a temp script file (not -e, which Electron may not support)
-console.log('\n--- Spawning electron with minimal test script (GPU disabled) ---\n')
-const tmpScript = join(root, 'data', '_electron_test.cjs')
-require('fs').writeFileSync(tmpScript, `
-  const { app } = require('electron');
-  app.disableHardwareAcceleration();
-  app.commandLine.appendSwitch('disable-gpu');
-  app.commandLine.appendSwitch('no-sandbox');
-  app.whenReady().then(() => {
-    process.stdout.write('ELECTRON_OK');
-    app.quit();
-  });
-  setTimeout(() => { process.stdout.write('ELECTRON_TIMEOUT'); app.quit(); }, 10000);
-`, 'utf-8')
-const testResult = spawnSync(electronBin, [tmpScript], {
-  timeout: 20000,
-  windowsHide: false,
-  env: { ...process.env, ELECTRON_ENABLE_LOGGING: 'true' },
+// 6. Spawn electron with the REAL main.cjs and capture everything
+console.log('\n--- Spawning electron with real main.cjs (15s timeout) ---\n')
+
+// Clear old debug log first
+const debugLog = join(root, 'data', 'electron-debug.log')
+try { require('fs').unlinkSync(debugLog) } catch {}
+
+const t0 = Date.now()
+const testResult = spawnSync(electronBin, [mainCjs, '--chat'], {
+  timeout: 15000,
+  stdio: ['ignore', 'pipe', 'pipe'],
+  env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1' },
 })
-try { require('fs').unlinkSync(tmpScript) } catch {}
+const elapsed = Date.now() - t0
+
+console.log(`  Exit code: ${testResult.status}`)
+console.log(`  Signal: ${testResult.signal}`)
+console.log(`  Elapsed: ${elapsed}ms`)
+if (testResult.error) console.log(`  Error: ${testResult.error.message}`)
 
 const testOut = testResult.stdout?.toString().trim() || ''
 const testErr = testResult.stderr?.toString().trim() || ''
+if (testOut) console.log(`  STDOUT (${testOut.length} chars): ${testOut.slice(0, 1000)}`)
+if (testErr) console.log(`  STDERR (${testErr.length} chars): ${testErr.slice(0, 1000)}`)
+if (!testOut && !testErr) console.log('  (zero stdout+stderr)')
 
-if (testOut.includes('ELECTRON_OK')) {
-  ok('Electron can start and create app!')
-} else if (testOut.includes('ELECTRON_TIMEOUT')) {
-  fail('Electron started but app.whenReady() never fired')
+// Check if our elog wrote anything
+console.log('')
+if (existsSync(debugLog)) {
+  const logContent = readFileSync(debugLog, 'utf-8').trim()
+  ok(`electron-debug.log exists (${logContent.length} chars)`)
+  console.log('--- electron-debug.log ---')
+  console.log(logContent.slice(0, 2000))
+  console.log('--- end ---')
 } else {
-  fail(`Electron test failed (exit ${testResult.status})`)
-  if (testOut) info(`stdout: ${testOut.slice(0, 500)}`)
-  if (testErr) info(`stderr: ${testErr.slice(0, 500)}`)
-  if (!testOut && !testErr) info('(zero output — binary may be broken or missing system libs)')
+  fail('electron-debug.log NOT CREATED — main.cjs was never loaded')
 }
 
 console.log('\n=== Done ===\n')
