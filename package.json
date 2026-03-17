@@ -13,7 +13,7 @@
   "scripts": {
     "dev": "tsx src/launcher.ts",
     "dev:single": "tsx src/index.ts",
-    "build": "tsc && npx esbuild src/remote/electron/main.ts --bundle --platform=node --format=cjs --outfile=dist/remote/electron/main.cjs --external:electron --external:../tool-handlers.js && node -e \"const fs=require('fs');fs.copyFileSync('src/remote/electron/launch-electron.cjs','dist/remote/electron/launch-electron.cjs');fs.copyFileSync('src/remote/electron/preload.cjs','dist/remote/electron/preload.cjs');fs.cpSync('src/remote/electron/renderer','dist/remote/electron/renderer',{recursive:true})\"",
+    "build": "tsc && npx esbuild src/remote/electron/main.ts --bundle --platform=node --format=cjs --outfile=dist/remote/electron/main.cjs --external:electron --external:ws --external:../tool-handlers.js && node -e \"const fs=require('fs');fs.copyFileSync('src/remote/electron/launch-electron.cjs','dist/remote/electron/launch-electron.cjs');fs.copyFileSync('src/remote/electron/preload.cjs','dist/remote/electron/preload.cjs');fs.cpSync('src/remote/electron/renderer','dist/remote/electron/renderer',{recursive:true})\"",
     "start": "node dist/index.js",
     "dashboard": "tsx src/dashboard/start.ts",
     "setup": "tsx src/setup.ts",

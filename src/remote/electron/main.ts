@@ -340,9 +340,15 @@ function createWindow(): void {
   })
 }
 
-// --- CLI args: --url <relay> --code <pairing> → auto-connect ---
+// --- Connection params: env vars (preferred) or CLI args ---
+// IMPORTANT: Chromium crashes when argv contains wss:// or https:// URLs,
+// so we pass connection params via environment variables instead.
 
-function getCliArg(name: string): string | undefined {
+function getParam(name: string): string | undefined {
+  // Env var takes priority (set by launch-electron.cjs / pair command)
+  const envKey = `CLAUDEBOT_${name.toUpperCase()}`
+  if (process.env[envKey]) return process.env[envKey]
+  // Fallback: CLI arg (only safe for non-URL values)
   const idx = process.argv.indexOf(`--${name}`)
   if (idx === -1 || idx + 1 >= process.argv.length) return undefined
   return process.argv[idx + 1]
@@ -356,9 +362,9 @@ app.whenReady().then(() => {
   elog('[electron] app ready, creating window...')
   createWindow()
 
-  // Auto-connect if --url and --code provided (from /pair chat command)
-  const cliUrl = getCliArg('url')
-  const cliCode = getCliArg('code')
+  // Auto-connect if url and code provided (from /pair chat command)
+  const cliUrl = getParam('url')
+  const cliCode = getParam('code')
   elog(`[electron] cli: url=${cliUrl ?? 'none'} code=${cliCode ?? 'none'} chat=${isChatMode()}`)
   if (isChatMode() && cliUrl && cliCode) {
     chatRelayUrl = cliUrl
