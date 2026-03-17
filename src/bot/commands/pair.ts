@@ -107,7 +107,7 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
       // 2. Spawns it detached with stderr → data/electron-launch.log
       // 3. Exits immediately (so remote_execute_command returns quickly)
       // This avoids all the Windows shell/detach/GUI session issues.
-      const launchCmd = `node dist/remote/electron/launch-electron.cjs dist/remote/electron/main.cjs --chat --url ${wsUrl} --code ${chatCode}`
+      const launchCmd = `node run-electron.cjs dist/remote/electron/main.cjs --chat --url ${wsUrl} --code ${chatCode}`
 
       await remoteToolCall(
         existing.code,
@@ -126,7 +126,7 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
         `❌ 自動啟動失敗: ${msg}\n\n` +
         `💡 手動啟動 — 在遠端 ClaudeBot 目錄貼上:\n` +
         '```\n' +
-        `npx electron dist/remote/electron/main.cjs --chat --url ${wsUrl} --code ${chatCode}\n` +
+        `node run-electron.cjs dist/remote/electron/main.cjs --chat --url ${wsUrl} --code ${chatCode}\n` +
         '```',
         { parse_mode: 'Markdown' },
       )
@@ -138,7 +138,7 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
   const code = createPairingCode(chatId, threadId)
   const { url: wsUrl, isPublic } = getRelayUrl()
 
-  const electronCmd = `git pull && npm run build && npx electron dist/remote/electron/main.cjs --chat --url ${wsUrl} --code ${code}`
+  const electronCmd = `git pull\nnpm run build\nnode run-electron.cjs dist/remote/electron/main.cjs --chat --url ${wsUrl} --code ${code}`
 
   const networkNote = isPublic
     ? '🌐 公開 URL — 跨網路可用'
