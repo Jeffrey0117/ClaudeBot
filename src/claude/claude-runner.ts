@@ -13,6 +13,7 @@ import { env } from '../config/env.js'
 import { getPairing } from '../remote/pairing-store.js'
 import { getRelayPort } from '../remote/relay-server.js'
 import { generateRemoteMcpConfig, cleanupRemoteMcpConfig } from '../remote/mcp-config-generator.js'
+import { isVirtualChat, getVirtualChatPairingCode } from '../remote/virtual-chat-store.js'
 
 /** Detect affirmative/agreement replies that reference the previous message. */
 const AFFIRMATIVE_RE = /^(好|可以|沒問題|沒差|OK|ok|Yes|yes|對|嗯|行|做吧|來吧|就這樣|同意|贊成|go|就醬|開始|動手|沒錯|是的|確定|sure|yep|yeah|做啊|加吧|弄吧|改吧|要|proceed|continue|繼續)/i
@@ -131,10 +132,11 @@ export function runClaude(options: RunOptions): void {
     parts.push(pinnedContext)
   }
 
-  // Inject remote pairing context — only when REMOTE_ENABLED for this instance
+  // Inject remote pairing context — for paired Telegram users AND virtual Electron chats
   if (env.REMOTE_ENABLED && options.chatId) {
     const pairing = getPairing(options.chatId, options.threadId)
-    if (pairing?.connected) {
+    const isRemote = pairing?.connected === true || isVirtualChat(options.chatId)
+    if (isRemote) {
       parts.push(
         `[遠端配對模式]\n` +
         `你已配對一台遠端電腦，所有操作都針對遠端。使用 remote_* MCP 工具：\n` +
@@ -240,9 +242,11 @@ export function runClaude(options: RunOptions): void {
     args.push('--resume', sessionId)
   }
 
-  // Determine if this is a remote session
-  const isRemoteSession = env.REMOTE_ENABLED && options.chatId
-    && getPairing(options.chatId, options.threadId)?.connected === true
+  // Determine if this is a remote session (paired Telegram user OR virtual Electron chat)
+  const isRemoteSession = env.REMOTE_ENABLED && options.chatId && (
+    getPairing(options.chatId, options.threadId)?.connected === true ||
+    isVirtualChat(options.chatId)
+  )
 
   const mcpConfigs: string[] = []
   if (env.MCP_BROWSER) {
@@ -253,13 +257,20 @@ export function runClaude(options: RunOptions): void {
     mcpConfigs.push(path.resolve('data', 'mcp-agent-browser.json'))
   }
 
-  // Dynamic remote pairing MCP config — only when REMOTE_ENABLED
+  // Dynamic remote pairing MCP config — find the agent's code
   let remoteMcpConfigPath: string | null = null
   if (isRemoteSession && options.chatId) {
+    let remoteCode: string | null = null
     const pairing = getPairing(options.chatId, options.threadId)
     if (pairing?.connected) {
+      remoteCode = pairing.code
+    } else if (isVirtualChat(options.chatId)) {
+      // Virtual Electron chat — look up the agent's code from virtual-chat-store
+      remoteCode = getVirtualChatPairingCode(options.chatId)
+    }
+    if (remoteCode) {
       const port = getRelayPort() || env.RELAY_PORT
-      remoteMcpConfigPath = generateRemoteMcpConfig(port, pairing.code)
+      remoteMcpConfigPath = generateRemoteMcpConfig(port, remoteCode)
       mcpConfigs.push(remoteMcpConfigPath)
     }
   }

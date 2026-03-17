@@ -96,7 +96,8 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
   // Check if remote agent is already connected — auto-launch Electron on remote
   const existing = getPairing(chatId, threadId)
   if (existing?.connected) {
-    const chatCode = createPairingCode(chatId, threadId)
+    // Reuse the agent's existing code — don't overwrite the pairing
+    const chatCode = existing.code
     const { url: wsUrl } = getRelayUrl()
 
     await ctx.reply('💬 正在遠端啟動桌面聊天客戶端...')
