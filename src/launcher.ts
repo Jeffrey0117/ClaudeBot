@@ -335,7 +335,18 @@ function startRestartAllWatcher(): void {
       if (!content) return
       // Delete signal file immediately to prevent re-triggering
       unlinkSync(RESTART_ALL_SIGNAL)
-      console.log('[launcher] restart-all signal received — restarting all bots')
+
+      // Auto-build before restart — ensures dist/ matches src/ changes.
+      // Without this, bots may run stale compiled code even though tsx reads src/.
+      console.log('[launcher] restart-all signal received — building before restart...')
+      try {
+        execSync('npx tsc', { cwd: root, timeout: 30_000, stdio: 'pipe' })
+        console.log('[launcher] build complete')
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`[launcher] build failed (continuing anyway): ${msg}`)
+      }
+
       notifyAdmin('🔄 <b>Restart ALL</b> — restarting all bot instances...')
       // Kill all running bots — close handlers will respawn them after RESPAWN_DELAY_MS
       for (const [, child] of children) {
