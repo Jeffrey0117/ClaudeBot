@@ -863,11 +863,14 @@ function handleSpawnDetached(args: Record<string, unknown>, baseDir: string): st
     : []
   const cwd = args.cwd ? String(args.cwd) : baseDir
 
+  // On Windows, shell:true + detached creates a cmd.exe wrapper that
+  // breaks GUI applications (Electron window never appears).
+  // Use shell:false and pass the executable directly instead.
   const child = spawn(cmd, [...cmdArgs], {
     cwd,
     detached: true,
     stdio: 'ignore',
-    shell: true,
+    shell: false,
   })
   child.unref()
 
