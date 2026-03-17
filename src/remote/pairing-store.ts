@@ -38,6 +38,8 @@ export interface PairingSession {
   readonly createdAt: number
   readonly label: string
   readonly connected: boolean
+  /** Bot token that created this pairing — used by relay to send notifications via correct bot */
+  readonly botToken: string
 }
 
 /** Build a bot-scoped pairing key so each bot instance has its own pairings. */
@@ -102,6 +104,7 @@ export function createPairingCode(
     createdAt: Date.now(),
     label: '',
     connected: false,
+    botToken: env.BOT_TOKEN,
   }
 
   pairings[key] = session
