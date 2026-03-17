@@ -156,10 +156,10 @@ export function markConnected(code: string, label: string): boolean {
   const updated = { ...session, connected: true, label }
   const pairings = { ...store.pairings, [key]: updated }
   writeStore({ pairings, codeIndex: store.codeIndex })
-  // Only fire callback if this pairing belongs to the current bot instance
-  if (key.startsWith(`${BOT_ID}:`)) {
-    onConnectFn(updated, label)
-  }
+  // Relay server only runs in main bot — fire callback for ALL pairings
+  // so the main bot sends Telegram notifications regardless of which bot created the pairing.
+  // sendMessage to unknown chatIds fails silently (.catch(() => {})).
+  onConnectFn(updated, label)
   return true
 }
 
@@ -171,9 +171,7 @@ export function markDisconnected(code: string, reason?: string): void {
   if (!session) return
   const pairings = { ...store.pairings, [key]: { ...session, connected: false } }
   writeStore({ pairings, codeIndex: store.codeIndex })
-  if (key.startsWith(`${BOT_ID}:`)) {
-    onDisconnectFn(session, session.label, reason ?? '連線中斷')
-  }
+  onDisconnectFn(session, session.label, reason ?? '連線中斷')
 }
 
 export function removePairing(
