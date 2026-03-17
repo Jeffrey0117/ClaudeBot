@@ -167,9 +167,16 @@ api.onStatus((status) => {
     connectPanel.classList.add('hidden')
     chatPanel.classList.remove('hidden')
     messageInput.focus()
+  } else if (status === 'connecting') {
+    // Auto-connect: skip connection panel, show chat with connecting state
+    connectPanel.classList.add('hidden')
+    chatPanel.classList.remove('hidden')
   } else if (status === 'disconnected') {
-    connectPanel.classList.remove('hidden')
-    chatPanel.classList.add('hidden')
+    // Only show connection panel if chat has no messages (fresh start or never connected)
+    if (bubbles.size === 0) {
+      connectPanel.classList.remove('hidden')
+      chatPanel.classList.add('hidden')
+    }
     hideTyping()
   }
 
