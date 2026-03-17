@@ -11,7 +11,7 @@ import { resolve } from 'node:path'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { WebSocket } from 'ws'
-import { createToolDispatcher, type ToolDispatcher } from '../tool-handlers.js'
+import type { ToolDispatcher } from '../tool-handlers.js'
 import type {
   AgentRegister,
   ToolCallRequest,
@@ -132,8 +132,10 @@ function disconnect(): void {
 
 // --- IPC handlers ---
 
-ipcMain.handle('connect', (_event, relayUrl: string, code: string, baseDir: string) => {
+ipcMain.handle('connect', async (_event, relayUrl: string, code: string, baseDir: string) => {
   const resolvedDir = resolve(baseDir || process.cwd())
+  // Lazy-load tool-handlers only in agent mode (heavy module with child_process deps)
+  const { createToolDispatcher } = await import('../tool-handlers.js')
   toolDispatcher = createToolDispatcher(resolvedDir)
   shouldReconnect = true
   log(`Working directory: ${resolvedDir}`)
@@ -274,7 +276,7 @@ function createWindow(): void {
     title: chatMode ? 'ClaudeBot Chat' : 'ClaudeBot Remote Agent',
     resizable: true,
     webPreferences: {
-      preload: resolve(process.cwd(), 'src', 'remote', 'electron', 'preload.js'),
+      preload: resolve(process.cwd(), 'src', 'remote', 'electron', 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
