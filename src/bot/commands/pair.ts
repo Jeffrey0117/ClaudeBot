@@ -102,18 +102,17 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
     await ctx.reply('💬 正在遠端啟動桌面聊天客戶端...')
 
     try {
-      // Use Windows `start` command via remote_execute_command.
-      // `start` launches a new process with full GUI session and returns immediately,
-      // so it won't be killed by remote_execute_command's timeout.
-      // This is far more reliable than spawn({detached, stdio:'ignore'}) which
-      // loses the GUI session on Windows.
-      const electronExe = 'node_modules\\electron\\dist\\electron.exe'
-      const startCmd = `start "" "${electronExe}" dist\\remote\\electron\\main.cjs --chat --url ${wsUrl} --code ${chatCode}`
+      // Use a tiny Node.js launcher script that:
+      // 1. Resolves electron.exe from node_modules/electron/path.txt
+      // 2. Spawns it detached with stderr → data/electron-launch.log
+      // 3. Exits immediately (so remote_execute_command returns quickly)
+      // This avoids all the Windows shell/detach/GUI session issues.
+      const launchCmd = `node dist/remote/electron/launch-electron.cjs dist/remote/electron/main.cjs --chat --url ${wsUrl} --code ${chatCode}`
 
       await remoteToolCall(
         existing.code,
         'remote_execute_command',
-        { command: startCmd, timeout: 15000 },
+        { command: launchCmd, timeout: 15000 },
         15_000,
       )
       await ctx.reply(
