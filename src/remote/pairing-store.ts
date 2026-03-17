@@ -14,6 +14,13 @@ import { sessionKey } from '../bot/state.js'
 /** BOT_ID prefix isolates pairings per bot instance */
 const BOT_ID = env.BOT_TOKEN.slice(-6)
 
+/** Human-readable bot name derived from --env arg (e.g. "bot1", "bot5") */
+const BOT_NAME = (() => {
+  const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
+  if (!envArg || envArg === '.env') return 'bot1'
+  return envArg.replace('.env.', '')
+})()
+
 const PAIRING_TTL_MS = 5 * 60 * 1000 // 5 minutes
 const STORE_PATH = path.resolve('data', 'pairings.json')
 
@@ -40,6 +47,8 @@ export interface PairingSession {
   readonly connected: boolean
   /** Bot token that created this pairing — used by relay to send notifications via correct bot */
   readonly botToken: string
+  /** Human-readable bot instance name (e.g. "bot1", "bot5") */
+  readonly botName?: string
 }
 
 /** Build a bot-scoped pairing key so each bot instance has its own pairings. */
@@ -105,6 +114,7 @@ export function createPairingCode(
     label: '',
     connected: false,
     botToken: env.BOT_TOKEN,
+    botName: BOT_NAME,
   }
 
   pairings[key] = session

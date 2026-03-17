@@ -35,6 +35,8 @@ import { extractDigest, setContext } from './context-digest-store.js'
 import { autoCommitAndPush } from '../utils/auto-commit.js'
 import { env } from '../config/env.js'
 import { startDraft, updateDraft, finalizeDraft, cancelDraft, hasDraft } from './draft-sender.js'
+import { isVirtualChat, getPairingCodeForChat } from '../remote/virtual-chat-store.js'
+import { findByCode as findPairingByCode } from '../remote/pairing-store.js'
 import path from 'node:path'
 
 const TIMEOUT_MS = 30 * 60 * 1000
@@ -42,10 +44,24 @@ const TIMEOUT_MS = 30 * 60 * 1000
 // Track projects already warned about missing CLAUDE.md (once per bot lifetime)
 const claudeMdWarned = new Set<string>()
 
-function deriveBotId(): string {
+/** Cached process-level bot ID from --env arg */
+const PROCESS_BOT_ID = (() => {
   const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
   if (!envArg || envArg === '.env') return 'bot1'
   return envArg.replace('.env.', '')
+})()
+
+function deriveBotId(chatId?: number): string {
+  // For virtual chats (Electron), derive bot ID from the pairing that created it
+  if (chatId && isVirtualChat(chatId)) {
+    const code = getPairingCodeForChat(chatId)
+    if (code) {
+      const pairing = findPairingByCode(code)
+      if (pairing?.botName) return pairing.botName
+      if (pairing?.botToken === env.BOT_TOKEN) return PROCESS_BOT_ID
+    }
+  }
+  return PROCESS_BOT_ID
 }
 
 interface ProcessorContext {
@@ -180,7 +196,7 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       emitResponseComplete(
         ctx.dashCmdId,
         responseText,
-        deriveBotId(),
+        deriveBotId(ctx.item.chatId),
         result.costUsd ?? 0,
         Date.now() - ctx.startTime,
       )
@@ -363,7 +379,7 @@ async function sendResponseChunks(
     ))
     const { cleaned: draftDigestCleaned } = extractDigest(draftStripped)
     const draftCleaned = cleanMarkdown(draftDigestCleaned || draftStripped)
-    const botLabel = `\`[${deriveBotId()}]\` `
+    const botLabel = `\`[${deriveBotId(ctx.item.chatId)}]\` `
     await finalizeDraft(ctx.telegram, ctx.item.chatId, botLabel + (draftCleaned || cleaned))
     ctx.draftActive = false
 
@@ -381,7 +397,7 @@ async function sendResponseChunks(
     }
   } else {
     // No draft: send message chunks as usual
-    const botLabel = `\`[${deriveBotId()}]\` `
+    const botLabel = `\`[${deriveBotId(ctx.item.chatId)}]\` `
     const chunks = splitText(botLabel + cleaned, 4096)
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]

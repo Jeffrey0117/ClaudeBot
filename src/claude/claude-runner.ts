@@ -10,9 +10,19 @@ import { getLastResponse } from '../bot/last-response-store.js'
 import { buildContextInjection } from '../bot/context-digest-store.js'
 import { getSystemPrompt } from '../utils/system-prompt.js'
 import { env } from '../config/env.js'
-import { getPairing } from '../remote/pairing-store.js'
+import { getPairing, findByCode } from '../remote/pairing-store.js'
+import { isVirtualChat, getPairingCodeForChat } from '../remote/virtual-chat-store.js'
 import { getRelayPort } from '../remote/relay-server.js'
 import { generateRemoteMcpConfig, cleanupRemoteMcpConfig } from '../remote/mcp-config-generator.js'
+
+/** Resolve pairing for a chat — handles virtual chats by looking up via pairing code. */
+function resolvePairing(chatId: number, threadId: number | undefined) {
+  if (isVirtualChat(chatId)) {
+    const code = getPairingCodeForChat(chatId)
+    return code ? findByCode(code) : null
+  }
+  return getPairing(chatId, threadId)
+}
 
 /** Detect affirmative/agreement replies that reference the previous message. */
 const AFFIRMATIVE_RE = /^(好|可以|沒問題|沒差|OK|ok|Yes|yes|對|嗯|行|做吧|來吧|就這樣|同意|贊成|go|就醬|開始|動手|沒錯|是的|確定|sure|yep|yeah|做啊|加吧|弄吧|改吧|要|proceed|continue|繼續)/i
@@ -133,7 +143,7 @@ export function runClaude(options: RunOptions): void {
 
   // Inject remote pairing context — only when REMOTE_ENABLED for this instance
   if (env.REMOTE_ENABLED && options.chatId) {
-    const pairing = getPairing(options.chatId, options.threadId)
+    const pairing = resolvePairing(options.chatId, options.threadId)
     if (pairing?.connected) {
       parts.push(
         `[遠端配對模式]\n` +
@@ -242,7 +252,7 @@ export function runClaude(options: RunOptions): void {
 
   // Determine if this is a remote session
   const isRemoteSession = env.REMOTE_ENABLED && options.chatId
-    && getPairing(options.chatId, options.threadId)?.connected === true
+    && resolvePairing(options.chatId, options.threadId)?.connected === true
 
   const mcpConfigs: string[] = []
   if (env.MCP_BROWSER) {
@@ -256,7 +266,7 @@ export function runClaude(options: RunOptions): void {
   // Dynamic remote pairing MCP config — only when REMOTE_ENABLED
   let remoteMcpConfigPath: string | null = null
   if (isRemoteSession && options.chatId) {
-    const pairing = getPairing(options.chatId, options.threadId)
+    const pairing = resolvePairing(options.chatId, options.threadId)
     if (pairing?.connected) {
       const port = getRelayPort() || env.RELAY_PORT
       remoteMcpConfigPath = generateRemoteMcpConfig(port, pairing.code)
