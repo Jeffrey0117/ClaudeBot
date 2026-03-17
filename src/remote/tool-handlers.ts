@@ -164,9 +164,11 @@ async function handleExecuteCommand(
     let totalSize = 0
     let truncated = false
 
-    // On Windows, prefer PowerShell if cmd.exe is not on PATH (e.g. restricted environments).
-    // Fall back to cmd.exe if PowerShell isn't available either.
-    const shellOption = IS_WIN ? process.env.ComSpec || 'cmd.exe' : true
+    // On Windows, Node's shell:true uses %ComSpec% which may be unset or
+    // point to a broken path in restricted environments. Use explicit fallback chain.
+    const shellOption = IS_WIN
+      ? (process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe')
+      : true
 
     const child = spawn(command, {
       cwd,
@@ -847,6 +849,31 @@ async function deleteLockfiles(): Promise<void> {
   }
 }
 
+/**
+ * Spawn a detached process that outlives the agent command.
+ * Used by /pair chat to launch Electron without blocking.
+ * args.command: executable name (e.g. 'npx')
+ * args.args: JSON string array of arguments
+ * args.cwd: optional working directory (defaults to baseDir)
+ */
+function handleSpawnDetached(args: Record<string, unknown>, baseDir: string): string {
+  const cmd = String(args.command || 'npx')
+  const cmdArgs: readonly string[] = args.args
+    ? JSON.parse(String(args.args))
+    : []
+  const cwd = args.cwd ? String(args.cwd) : baseDir
+
+  const child = spawn(cmd, [...cmdArgs], {
+    cwd,
+    detached: true,
+    stdio: 'ignore',
+    shell: true,
+  })
+  child.unref()
+
+  return `Spawned detached: ${cmd} ${cmdArgs.join(' ')} (pid ${child.pid ?? 'unknown'})`
+}
+
 export function createToolDispatcher(baseDir: string): ToolDispatcher {
   const validatePath = createPathValidator(baseDir)
 
@@ -873,6 +900,7 @@ export function createToolDispatcher(baseDir: string): ToolDispatcher {
         case 'ab_back': return handleBrowserBack()
         case 'ab_get_url': return handleBrowserGetUrl()
         case 'ab_connect_browser': return handleBrowserConnect()
+        case 'remote_spawn_detached': return handleSpawnDetached(args, baseDir)
         default: throw new Error(`Unknown tool: ${tool}`)
       }
     },

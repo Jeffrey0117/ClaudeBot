@@ -102,14 +102,17 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
     await ctx.reply('💬 正在遠端啟動桌面聊天客戶端...')
 
     try {
-      // Fire-and-forget: Start-Process so it doesn't block the agent
+      // Use dedicated spawn_detached tool — no shell escaping issues,
+      // works on any OS, and the process outlives the agent command.
+      const electronArgs = JSON.stringify([
+        'electron', 'dist/remote/electron/main.js',
+        '--chat', '--url', wsUrl, '--code', chatCode,
+      ])
+
       await remoteToolCall(
         existing.code,
-        'remote_execute_command',
-        {
-          command: `powershell -NoProfile -Command "Start-Process npx -ArgumentList 'electron','dist/remote/electron/main.js','--chat','--url','${wsUrl}','--code','${chatCode}' -WorkingDirectory (Get-Location).Path"`,
-          timeout: 15000,
-        },
+        'remote_spawn_detached',
+        { command: 'npx', args: electronArgs },
         15_000,
       )
       await ctx.reply(

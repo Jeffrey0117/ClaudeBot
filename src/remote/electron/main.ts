@@ -311,8 +311,8 @@ app.whenReady().then(() => {
     chatCode = cliCode
     chatShouldReconnect = true
     chatClientMsgId = 1
-    // Small delay so renderer is ready to receive status events
-    setTimeout(() => connectChat(cliUrl, cliCode), 500)
+    // Small delay so renderer is ready to receive IPC events
+    setTimeout(() => connectChat(cliUrl, cliCode), 100)
   }
 })
 
