@@ -97,13 +97,23 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       promptLength: ctx.item.prompt.length,
     })
 
-    // Allot: settle remote quota (replace pre-reserve with actual turns)
+    // Settle remote quota (replace pre-reserve with actual turns)
     if (ctx.item.project.name === 'remote') {
-      const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
-      if (allotMod?.settle) {
-        (allotMod.settle as (c: number, t: number | undefined, turns: number) => void)(
-          ctx.item.chatId, ctx.item.threadId, ctx.toolCount + 1,
-        )
+      const turns = ctx.toolCount + 1
+      // License settle (shared pool across devices)
+      const { getVirtualChatLicenseKey } = await import('../remote/virtual-chat-store.js')
+      const licKey = getVirtualChatLicenseKey(ctx.item.chatId)
+      if (licKey) {
+        const { settleLicense } = await import('../remote/license-store.js')
+        settleLicense(licKey, turns)
+      } else {
+        // Allot settle (legacy remote quota)
+        const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
+        if (allotMod?.settle) {
+          (allotMod.settle as (c: number, t: number | undefined, turns: number) => void)(
+            ctx.item.chatId, ctx.item.threadId, turns,
+          )
+        }
       }
     }
 
@@ -433,14 +443,23 @@ function handleRunnerError(ctx: ProcessorContext, error: string): void {
     }
   }
 
-  // Allot: release pre-reserve on error (0 actual turns)
+  // Release pre-reserve on error (0 actual turns)
   if (ctx.item.project.name === 'remote') {
-    const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
-    if (allotMod?.settle) {
-      (allotMod.settle as (c: number, t: number | undefined, turns: number) => void)(
-        ctx.item.chatId, ctx.item.threadId, 0,
-      )
-    }
+    void import('../remote/virtual-chat-store.js').then(({ getVirtualChatLicenseKey }) => {
+      const licKey = getVirtualChatLicenseKey(ctx.item.chatId)
+      if (licKey) {
+        void import('../remote/license-store.js').then(({ settleLicense }) => {
+          settleLicense(licKey, 0)
+        })
+      } else {
+        const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
+        if (allotMod?.settle) {
+          (allotMod.settle as (c: number, t: number | undefined, turns: number) => void)(
+            ctx.item.chatId, ctx.item.threadId, 0,
+          )
+        }
+      }
+    })
   }
 
   if (ctx.dashCmdId) {

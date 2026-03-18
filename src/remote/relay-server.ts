@@ -28,10 +28,14 @@ import type {
   AgentShutdown,
   ElectronChatRegister,
   ElectronChatRegistered,
+  LicenseRegister,
+  LicenseRegistered,
+  LicenseError,
   ChatMessage,
   ChatCallback,
 } from './protocol.js'
-import { getOrCreateVirtualChat, isCodeUsedByVirtualChat } from './virtual-chat-store.js'
+import { validateLicense } from './license-store.js'
+import { getOrCreateVirtualChat, isCodeUsedByVirtualChat, getOrCreateVirtualChatWithLicense } from './virtual-chat-store.js'
 import { registerVirtualChat, unregisterVirtualChat } from './telegram-proxy.js'
 import { handleElectronChatMessage, handleElectronChatCallback } from './electron-chat-bridge.js'
 import { setUserProject } from '../bot/state.js'
@@ -90,10 +94,10 @@ function isRateLimited(ip: string): boolean {
 function handleAgentRegister(ws: WebSocket, code: string, ip: string, baseDir?: string): void {
   const session = findByCode(code)
 
-  // Allow registration if code is in pairing-store OR used by an Electron virtual chat.
-  // Electron chat embeds an agent, but its code can become stale when /pair re-runs
-  // (pairing-store deletes old codes). The virtual-chat-store retains the code.
-  if (!session && !isCodeUsedByVirtualChat(code)) {
+  // Allow registration if code is in pairing-store, used by an Electron virtual chat,
+  // or is a valid license key (Electron agents authenticate with license key as code).
+  const licenseValid = code.startsWith('CB-') && validateLicense(code).valid
+  if (!session && !isCodeUsedByVirtualChat(code) && !licenseValid) {
     // Only rate-limit INVALID codes — valid reconnects should always work
     if (isRateLimited(ip)) {
       send(ws, { type: 'error', error: 'Too many attempts. Try again later.' })
@@ -335,7 +339,13 @@ export function startRelayServer(port: number): void {
           handleElectronChatRegister(ws, chatMsg.code, chatMsg.clientId, ip)
           return
         }
-        send(ws, { type: 'error', error: 'First message must be agent_register, proxy_connect, or electron_chat_register' })
+        if (msg.type === 'license_register') {
+          role = 'electron_chat'
+          const licMsg = msg as LicenseRegister
+          handleLicenseRegister(ws, licMsg.licenseKey, licMsg.clientId, ip)
+          return
+        }
+        send(ws, { type: 'error', error: 'First message must be agent_register, proxy_connect, electron_chat_register, or license_register' })
         ws.close()
         return
       }
@@ -390,6 +400,38 @@ export function startRelayServer(port: number): void {
       }
       chatWs.send(JSON.stringify(resp))
       console.log(`[relay] Electron chat registered: clientId=${clientId.slice(0, 8)}... chatId=${virtualChatId} from=${chatIp}`)
+    }
+
+    function handleLicenseRegister(licWs: WebSocket, licenseKey: string, clientId: string, licIp: string): void {
+      const result = validateLicense(licenseKey)
+      if (!result.valid) {
+        if (isRateLimited(licIp)) {
+          const err: LicenseError = { type: 'license_error', error: 'Too many attempts. Try again later.' }
+          licWs.send(JSON.stringify(err))
+          licWs.close()
+          return
+        }
+        const err: LicenseError = { type: 'license_error', error: result.reason ?? '序號無效' }
+        licWs.send(JSON.stringify(err))
+        licWs.close()
+        return
+      }
+
+      const virtualChatId = getOrCreateVirtualChatWithLicense(clientId, licenseKey)
+      assignedCode = licenseKey
+      assignedVirtualChatId = virtualChatId
+
+      registerVirtualChat(virtualChatId, licWs, licenseKey)
+
+      setUserProject(virtualChatId, { name: 'remote', path: process.cwd() })
+
+      const resp: LicenseRegistered = {
+        type: 'license_registered',
+        virtualChatId,
+        plan: result.license!.plan,
+      }
+      licWs.send(JSON.stringify(resp))
+      console.log(`[relay] License registered: key=${licenseKey.slice(0, 7)}... plan=${result.license!.plan} chatId=${virtualChatId} from=${licIp}`)
     }
 
     ws.on('close', () => {

@@ -72,6 +72,9 @@ export type {
   ChatStatus,
   ElectronChatRegister,
   ElectronChatRegistered,
+  LicenseRegister,
+  LicenseRegistered,
+  LicenseError,
   ChatInbound,
   ChatOutbound,
 } from './chat-protocol.js'
@@ -83,6 +86,7 @@ export type RelayInbound =
   | AgentRegister | ProxyConnect | AgentShutdown
   | ToolCallRequest | ToolCallResult | ToolCallError
   | import('./chat-protocol.js').ElectronChatRegister
+  | import('./chat-protocol.js').LicenseRegister
   | import('./chat-protocol.js').ChatMessage
   | import('./chat-protocol.js').ChatCallback
 
@@ -91,6 +95,8 @@ export type RelayOutbound =
   | AgentRegistered | ProxyConnected | RelayError
   | ToolCallRequest | ToolCallResult | ToolCallError
   | import('./chat-protocol.js').ElectronChatRegistered
+  | import('./chat-protocol.js').LicenseRegistered
+  | import('./chat-protocol.js').LicenseError
   | import('./chat-protocol.js').ChatResponse
   | import('./chat-protocol.js').ChatEdit
   | import('./chat-protocol.js').ChatDelete

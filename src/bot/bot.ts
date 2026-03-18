@@ -45,6 +45,7 @@ import { ctxCommand } from './commands/ctx.js'
 import { deepCommand } from './commands/deep.js'
 import { browseVisionCommand } from './commands/browse-vision.js'
 import { lastCommand } from './commands/last.js'
+import { licenseCommand } from './commands/license.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
@@ -233,6 +234,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['last3', lastCommand],
     ['last4', lastCommand],
     ['last5', lastCommand],
+    ['license', licenseCommand],
   ]
   for (const [name, handler] of coreEntries) {
     bot.command(name, handler)

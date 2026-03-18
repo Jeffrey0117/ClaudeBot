@@ -60,6 +60,25 @@ export interface ElectronChatRegistered {
   readonly virtualChatId: number
 }
 
+// --- License handshake ---
+
+export interface LicenseRegister {
+  readonly type: 'license_register'
+  readonly licenseKey: string
+  readonly clientId: string
+}
+
+export interface LicenseRegistered {
+  readonly type: 'license_registered'
+  readonly virtualChatId: number
+  readonly plan: string
+}
+
+export interface LicenseError {
+  readonly type: 'license_error'
+  readonly error: string
+}
+
 // --- Union helpers ---
 
 export type ChatInbound = ChatMessage | ChatCallback

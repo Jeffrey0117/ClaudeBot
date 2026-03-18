@@ -29,10 +29,10 @@ const chatPanel = document.getElementById('chat-panel')
 const messagesEl = document.getElementById('messages')
 const typingIndicator = document.getElementById('typing-indicator')
 const messageInput = document.getElementById('message-input')
-const btnConnect = document.getElementById('btn-connect')
+const btnActivate = document.getElementById('btn-activate')
 const btnSend = document.getElementById('btn-send')
-const inputUrl = document.getElementById('relay-url')
-const inputCode = document.getElementById('pairing-code')
+const inputLicenseKey = document.getElementById('license-key')
+const licenseError = document.getElementById('license-error')
 
 // --- State ---
 
@@ -243,9 +243,21 @@ api.onStatus((status) => {
     hideTyping()
   }
 
-  btnConnect.disabled = status !== 'disconnected'
-  inputUrl.disabled = status !== 'disconnected'
-  inputCode.disabled = status !== 'disconnected'
+  btnActivate.disabled = status !== 'disconnected'
+  inputLicenseKey.disabled = status !== 'disconnected'
+})
+
+api.onLicenseConnected((data) => {
+  licenseError.classList.add('hidden')
+  connectPanel.classList.add('hidden')
+  chatPanel.classList.remove('hidden')
+})
+
+api.onLicenseError((data) => {
+  licenseError.textContent = data.error
+  licenseError.classList.remove('hidden')
+  btnActivate.disabled = false
+  inputLicenseKey.disabled = false
 })
 
 api.onLog((message) => {
@@ -257,21 +269,21 @@ api.onLog((message) => {
 
 // --- DOM Events ---
 
-btnConnect.addEventListener('click', () => {
-  const url = inputUrl.value.trim()
-  const code = inputCode.value.trim()
-  if (!url || !code) return
-  api.chatConnect(url, code)
+btnActivate.addEventListener('click', () => {
+  const key = inputLicenseKey.value.trim().toUpperCase()
+  if (!key) return
+  licenseError.classList.add('hidden')
+  api.licenseConnect(key)
 })
 
 btnSend.addEventListener('click', sendMessage)
 
 // keydown handled by command palette section below
 
-// Enter on pairing code → connect
-inputCode.addEventListener('keydown', (e) => {
+// Enter on license key → activate
+inputLicenseKey.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
-    btnConnect.click()
+    btnActivate.click()
   }
 })
 
@@ -414,5 +426,12 @@ messageInput.addEventListener('keydown', (e) => {
   }
 })
 
-// Auto-focus pairing code
-inputCode.focus()
+// Auto-focus license key input
+inputLicenseKey.focus()
+
+// Check for saved license key — auto-connect
+api.getLicenseKey().then((key) => {
+  if (key) {
+    inputLicenseKey.value = key
+  }
+})

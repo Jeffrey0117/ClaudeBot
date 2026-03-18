@@ -60,6 +60,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('chat:status', handler)
   },
 
+  // --- License ---
+  licenseConnect: (key) => ipcRenderer.invoke('license-connect', key),
+  getLicenseKey: () => ipcRenderer.invoke('get-license-key'),
+  setRelayUrl: (url) => ipcRenderer.invoke('set-relay-url', url),
+
+  onLicenseConnected: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('license:connected', handler)
+    return () => ipcRenderer.removeListener('license:connected', handler)
+  },
+
+  onLicenseError: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('license:error', handler)
+    return () => ipcRenderer.removeListener('license:error', handler)
+  },
+
   // --- Settings ---
   setProjectsDir: (dir) => ipcRenderer.invoke('set-projects-dir', dir),
   getProjectsDir: () => ipcRenderer.invoke('get-projects-dir'),

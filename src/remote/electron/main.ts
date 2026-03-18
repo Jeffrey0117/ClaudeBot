@@ -46,6 +46,7 @@ import type {
   ToolCallResult,
   ToolCallError,
   ElectronChatRegister,
+  LicenseRegister,
 } from '../protocol.js'
 
 // --- State ---
@@ -61,6 +62,8 @@ const CONFIG_PATH = resolve(process.cwd(), 'data', 'electron-config.json')
 
 interface ElectronConfig {
   readonly projectsBaseDir?: string
+  readonly licenseKey?: string
+  readonly relayUrl?: string
 }
 
 function loadConfig(): ElectronConfig {
@@ -317,6 +320,108 @@ ipcMain.handle('send-callback', (_event, data: string, msgId: number) => {
   }))
 })
 
+// --- License mode ---
+
+const DEFAULT_RELAY_URL = 'wss://relay.claudebot.app'
+
+function connectLicense(relayUrl: string, licenseKey: string): void {
+  setStatus('connecting')
+  log('正在連線...')
+
+  const clientId = getClientId()
+  const socket = new WebSocket(relayUrl)
+
+  socket.on('open', () => {
+    const msg: LicenseRegister = { type: 'license_register', licenseKey, clientId }
+    socket.send(JSON.stringify(msg))
+  })
+
+  socket.on('message', (raw) => {
+    let msg: { type: string; [key: string]: unknown }
+    try {
+      msg = JSON.parse(raw.toString())
+    } catch {
+      return
+    }
+
+    if (msg.type === 'license_registered') {
+      chatWs = socket
+      setStatus('connected')
+      log(`已連線! (方案: ${msg.plan})`)
+      sendToRenderer('license:connected', { plan: msg.plan })
+      return
+    }
+
+    if (msg.type === 'license_error') {
+      log(`序號錯誤: ${msg.error}`)
+      sendToRenderer('license:error', { error: msg.error })
+      socket.close()
+      return
+    }
+
+    if (msg.type === 'error') {
+      log(`連線錯誤: ${msg.error}`)
+      sendToRenderer('license:error', { error: msg.error })
+      socket.close()
+      return
+    }
+
+    // Route chat messages to renderer
+    if (msg.type === 'chat_response') {
+      sendToRenderer('chat:message', msg)
+    } else if (msg.type === 'chat_edit') {
+      sendToRenderer('chat:edit', msg)
+    } else if (msg.type === 'chat_delete') {
+      sendToRenderer('chat:delete', msg)
+    } else if (msg.type === 'chat_status') {
+      sendToRenderer('chat:status', msg)
+    }
+  })
+
+  socket.on('close', () => {
+    chatWs = null
+    setStatus('disconnected')
+    if (chatShouldReconnect) {
+      log('連線中斷，3 秒後重新連線...')
+      setTimeout(() => connectLicense(relayUrl, licenseKey), 3_000)
+    } else {
+      log('已斷線')
+    }
+  })
+
+  socket.on('error', (err) => {
+    log(`連線錯誤: ${err.message}`)
+  })
+}
+
+ipcMain.handle('license-connect', async (_event, licenseKey: string) => {
+  const config = loadConfig()
+  const relayUrl = config.relayUrl ?? DEFAULT_RELAY_URL
+
+  // Save license key for auto-reconnect
+  saveConfig({ licenseKey, relayUrl })
+
+  chatShouldReconnect = true
+  chatClientMsgId = 1
+  connectLicense(relayUrl, licenseKey)
+
+  // Also start agent connection for remote tool execution
+  const projDir = getProjectsBaseDir()
+  const { createToolDispatcher } = await import('../tool-handlers.js')
+  toolDispatcher = createToolDispatcher(projDir)
+  shouldReconnect = true
+  connectToRelay(relayUrl, licenseKey)
+})
+
+ipcMain.handle('get-license-key', () => {
+  return loadConfig().licenseKey ?? null
+})
+
+ipcMain.handle('set-relay-url', (_event, url: string) => {
+  saveConfig({ relayUrl: url })
+  return url
+})
+
 // --- Window control IPC handlers ---
 
 ipcMain.handle('window-minimize', () => mainWindow?.minimize())
@@ -453,6 +558,25 @@ app.whenReady().then(async () => {
       connectChat(cliUrl, cliCode)
       connectToRelay(cliUrl, cliCode)
     }, 100)
+  } else if (isChatMode()) {
+    // Auto-reconnect with saved license key if available
+    const config = loadConfig()
+    if (config.licenseKey) {
+      const relayUrl = config.relayUrl ?? DEFAULT_RELAY_URL
+      chatShouldReconnect = true
+      chatClientMsgId = 1
+
+      const projDir = getProjectsBaseDir()
+      const { createToolDispatcher } = await import('../tool-handlers.js')
+      toolDispatcher = createToolDispatcher(projDir)
+      shouldReconnect = true
+      elog(`[electron] license auto-connect: key=${config.licenseKey.slice(0, 7)}... relay=${relayUrl}`)
+
+      setTimeout(() => {
+        connectLicense(relayUrl, config.licenseKey!)
+        connectToRelay(relayUrl, config.licenseKey!)
+      }, 100)
+    }
   }
 }).catch((err) => {
   elog(`[electron] app.whenReady() failed: ${err.message}`)

@@ -21,6 +21,7 @@ interface VirtualChatEntry {
   readonly pairingCode: string
   readonly createdAt: number
   readonly lastSeen: number
+  readonly licenseKey?: string
 }
 
 type VirtualChatData = Record<string, VirtualChatEntry>
@@ -112,4 +113,42 @@ export function getVirtualChatPairingCode(chatId: number): string | null {
 export function isCodeUsedByVirtualChat(code: string): boolean {
   const data = store.load()
   return Object.values(data).some((entry) => entry.pairingCode === code)
+}
+
+/** Get or create a virtual chatId for a license-based client. */
+export function getOrCreateVirtualChatWithLicense(clientId: string, licenseKey: string): number {
+  ensureLoaded()
+  const data = store.load()
+  const existing = data[clientId]
+
+  if (existing) {
+    store.save({
+      ...data,
+      [clientId]: { ...existing, licenseKey, lastSeen: Date.now() },
+    })
+    return existing.virtualChatId
+  }
+
+  const virtualChatId = generateVirtualChatId(clientId, data)
+  virtualChatIds.add(virtualChatId)
+  store.save({
+    ...data,
+    [clientId]: {
+      virtualChatId,
+      pairingCode: '',
+      licenseKey,
+      createdAt: Date.now(),
+      lastSeen: Date.now(),
+    },
+  })
+  return virtualChatId
+}
+
+/** Look up the license key for a virtual chatId. */
+export function getVirtualChatLicenseKey(chatId: number): string | null {
+  const data = store.load()
+  for (const entry of Object.values(data)) {
+    if (entry.virtualChatId === chatId) return entry.licenseKey ?? null
+  }
+  return null
 }
