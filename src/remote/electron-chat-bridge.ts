@@ -109,15 +109,27 @@ export async function handleElectronChatMessage(
     return
   }
 
-  // Allot gate for remote projects
+  // License quota gate (takes priority over allot for license-based users)
   if (state.selectedProject.name === 'remote') {
-    const { getPluginModule } = await import('../plugins/loader.js')
-    const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
-    if (allotMod?.tryReserve) {
-      const check = (allotMod.tryReserve as (c: number, t: number | undefined) => { allowed: boolean; reason?: string })(virtualChatId, undefined)
+    const { getVirtualChatLicenseKey } = await import('./virtual-chat-store.js')
+    const licenseKey = getVirtualChatLicenseKey(virtualChatId)
+    if (licenseKey) {
+      const { tryReserveLicense } = await import('./license-store.js')
+      const check = tryReserveLicense(licenseKey)
       if (!check.allowed) {
         sendText(ws, check.reason ?? '⏳ 額度已用完')
         return
+      }
+    } else {
+      // Fallback to allot gate for non-license remote users
+      const { getPluginModule } = await import('../plugins/loader.js')
+      const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
+      if (allotMod?.tryReserve) {
+        const check = (allotMod.tryReserve as (c: number, t: number | undefined) => { allowed: boolean; reason?: string })(virtualChatId, undefined)
+        if (!check.allowed) {
+          sendText(ws, check.reason ?? '⏳ 額度已用完')
+          return
+        }
       }
     }
   }

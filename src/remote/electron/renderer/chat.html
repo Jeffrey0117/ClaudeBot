@@ -26,14 +26,11 @@
   <!-- Connection panel (shown when disconnected) -->
   <div class="connect-panel" id="connect-panel">
     <div class="form-group">
-      <label for="relay-url">Server</label>
-      <input type="text" id="relay-url" placeholder="ws://1.2.3.4:9877" value="ws://localhost:9877">
+      <label for="license-key">序號 License Key</label>
+      <input type="text" id="license-key" placeholder="CB-XXXX-XXXX-XXXX" maxlength="16" autocomplete="off" spellcheck="false">
     </div>
-    <div class="form-group">
-      <label for="pairing-code">Pairing Code</label>
-      <input type="text" id="pairing-code" placeholder="配對碼" maxlength="8" autocomplete="off">
-    </div>
-    <button id="btn-connect" class="btn-primary">Connect</button>
+    <div id="license-error" class="license-error hidden"></div>
+    <button id="btn-activate" class="btn-primary">啟用</button>
   </div>
 
   <!-- Chat panel (shown when connected) -->

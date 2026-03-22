@@ -1,6 +1,6 @@
 import type { BotContext } from '../../types/context.js'
 import { getUserState } from '../state.js'
-import { execSync } from 'child_process'
+import { execSync, execFileSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import { getPairing } from '../../remote/pairing-store.js'
@@ -89,9 +89,8 @@ export async function deployCommand(ctx: BotContext): Promise<void> {
       })
     }
 
-    // Git commit
-    const escapedMessage = commitMessage.replace(/"/g, '\\"')
-    execSync(`git commit -m "${escapedMessage}"`, {
+    // Git commit (use execFileSync to prevent shell injection in commit message)
+    execFileSync('git', ['commit', '-m', commitMessage], {
       cwd: projectDir,
       windowsHide: true,
     })
@@ -137,8 +136,8 @@ export async function deployCommand(ctx: BotContext): Promise<void> {
       pushBranch = 'master'
     }
 
-    // Git push
-    execSync(`git push origin ${pushBranch}`, {
+    // Git push (use execFileSync to prevent shell injection via branch name)
+    execFileSync('git', ['push', 'origin', pushBranch], {
       cwd: pushDir,
       windowsHide: true,
     })

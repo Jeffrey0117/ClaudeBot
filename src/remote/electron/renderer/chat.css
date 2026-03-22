@@ -155,6 +155,13 @@ body {
 .btn-primary:hover { opacity: 0.8; }
 .btn-primary:disabled { opacity: 0.3; cursor: not-allowed; }
 
+.license-error {
+  color: #e81123;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 0;
+}
+
 /* --- Chat Panel --- */
 
 .chat-panel {

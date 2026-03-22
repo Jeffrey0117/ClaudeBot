@@ -13,7 +13,7 @@
 
 import { WebSocket } from 'ws'
 import { resolve } from 'node:path'
-import { createToolDispatcher } from './tool-handlers.js'
+import { createToolDispatcher } from './tool-handlers/index.js'
 import { appendAuditEntry, rotateAuditLog } from './audit-log.js'
 import type {
   AgentRegister,

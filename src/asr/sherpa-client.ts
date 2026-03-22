@@ -9,7 +9,7 @@
  *   3. Attempts to clone Jeffrey0117/Sherpa_ASR
  */
 
-import { spawn, execSync, type ChildProcess } from 'node:child_process'
+import { spawn, execSync, execFileSync, type ChildProcess } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { createInterface, type Interface } from 'node:readline'
 import { join } from 'node:path'
@@ -20,7 +20,7 @@ const TIMEOUT_MS = 60_000
 /** Try running a command — returns true if it exits successfully. */
 function canRun(cmd: string, args: readonly string[]): boolean {
   try {
-    execSync(`"${cmd}" ${args.join(' ')}`, { stdio: 'pipe', timeout: 5_000, windowsHide: true })
+    execFileSync(cmd, [...args], { stdio: 'pipe', timeout: 5_000, windowsHide: true })
     return true
   } catch {
     return false

@@ -29,10 +29,10 @@ const chatPanel = document.getElementById('chat-panel')
 const messagesEl = document.getElementById('messages')
 const typingIndicator = document.getElementById('typing-indicator')
 const messageInput = document.getElementById('message-input')
-const btnConnect = document.getElementById('btn-connect')
+const btnActivate = document.getElementById('btn-activate')
 const btnSend = document.getElementById('btn-send')
-const inputUrl = document.getElementById('relay-url')
-const inputCode = document.getElementById('pairing-code')
+const inputLicenseKey = document.getElementById('license-key')
+const licenseError = document.getElementById('license-error')
 
 // --- State ---
 
@@ -44,6 +44,9 @@ let localMsgId = 1
 
 /** Timer to auto-hide typing indicator */
 let typingTimer = null
+
+/** Prevent duplicate welcome messages (chat + agent both fire 'connected') */
+let welcomeShown = false
 
 const STATUS_LABELS = {
   disconnected: 'Disconnected',
@@ -164,9 +167,24 @@ function removeBubble(id) {
 
 // --- Event Handlers ---
 
-function sendMessage() {
+async function sendMessage() {
   const text = messageInput.value.trim()
   if (!text) return
+
+  // Local-only commands (not sent to bot)
+  if (text.startsWith('/setbase')) {
+    const dir = text.slice('/setbase'.length).trim()
+    messageInput.value = ''
+    if (!dir) {
+      const current = await api.getProjectsDir()
+      appendBubble(localMsgId++, `專案資料夾: \`${current}\`\n\n用法: \`/setbase <路徑>\``, 'bot')
+    } else {
+      const resolved = await api.setProjectsDir(dir)
+      appendBubble(localMsgId++, `專案資料夾已設定: \`${resolved}\`\n使用 \`/projects\` 瀏覽專案`, 'bot')
+    }
+    messageInput.focus()
+    return
+  }
 
   const id = localMsgId++
   appendBubble(id, text, 'user')
@@ -207,7 +225,10 @@ api.onStatus((status) => {
   if (status === 'connected') {
     connectPanel.classList.add('hidden')
     chatPanel.classList.remove('hidden')
-    appendBubble(localMsgId++, 'ClaudeBot 已連線\n輸入 `/` 查看可用指令', 'bot')
+    if (!welcomeShown) {
+      welcomeShown = true
+      appendBubble(localMsgId++, 'ClaudeBot 已連線\n輸入 `/` 查看可用指令', 'bot')
+    }
     messageInput.focus()
   } else if (status === 'connecting') {
     // Auto-connect: skip connection panel, show chat with connecting state
@@ -222,9 +243,21 @@ api.onStatus((status) => {
     hideTyping()
   }
 
-  btnConnect.disabled = status !== 'disconnected'
-  inputUrl.disabled = status !== 'disconnected'
-  inputCode.disabled = status !== 'disconnected'
+  btnActivate.disabled = status !== 'disconnected'
+  inputLicenseKey.disabled = status !== 'disconnected'
+})
+
+api.onLicenseConnected((data) => {
+  licenseError.classList.add('hidden')
+  connectPanel.classList.add('hidden')
+  chatPanel.classList.remove('hidden')
+})
+
+api.onLicenseError((data) => {
+  licenseError.textContent = data.error
+  licenseError.classList.remove('hidden')
+  btnActivate.disabled = false
+  inputLicenseKey.disabled = false
 })
 
 api.onLog((message) => {
@@ -236,21 +269,21 @@ api.onLog((message) => {
 
 // --- DOM Events ---
 
-btnConnect.addEventListener('click', () => {
-  const url = inputUrl.value.trim()
-  const code = inputCode.value.trim()
-  if (!url || !code) return
-  api.chatConnect(url, code)
+btnActivate.addEventListener('click', () => {
+  const key = inputLicenseKey.value.trim().toUpperCase()
+  if (!key) return
+  licenseError.classList.add('hidden')
+  api.licenseConnect(key)
 })
 
 btnSend.addEventListener('click', sendMessage)
 
 // keydown handled by command palette section below
 
-// Enter on pairing code → connect
-inputCode.addEventListener('keydown', (e) => {
+// Enter on license key → activate
+inputLicenseKey.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
-    btnConnect.click()
+    btnActivate.click()
   }
 })
 
@@ -282,6 +315,7 @@ const COMMANDS = [
   { cmd: '/model',    desc: '切換模型' },
   { cmd: '/projects', desc: '瀏覽與選擇專案' },
   { cmd: '/select',   desc: '快速切換專案' },
+  { cmd: '/setbase',  desc: '設定專案資料夾路徑' },
   { cmd: '/chat',     desc: '通用對話模式' },
   { cmd: '/pair',     desc: '配對遠端電腦' },
   { cmd: '/unpair',   desc: '斷開遠端配對' },
@@ -392,5 +426,12 @@ messageInput.addEventListener('keydown', (e) => {
   }
 })
 
-// Auto-focus pairing code
-inputCode.focus()
+// Auto-focus license key input
+inputLicenseKey.focus()
+
+// Check for saved license key — auto-connect
+api.getLicenseKey().then((key) => {
+  if (key) {
+    inputLicenseKey.value = key
+  }
+})

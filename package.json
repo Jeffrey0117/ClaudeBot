@@ -20,7 +20,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "remote": "tsx src/remote/agent.ts",
-    "electron:dev": "electron dist/remote/electron/main.cjs"
+    "electron:dev": "electron dist/remote/electron/main.cjs",
+    "chat": "node run-electron.cjs dist/remote/electron/main.cjs --chat"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",

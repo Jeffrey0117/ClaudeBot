@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { existsSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { scanProjects } from '../../config/projects.js'
@@ -23,9 +23,9 @@ export interface GitSummary {
   readonly commits: readonly CommitInfo[]
 }
 
-function runGit(cwd: string, args: string): string {
+function runGit(cwd: string, args: readonly string[]): string {
   try {
-    return execSync(`git ${args}`, {
+    return execFileSync('git', [...args], {
       cwd,
       encoding: 'utf-8',
       timeout: 5_000,
@@ -77,7 +77,7 @@ function getGitDir(dirPath: string): string | null {
     }
     // Worktree — .git is a file containing "gitdir: /path/to/main/.git/worktrees/xxx"
     // Use git rev-parse to get the common dir
-    const commonDir = runGit(dirPath, 'rev-parse --git-common-dir')
+    const commonDir = runGit(dirPath, ['rev-parse', '--git-common-dir'])
     return commonDir ? resolve(dirPath, commonDir) : null
   } catch {
     return null
@@ -111,7 +111,7 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
   const sinceNorm = normSince(sinceDate)
   const sinceMs = new Date(sinceNorm).getTime()
 
-  const untilArg = untilDate ? ` --until="${normUntil(untilDate)}"` : ''
+  const untilArgs = untilDate ? ['--until=' + normUntil(untilDate)] : []
 
   for (const project of projects) {
     // Skip backup directories — they duplicate the original repo's commits
@@ -130,7 +130,7 @@ export function scanGitActivity(sinceDate: string, untilDate?: string): GitSumma
     // Use HEAD only (no --all), --no-merges for clean counts
     const log = runGit(
       project.path,
-      `log --no-merges --since="${sinceNorm}" ${untilArg} --pretty=format:"%H|%aI|%s" --shortstat`
+      ['log', '--no-merges', '--since=' + sinceNorm, ...untilArgs, '--pretty=format:%H|%aI|%s', '--shortstat'],
     )
 
     if (!log) continue

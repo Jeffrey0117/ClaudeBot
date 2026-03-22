@@ -1,6 +1,6 @@
 import type { Plugin } from '../../types/plugin.js'
 import type { BotContext } from '../../types/context.js'
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
 
@@ -169,11 +169,11 @@ function commitAndPush(filename: string, isNote: boolean): void {
   const type = isNote ? 'note' : 'article'
 
   try {
-    execSync(`git add "${filename}"`, { cwd: isNote ? NOTES_DIR : POSTS_DIR, windowsHide: true })
-    execSync(`git commit -m "${prefix}: add ${type} - ${path.basename(filename, '.md')}"`, {
+    execFileSync('git', ['add', filename], { cwd: isNote ? NOTES_DIR : POSTS_DIR, windowsHide: true })
+    execFileSync('git', ['commit', '-m', `${prefix}: add ${type} - ${path.basename(filename, '.md')}`], {
       cwd: EVERNOTE_REPO, windowsHide: true,
     })
-    execSync('git push', { cwd: EVERNOTE_REPO, windowsHide: true })
+    execFileSync('git', ['push'], { cwd: EVERNOTE_REPO, windowsHide: true })
   } catch (err) {
     throw new Error(`Git operation failed: ${err instanceof Error ? err.message : 'unknown'}`)
   }
