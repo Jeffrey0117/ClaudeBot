@@ -160,11 +160,14 @@ async function pollCommands(botId: string): Promise<void> {
     const pendingCommands = commands.filter((c) => {
       if (c.status !== 'pending') return false
       if (c.targetBot !== null && c.targetBot !== botId) return false
-      // Dashboard commands (chatId === 0) must be processed by main bot
-      // so response-broker events fire in the same process as dashboard server
+      // Dashboard commands (chatId === 0) must be processed by the main bot
+      // so response-broker events fire in the same process as dashboard server.
+      // Main bot uses .env (deriveBotId returns 'bot1'), so check env arg directly.
       const isBrowserCmd = c.type === 'prompt'
         && (typeof c.payload.chatId !== 'number' || c.payload.chatId === 0)
-      if (isBrowserCmd && botId !== 'main') return false
+      const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
+      const isMainBot = !envArg || envArg === '.env'
+      if (isBrowserCmd && !isMainBot) return false
       return true
     })
 
