@@ -189,6 +189,12 @@ async function sendMessage() {
     return
   }
 
+  // Track manual /select commands for titlebar update
+  if (text.startsWith('/select ')) {
+    const path = text.slice('/select '.length).trim()
+    if (path) setProjectLabel(path)
+  }
+
   const id = localMsgId++
   appendBubble(id, text, 'user')
   api.sendMessage(text)
@@ -198,6 +204,12 @@ async function sendMessage() {
 
 function handleButtonClick(data, messageId) {
   api.sendCallback(data, messageId)
+
+  // Track project selection from inline buttons (rproject:<path>)
+  if (typeof data === 'string' && data.startsWith('rproject:')) {
+    const projectPath = data.slice('rproject:'.length)
+    setProjectLabel(projectPath)
+  }
 }
 
 // --- IPC Listeners ---
@@ -294,6 +306,79 @@ btnSend.addEventListener('click', sendMessage)
 inputLicenseKey.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     btnActivate.click()
+  }
+})
+
+// --- Project Selector ---
+
+const btnProject = document.getElementById('btn-project')
+const projectLabel = document.getElementById('project-label')
+const projectPanel = document.getElementById('project-panel')
+const projectPathInput = document.getElementById('project-path-input')
+const btnProjectGo = document.getElementById('btn-project-go')
+const btnBrowseProjects = document.getElementById('btn-browse-projects')
+
+function toggleProjectPanel() {
+  const isHidden = projectPanel.classList.contains('hidden')
+  if (isHidden) {
+    projectPanel.classList.remove('hidden')
+    projectPathInput.value = ''
+    projectPathInput.focus()
+  } else {
+    projectPanel.classList.add('hidden')
+  }
+}
+
+function closeProjectPanel() {
+  projectPanel.classList.add('hidden')
+}
+
+function setProjectLabel(name) {
+  const display = name.replace(/^remote:/, '')
+  const parts = display.replace(/\\/g, '/').split('/')
+  projectLabel.textContent = parts[parts.length - 1] || display
+  projectLabel.title = name
+}
+
+btnProject.addEventListener('click', toggleProjectPanel)
+
+btnBrowseProjects.addEventListener('click', () => {
+  closeProjectPanel()
+  api.sendMessage('/projects')
+  appendBubble(localMsgId++, '/projects', 'user')
+})
+
+btnProjectGo.addEventListener('click', () => {
+  const path = projectPathInput.value.trim()
+  if (!path) return
+  closeProjectPanel()
+  api.sendMessage('/select ' + path)
+  appendBubble(localMsgId++, '/select ' + path, 'user')
+  setProjectLabel(path)
+})
+
+projectPathInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    btnProjectGo.click()
+  }
+  if (e.key === 'Escape') {
+    closeProjectPanel()
+  }
+})
+
+// Close panel on click outside
+document.addEventListener('click', (e) => {
+  if (!projectPanel.classList.contains('hidden') &&
+      !projectPanel.contains(e.target) &&
+      !btnProject.contains(e.target)) {
+    closeProjectPanel()
+  }
+})
+
+// Close panel on Escape anywhere
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !projectPanel.classList.contains('hidden')) {
+    closeProjectPanel()
   }
 })
 

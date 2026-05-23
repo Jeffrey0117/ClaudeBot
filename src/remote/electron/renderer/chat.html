@@ -15,12 +15,24 @@
       <span class="status-dot disconnected" id="status-dot"></span>
       <span id="status-text">Disconnected</span>
     </div>
+    <button id="btn-project" class="titlebar-btn project-btn" title="Select Project">
+      <span id="project-label">No Project</span>
+    </button>
     <div class="titlebar-controls">
       <button id="btn-pin" class="titlebar-btn" title="Always on Top">&#x1F4CC;</button>
       <button id="btn-compact" class="titlebar-btn" title="Compact Mode">&#x25FB;</button>
       <button id="btn-minimize" class="titlebar-btn">&#x2500;</button>
       <button id="btn-close" class="titlebar-btn close">&#x2715;</button>
     </div>
+  </div>
+
+  <!-- Project panel (hidden by default, anchored below titlebar) -->
+  <div id="project-panel" class="project-panel hidden">
+    <div class="project-panel-row">
+      <input type="text" id="project-path-input" placeholder="Paste project path..." autocomplete="off" spellcheck="false">
+      <button id="btn-project-go" class="btn-project-go">GO</button>
+    </div>
+    <button id="btn-browse-projects" class="btn-browse">Browse Projects</button>
   </div>
 
   <!-- Connection panel (shown when disconnected) -->
