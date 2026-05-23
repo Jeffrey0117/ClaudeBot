@@ -72,27 +72,49 @@ interface ElectronConfig {
   readonly licenseKey?: string
   readonly relayUrl?: string
   readonly discoveryUrl?: string
+  readonly relayPasteId?: string
 }
 
-const DEFAULT_DISCOVERY_URL = 'https://rawtxt.jeffdev.cc/relay-url'
+const RAWTXT_BASE = 'https://rawtxt.isnowfriend.com'
 
-/** Fetch the current relay URL from rawtxt (published by bot on tunnel rotation). */
-async function discoverRelayUrl(): Promise<string | null> {
-  const config = loadConfig()
-  const url = config.discoveryUrl || DEFAULT_DISCOVERY_URL
+/** Try fetching text from a URL with timeout. */
+async function fetchText(url: string, timeoutMs = 8_000): Promise<string | null> {
   try {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 8_000)
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
     const res = await fetch(url, { signal: controller.signal })
     clearTimeout(timeout)
     if (!res.ok) return null
-    const text = (await res.text()).trim()
-    // Sanity check: must look like a WebSocket URL
-    if (text.startsWith('wss://') || text.startsWith('ws://')) return text
-    return null
+    return (await res.text()).trim()
   } catch {
     return null
   }
+}
+
+/**
+ * Discover the current relay URL by trying multiple sources:
+ * 1. rawtxt paste via saved paste ID (public, works from any network)
+ * 2. Current tunnel's HTTP /relay-url (works if tunnel still alive)
+ */
+async function discoverRelayUrl(): Promise<string | null> {
+  const config = loadConfig()
+
+  // 1. rawtxt — read relay URL from known paste ID
+  const pasteId = config.relayPasteId
+  if (pasteId) {
+    const url = config.discoveryUrl || `${RAWTXT_BASE}/${pasteId}/raw`
+    const text = await fetchText(url)
+    if (text && (text.startsWith('wss://') || text.startsWith('ws://'))) return text
+  }
+
+  // 2. Try current tunnel's HTTP /relay-url endpoint
+  if (agentRelayUrl) {
+    const httpUrl = agentRelayUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:')
+    const text = await fetchText(`${httpUrl}/relay-url`)
+    if (text && (text.startsWith('wss://') || text.startsWith('ws://'))) return text
+  }
+
+  return null
 }
 
 function loadConfig(): ElectronConfig {
@@ -171,6 +193,10 @@ function connectToRelay(relayUrl: string, code: string): void {
       agentReconnectFails = 0
       setStatus('connected')
       log('Connected and paired!')
+      // Save relay paste ID for URL discovery on reconnect
+      if (msg.relayPasteId && typeof msg.relayPasteId === 'string') {
+        saveConfig({ relayPasteId: msg.relayPasteId })
+      }
       return
     }
 

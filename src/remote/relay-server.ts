@@ -8,6 +8,7 @@
  * The relay forwards tool_call/tool_result messages between proxy and agent.
  */
 
+import { createServer } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
 import {
   findByCode,
@@ -17,7 +18,7 @@ import {
   remoteProjectPath,
 } from './pairing-store.js'
 import { env } from '../config/env.js'
-import { startTunnel, setPublicRelayUrl, getPublicRelayUrl } from './tunnel.js'
+import { startTunnel, setPublicRelayUrl, getPublicRelayUrl, getRelayPasteId } from './tunnel.js'
 import type {
   RelayInbound,
   AgentRegistered,
@@ -124,7 +125,8 @@ function handleAgentRegister(ws: WebSocket, code: string, ip: string, baseDir?: 
     markConnected(code, agentHostname || 'remote')
   }
 
-  send(ws, { type: 'agent_registered' })
+  const pasteId = getRelayPasteId()
+  send(ws, { type: 'agent_registered', ...(pasteId ? { relayPasteId: pasteId } : {}) })
   console.log(`[relay] Agent registered: code=${code} from=${ip}`)
 }
 
@@ -288,7 +290,23 @@ export function startRelayServer(port: number): void {
     console.log(`[relay] Cleared ${cleared} stale connected flag(s) from previous run`)
   }
 
-  const wss = new WebSocketServer({ port })
+  // HTTP server with /relay-url endpoint for Electron auto-discovery
+  const httpServer = createServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/relay-url') {
+      const url = getPublicRelayUrl()
+      res.writeHead(200, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' })
+      res.end(url)
+      return
+    }
+    // Cloudflare Tunnel health-check and browser requests
+    res.writeHead(200, { 'Content-Type': 'text/plain' })
+    res.end('ClaudeBot Relay')
+  })
+  httpServer.listen(port, () => {
+    console.log(`[relay] Server listening on port ${port}`)
+  })
+
+  const wss = new WebSocketServer({ server: httpServer })
 
   // Ping all connected agents every 25s to keep WebSocket alive
   // (Cloudflare Tunnel, NAT routers, and proxies drop idle connections)
@@ -493,6 +511,4 @@ export function startRelayServer(port: number): void {
       }
     }
   }, 5 * 60_000)
-
-  console.log(`[relay] Server listening on port ${port}`)
 }
