@@ -189,6 +189,12 @@ body {
   color: #000;
 }
 
+.project-hint {
+  font-size: 10px;
+  color: #aaa;
+  letter-spacing: 0.3px;
+}
+
 /* --- Connection Panel --- */
 
 .connect-panel {
