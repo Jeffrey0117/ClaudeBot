@@ -7,7 +7,7 @@ const PUBLIC_COMMANDS = new Set(['/start', '/login', '/help'])
 /** Commands remote-only users are allowed to use */
 const REMOTE_ALLOWED_COMMANDS = new Set([
   '/start', '/login', '/help', '/status', '/cancel', '/new',
-  '/pair', '/unpair', '/model', '/projects', '/select', '/chat',
+  '/pair', '/unpair', '/machines', '/model', '/projects', '/select', '/chat',
 ])
 
 export function authMiddleware() {

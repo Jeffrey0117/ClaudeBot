@@ -14,6 +14,7 @@ import {
   markConnected,
   markDisconnected,
   resetAllConnectedFlags,
+  remoteProjectPath,
 } from './pairing-store.js'
 import { env } from '../config/env.js'
 import { startTunnel, setPublicRelayUrl, getPublicRelayUrl } from './tunnel.js'
@@ -45,6 +46,7 @@ interface PairedAgent {
   readonly code: string
   readonly connectedAt: number
   readonly baseDir?: string
+  readonly hostname?: string
 }
 
 interface PairedProxy {
@@ -91,7 +93,7 @@ function isRateLimited(ip: string): boolean {
   return entry.attempts > MAX_ATTEMPTS_PER_MINUTE
 }
 
-function handleAgentRegister(ws: WebSocket, code: string, ip: string, baseDir?: string): void {
+function handleAgentRegister(ws: WebSocket, code: string, ip: string, baseDir?: string, agentHostname?: string): void {
   const session = findByCode(code)
 
   // Allow registration if code is in pairing-store, used by an Electron virtual chat,
@@ -115,11 +117,11 @@ function handleAgentRegister(ws: WebSocket, code: string, ip: string, baseDir?: 
     prev.ws.close()
   }
 
-  agents.set(code, { ws, code, connectedAt: Date.now(), baseDir })
+  agents.set(code, { ws, code, connectedAt: Date.now(), baseDir, hostname: agentHostname })
 
   // Only mark connected in pairing-store if the code exists there
   if (session) {
-    markConnected(code, 'remote agent')
+    markConnected(code, agentHostname || 'remote')
   }
 
   send(ws, { type: 'agent_registered' })
@@ -267,6 +269,11 @@ export function getAgentBaseDir(code: string): string | undefined {
   return agents.get(code)?.baseDir
 }
 
+/** Get the hostname reported by a connected agent. */
+export function getAgentHostname(code: string): string | undefined {
+  return agents.get(code)?.hostname
+}
+
 /** Get the public URL for remote agents (tunnel or manual override). */
 export { getPublicRelayUrl } from './tunnel.js'
 
@@ -324,7 +331,8 @@ export function startRelayServer(port: number): void {
         if (msg.type === 'agent_register') {
           role = 'agent'
           assignedCode = msg.code
-          handleAgentRegister(ws, msg.code, ip, (msg as import('./protocol.js').AgentRegister).baseDir)
+          const regMsg = msg as import('./protocol.js').AgentRegister
+          handleAgentRegister(ws, msg.code, ip, regMsg.baseDir, regMsg.hostname)
           return
         }
         if (msg.type === 'proxy_connect') {
@@ -392,7 +400,7 @@ export function startRelayServer(port: number): void {
       registerVirtualChat(virtualChatId, chatWs, code)
 
       // Auto-set to remote mode so Claude has remote tools (MCP) for the Electron user's machine
-      setUserProject(virtualChatId, { name: 'remote', path: process.cwd() })
+      setUserProject(virtualChatId, { name: 'remote', path: remoteProjectPath(code) })
 
       const resp: ElectronChatRegistered = {
         type: 'electron_chat_registered',
@@ -423,7 +431,7 @@ export function startRelayServer(port: number): void {
 
       registerVirtualChat(virtualChatId, licWs, licenseKey)
 
-      setUserProject(virtualChatId, { name: 'remote', path: process.cwd() })
+      setUserProject(virtualChatId, { name: 'remote', path: remoteProjectPath(licenseKey) })
 
       const resp: LicenseRegistered = {
         type: 'license_registered',

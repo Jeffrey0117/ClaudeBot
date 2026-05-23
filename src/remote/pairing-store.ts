@@ -3,6 +3,9 @@
  * Uses a JSON file so all bot processes (main, bot2, bot5, etc.)
  * share the same pairing data — relay runs in main but /pair
  * can be called from any bot instance.
+ *
+ * Supports multiple machines per chat — each machine gets its own
+ * key suffix: BOT_ID:chatId:threadId:label
  */
 
 import { randomBytes } from 'node:crypto'
@@ -13,6 +16,16 @@ import { sessionKey } from '../bot/state.js'
 
 /** BOT_ID prefix isolates pairings per bot instance */
 const BOT_ID = env.BOT_TOKEN.slice(-6)
+
+/** Build a machine-specific project path for queue isolation. */
+export function remoteProjectPath(label: string): string {
+  return `remote:${label || 'remote'}`
+}
+
+/** Check if a project path is a remote machine path. */
+export function isRemotePath(projectPath: string): boolean {
+  return projectPath.startsWith('remote:')
+}
 
 const PAIRING_TTL_MS = 5 * 60 * 1000 // 5 minutes
 const STORE_PATH = path.resolve('data', 'pairings.json')
@@ -38,17 +51,24 @@ export interface PairingSession {
   readonly createdAt: number
   readonly label: string
   readonly connected: boolean
+  /** Raw hostname from agent registration */
+  readonly hostname?: string
   /** Bot token that created this pairing — used by relay to send notifications via correct bot */
   readonly botToken: string
 }
 
-/** Build a bot-scoped pairing key so each bot instance has its own pairings. */
-function pairingKey(chatId: number, threadId: number | undefined): string {
+/** Build the base key prefix for a chat (without label suffix). */
+function basePairingKey(chatId: number, threadId: number | undefined): string {
   return `${BOT_ID}:${sessionKey(chatId, threadId)}`
 }
 
+/** Build a full pairing key with label suffix. */
+function labeledPairingKey(chatId: number, threadId: number | undefined, label: string): string {
+  return `${basePairingKey(chatId, threadId)}:${label}`
+}
+
 interface StoreData {
-  /** Key: BOT_ID:sessionKey → PairingSession */
+  /** Key: BOT_ID:sessionKey:label → PairingSession */
   readonly pairings: Record<string, PairingSession>
   /** Reverse lookup: code → pairingKey */
   readonly codeIndex: Record<string, string>
@@ -79,24 +99,52 @@ function isExpired(session: PairingSession): boolean {
   return Date.now() - session.createdAt > PAIRING_TTL_MS
 }
 
+/**
+ * Check if a key belongs to a given chat's base prefix.
+ * Handles both old format (BOT_ID:chatId[:threadId]) and
+ * new format (BOT_ID:chatId[:threadId]:label).
+ */
+function keyBelongsToChat(key: string, baseKey: string): boolean {
+  return key === baseKey || key.startsWith(`${baseKey}:`)
+}
+
+/**
+ * Deduplicate label: if the same label already exists for this chat,
+ * append a number suffix.
+ */
+function deduplicateLabel(existing: readonly PairingSession[], rawLabel: string): string {
+  const lowerLabel = rawLabel.toLowerCase()
+  const taken = new Set(existing.map((s) => s.label.toLowerCase()))
+  if (!taken.has(lowerLabel)) return rawLabel
+  for (let i = 2; i <= 99; i++) {
+    const candidate = `${rawLabel}-${i}`
+    if (!taken.has(candidate.toLowerCase())) return candidate
+  }
+  return `${rawLabel}-${Date.now() % 10000}`
+}
+
 export function createPairingCode(
   chatId: number,
   threadId: number | undefined,
 ): string {
-  const key = pairingKey(chatId, threadId)
   const store = readStore()
   const pairings = { ...store.pairings }
   const codeIndex = { ...store.codeIndex }
 
-  // Remove previous pairing for this chat if any
-  const prev = pairings[key]
-  if (prev) {
-    delete codeIndex[prev.code]
-    delete pairings[key]
+  // Purge expired entries for this chat to prevent accumulation
+  const baseKey = basePairingKey(chatId, threadId)
+  for (const [key, session] of Object.entries(pairings)) {
+    if (keyBelongsToChat(key, baseKey) && isExpired(session)) {
+      delete codeIndex[session.code]
+      delete pairings[key]
+    }
   }
 
-  // 8-char alphanumeric code (~2^47 possibilities)
+  // Don't remove previous pairings — allow multiple machines
+  // Use the code itself as temporary label suffix until agent connects
   const code = randomBytes(5).toString('base64url').slice(0, 8).toUpperCase()
+  const tempKey = labeledPairingKey(chatId, threadId, code)
+
   const session: PairingSession = {
     code,
     chatId,
@@ -107,30 +155,81 @@ export function createPairingCode(
     botToken: env.BOT_TOKEN,
   }
 
-  pairings[key] = session
-  codeIndex[code] = key
+  pairings[tempKey] = session
+  codeIndex[code] = tempKey
   writeStore({ pairings, codeIndex })
   return code
 }
 
+/** Get all pairings for a chat (purges expired ones). */
+export function getPairings(
+  chatId: number,
+  threadId: number | undefined,
+): readonly PairingSession[] {
+  const baseKey = basePairingKey(chatId, threadId)
+  const store = readStore()
+  let dirty = false
+  const pairings = { ...store.pairings }
+  const codeIndex = { ...store.codeIndex }
+  const results: PairingSession[] = []
+
+  for (const [key, session] of Object.entries(pairings)) {
+    if (!keyBelongsToChat(key, baseKey)) continue
+
+    // Migrate old-format keys: if key === baseKey (no label suffix),
+    // rename to baseKey:label format
+    if (key === baseKey && session.label) {
+      const newKey = labeledPairingKey(chatId, threadId, session.label)
+      delete pairings[key]
+      pairings[newKey] = session
+      codeIndex[session.code] = newKey
+      dirty = true
+    }
+
+    if (isExpired(session)) {
+      delete codeIndex[session.code]
+      delete pairings[key]
+      dirty = true
+      continue
+    }
+    results.push(session)
+  }
+
+  if (dirty) writeStore({ pairings, codeIndex })
+  return results
+}
+
+/**
+ * Get the active machine's pairing for a chat.
+ * Uses activeMachine from state; falls back to first connected machine.
+ */
 export function getPairing(
   chatId: number,
   threadId: number | undefined,
+  activeMachine?: string,
 ): PairingSession | null {
-  const key = pairingKey(chatId, threadId)
-  const store = readStore()
-  const session = store.pairings[key]
-  if (!session) return null
-  if (isExpired(session)) {
-    // Purge expired
-    const pairings = { ...store.pairings }
-    const codeIndex = { ...store.codeIndex }
-    delete codeIndex[session.code]
-    delete pairings[key]
-    writeStore({ pairings, codeIndex })
-    return null
+  const all = getPairings(chatId, threadId)
+  if (all.length === 0) return null
+
+  // If activeMachine is set, find that specific machine
+  if (activeMachine) {
+    const active = all.find((s) => s.label === activeMachine && s.connected)
+    if (active) return active
   }
-  return session
+
+  // Fallback: first connected machine
+  const connected = all.find((s) => s.connected)
+  return connected ?? null
+}
+
+/** Get a specific machine's pairing by label. */
+export function getPairingByLabel(
+  chatId: number,
+  threadId: number | undefined,
+  label: string,
+): PairingSession | null {
+  const all = getPairings(chatId, threadId)
+  return all.find((s) => s.label === label) ?? null
 }
 
 export function findByCode(code: string): PairingSession | null {
@@ -150,18 +249,35 @@ export function findByCode(code: string): PairingSession | null {
   return session
 }
 
+/** Mark a pairing code as connected and rename key to hostname label. */
 export function markConnected(code: string, label: string): boolean {
   const store = readStore()
-  const key = store.codeIndex[code]
-  if (!key) return false
-  const session = store.pairings[key]
+  const oldKey = store.codeIndex[code]
+  if (!oldKey) return false
+  const session = store.pairings[oldKey]
   if (!session) return false
-  const updated = { ...session, connected: true, label }
-  const pairings = { ...store.pairings, [key]: updated }
-  writeStore({ pairings, codeIndex: store.codeIndex })
-  onConnectFn(updated, label)
-  // Send notification directly using stored botToken — bypass callback chain issues
-  sendPairingNotification(updated, label)
+
+  const pairings = { ...store.pairings }
+  const codeIndex = { ...store.codeIndex }
+
+  // Deduplicate label among this chat's existing pairings
+  const baseKey = basePairingKey(session.chatId, session.threadId)
+  const siblings = Object.entries(pairings)
+    .filter(([k, s]) => keyBelongsToChat(k, baseKey) && s.code !== code)
+    .map(([, s]) => s)
+  const finalLabel = deduplicateLabel(siblings, label)
+
+  const newKey = labeledPairingKey(session.chatId, session.threadId, finalLabel)
+
+  // Remove old key, set new key
+  delete pairings[oldKey]
+  const updated: PairingSession = { ...session, connected: true, label: finalLabel, hostname: label }
+  pairings[newKey] = updated
+  codeIndex[code] = newKey
+
+  writeStore({ pairings, codeIndex })
+  onConnectFn(updated, finalLabel)
+  sendPairingNotification(updated, finalLabel)
   return true
 }
 
@@ -174,7 +290,6 @@ export function markDisconnected(code: string, reason?: string): void {
   const pairings = { ...store.pairings, [key]: { ...session, connected: false } }
   writeStore({ pairings, codeIndex: store.codeIndex })
   onDisconnectFn(session, session.label, reason ?? '連線中斷')
-  // Send notification directly using stored botToken
   sendDisconnectNotification(session, reason ?? '連線中斷')
 }
 
@@ -192,7 +307,7 @@ function sendPairingNotification(session: PairingSession, label: string): void {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: session.chatId,
-      text: `🔗 *遠端已連線* — ${label}\n_已自動切換到遠端模式，可以開始操作了_\n💡 _用 /projects 選擇遠端專案_`,
+      text: `🔗 *${label} 已連線*\n_用 /machines 查看所有已配對機器_`,
       parse_mode: 'Markdown',
     }),
     signal: AbortSignal.timeout(5_000),
@@ -211,35 +326,60 @@ function sendDisconnectNotification(session: PairingSession, reason: string): vo
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: session.chatId,
-      text: `🔌 遠端已斷開 — ${reason}`,
+      text: `🔌 ${session.label || 'remote'} 已斷開 — ${reason}`,
     }),
     signal: AbortSignal.timeout(5_000),
   }).catch(() => {})
 }
 
+/**
+ * Remove pairings for a chat.
+ * If label is provided, remove only that machine.
+ * If label is omitted, remove all machines.
+ */
 export function removePairing(
   chatId: number,
   threadId: number | undefined,
+  label?: string,
 ): boolean {
-  const key = pairingKey(chatId, threadId)
+  const baseKey = basePairingKey(chatId, threadId)
   const store = readStore()
-  const session = store.pairings[key]
-  if (!session) return false
   const pairings = { ...store.pairings }
   const codeIndex = { ...store.codeIndex }
-  delete codeIndex[session.code]
-  delete pairings[key]
-  writeStore({ pairings, codeIndex })
-  return true
+  let removed = false
+
+  if (label) {
+    // Remove specific machine
+    const targetKey = labeledPairingKey(chatId, threadId, label)
+    const session = pairings[targetKey]
+    if (session) {
+      delete codeIndex[session.code]
+      delete pairings[targetKey]
+      removed = true
+    }
+  } else {
+    // Remove all pairings for this chat
+    for (const [key, session] of Object.entries(pairings)) {
+      if (keyBelongsToChat(key, baseKey)) {
+        delete codeIndex[session.code]
+        delete pairings[key]
+        removed = true
+      }
+    }
+  }
+
+  if (removed) writeStore({ pairings, codeIndex })
+  return removed
 }
 
 export function getCodeForChat(
   chatId: number,
   threadId: number | undefined,
 ): string | null {
-  const store = readStore()
-  const session = store.pairings[pairingKey(chatId, threadId)]
-  return session?.code ?? null
+  // Return the first connected machine's code (backward compat)
+  const all = getPairings(chatId, threadId)
+  const connected = all.find((s) => s.connected)
+  return connected?.code ?? all[0]?.code ?? null
 }
 
 /** Return all pairings that were connected (for restart notifications). */

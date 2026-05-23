@@ -475,7 +475,7 @@ function extractDomain(url: string): string {
 
 // --- Shared fetch helper ---
 
-async function callGeminiApi(
+export async function callGeminiApi(
   body: Record<string, unknown>,
   model = 'gemini-2.5-flash',
 ): Promise<{ text: string; error?: string }> {

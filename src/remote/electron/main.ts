@@ -18,13 +18,19 @@ app.commandLine.appendSwitch('disable-gpu')
 app.commandLine.appendSwitch('no-sandbox')
 app.commandLine.appendSwitch('disable-software-rasterizer')
 
+// --- Data directory: userData when packaged, cwd/data when dev ---
+
+const DATA_DIR = app.isPackaged
+  ? resolve(app.getPath('userData'))
+  : resolve(process.cwd(), 'data')
+
 // --- File-based diagnostics (stderr may be swallowed by Electron/npx) ---
 
-const LOG_PATH = resolve(process.cwd(), 'data', 'electron-debug.log')
+const LOG_PATH = resolve(DATA_DIR, 'electron-debug.log')
 function elog(msg: string): void {
   const line = `[${new Date().toISOString()}] ${msg}\n`
   try {
-    mkdirSync(resolve(process.cwd(), 'data'), { recursive: true })
+    mkdirSync(DATA_DIR, { recursive: true })
     appendFileSync(LOG_PATH, line, 'utf-8')
   } catch { /* best effort */ }
   console.error(msg)
@@ -58,7 +64,7 @@ let toolDispatcher: ToolDispatcher | null = null
 
 // --- Electron config (projectsBaseDir etc.) ---
 
-const CONFIG_PATH = resolve(process.cwd(), 'data', 'electron-config.json')
+const CONFIG_PATH = resolve(DATA_DIR, 'electron-config.json')
 
 interface ElectronConfig {
   readonly projectsBaseDir?: string
@@ -77,13 +83,16 @@ function loadConfig(): ElectronConfig {
 function saveConfig(patch: Partial<ElectronConfig>): ElectronConfig {
   const current = loadConfig()
   const updated = { ...current, ...patch }
-  mkdirSync(resolve(process.cwd(), 'data'), { recursive: true })
+  mkdirSync(DATA_DIR, { recursive: true })
   writeFileSync(CONFIG_PATH, JSON.stringify(updated, null, 2), 'utf-8')
   return updated
 }
 
 function getProjectsBaseDir(): string {
-  return loadConfig().projectsBaseDir ?? process.cwd()
+  const configured = loadConfig().projectsBaseDir
+  if (configured) return configured
+  if (app.isPackaged) return app.getPath('home')
+  return process.cwd()
 }
 
 // Chat mode state
@@ -118,7 +127,7 @@ function connectToRelay(relayUrl: string, code: string): void {
   const socket = new WebSocket(relayUrl)
 
   socket.on('open', () => {
-    const msg: AgentRegister = { type: 'agent_register', code, baseDir: process.cwd() }
+    const msg: AgentRegister = { type: 'agent_register', code, baseDir: getProjectsBaseDir() }
     socket.send(JSON.stringify(msg))
   })
 
@@ -192,7 +201,7 @@ function disconnect(): void {
 // --- IPC handlers ---
 
 ipcMain.handle('connect', async (_event, relayUrl: string, code: string, baseDir: string) => {
-  const resolvedDir = resolve(baseDir || process.cwd())
+  const resolvedDir = resolve(baseDir || getProjectsBaseDir())
   // Lazy-load tool-handlers only in agent mode (heavy module with child_process deps)
   const { createToolDispatcher } = await import('../tool-handlers/index.js')
   toolDispatcher = createToolDispatcher(resolvedDir)
@@ -208,14 +217,14 @@ ipcMain.handle('disconnect', () => {
 // --- Chat mode: persistent client ID ---
 
 function getClientId(): string {
-  const idPath = resolve('data', 'electron-client-id')
+  const idPath = resolve(DATA_DIR, 'electron-client-id')
   try {
     const existing = readFileSync(idPath, 'utf-8').trim()
     if (existing) return existing
   } catch { /* not yet created */ }
 
   const newId = randomUUID()
-  mkdirSync(resolve('data'), { recursive: true })
+  mkdirSync(DATA_DIR, { recursive: true })
   writeFileSync(idPath, newId, 'utf-8')
   return newId
 }
@@ -300,6 +309,25 @@ ipcMain.handle('chat-connect', (_event, relayUrl: string, code: string) => {
   chatShouldReconnect = true
   chatClientMsgId = 1
   connectChat(relayUrl, code)
+})
+
+ipcMain.handle('pair-connect', async (_event, relayUrl: string, code: string) => {
+  // Save URL for next session
+  saveConfig({ relayUrl })
+
+  // Chat connection (messaging)
+  chatRelayUrl = relayUrl
+  chatCode = code
+  chatShouldReconnect = true
+  chatClientMsgId = 1
+  connectChat(relayUrl, code)
+
+  // Agent connection (tool execution on this machine)
+  const projDir = getProjectsBaseDir()
+  const { createToolDispatcher } = await import('../tool-handlers/index.js')
+  toolDispatcher = createToolDispatcher(projDir)
+  shouldReconnect = true
+  connectToRelay(relayUrl, code)
 })
 
 ipcMain.handle('send-message', (_event, text: string) => {
@@ -417,6 +445,10 @@ ipcMain.handle('get-license-key', () => {
   return loadConfig().licenseKey ?? null
 })
 
+ipcMain.handle('get-relay-url', () => {
+  return loadConfig().relayUrl ?? ''
+})
+
 ipcMain.handle('set-relay-url', (_event, url: string) => {
   saveConfig({ relayUrl: url })
   return url
@@ -464,6 +496,7 @@ ipcMain.handle('toggle-compact', () => {
 // --- Window ---
 
 function isChatMode(): boolean {
+  if (app.isPackaged) return true
   return process.argv.includes('--chat')
 }
 

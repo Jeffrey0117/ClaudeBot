@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   chatConnect: (relayUrl, code) =>
     ipcRenderer.invoke('chat-connect', relayUrl, code),
 
+  pairConnect: (relayUrl, code) =>
+    ipcRenderer.invoke('pair-connect', relayUrl, code),
+
   sendMessage: (text) =>
     ipcRenderer.invoke('send-message', text),
 
@@ -60,9 +63,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('chat:status', handler)
   },
 
-  // --- License ---
+  // --- License / Config ---
   licenseConnect: (key) => ipcRenderer.invoke('license-connect', key),
   getLicenseKey: () => ipcRenderer.invoke('get-license-key'),
+  getRelayUrl: () => ipcRenderer.invoke('get-relay-url'),
   setRelayUrl: (url) => ipcRenderer.invoke('set-relay-url', url),
 
   onLicenseConnected: (callback) => {

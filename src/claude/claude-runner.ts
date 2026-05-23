@@ -10,7 +10,8 @@ import { getLastResponse } from '../bot/last-response-store.js'
 import { buildContextInjection } from '../bot/context-digest-store.js'
 import { getSystemPrompt } from '../utils/system-prompt.js'
 import { env } from '../config/env.js'
-import { getPairing } from '../remote/pairing-store.js'
+import { getPairing, getPairings, isRemotePath } from '../remote/pairing-store.js'
+import { getActiveMachine } from '../bot/state.js'
 import { getRelayPort, getAgentBaseDir } from '../remote/relay-server.js'
 import { generateRemoteMcpConfig, cleanupRemoteMcpConfig } from '../remote/mcp-config-generator.js'
 import { isVirtualChat, getVirtualChatPairingCode } from '../remote/virtual-chat-store.js'
@@ -109,12 +110,17 @@ export function runClaude(options: RunOptions): void {
   const { prompt, projectPath, model, sessionId, imagePaths, onTextDelta, onToolUse, onResult, onError } =
     options
 
+  // Remote machine paths (remote:label) use bot's cwd as CLI working directory
   let validatedPath: string
-  try {
-    validatedPath = validateProjectPath(projectPath)
-  } catch (error) {
-    onError(`Invalid project path: ${error instanceof Error ? error.message : String(error)}`)
-    return
+  if (isRemotePath(projectPath)) {
+    validatedPath = process.cwd()
+  } else {
+    try {
+      validatedPath = validateProjectPath(projectPath)
+    } catch (error) {
+      onError(`Invalid project path: ${error instanceof Error ? error.message : String(error)}`)
+      return
+    }
   }
 
   const parts: string[] = []
@@ -136,12 +142,13 @@ export function runClaude(options: RunOptions): void {
   // Inject remote pairing context — Telegram users need REMOTE_ENABLED,
   // but Electron virtual chats are ALWAYS remote by definition
   if (options.chatId) {
-    const pairing = env.REMOTE_ENABLED ? getPairing(options.chatId, options.threadId) : null
+    const activeMch = getActiveMachine(options.chatId, options.threadId)
+    const pairing = env.REMOTE_ENABLED ? getPairing(options.chatId, options.threadId, activeMch) : null
     const isRemote = pairing?.connected === true || isVirtualChat(options.chatId)
     if (isRemote) {
       // Look up agent baseDir for remote prompt context
       let remoteBaseDir: string | undefined
-      const pairingForBaseDir = env.REMOTE_ENABLED ? getPairing(options.chatId!, options.threadId) : null
+      const pairingForBaseDir = pairing
       if (pairingForBaseDir?.connected) {
         remoteBaseDir = getAgentBaseDir(pairingForBaseDir.code)
       } else if (isVirtualChat(options.chatId!)) {
@@ -256,8 +263,9 @@ export function runClaude(options: RunOptions): void {
 
   // Determine if this is a remote session (paired Telegram user OR virtual Electron chat)
   // Virtual Electron chats are ALWAYS remote — no REMOTE_ENABLED gate needed
+  const activeMchForSession = options.chatId ? getActiveMachine(options.chatId, options.threadId) : undefined
   const isRemoteSession = options.chatId && (
-    (env.REMOTE_ENABLED && getPairing(options.chatId, options.threadId)?.connected === true) ||
+    (env.REMOTE_ENABLED && getPairing(options.chatId, options.threadId, activeMchForSession)?.connected === true) ||
     isVirtualChat(options.chatId)
   )
 
@@ -274,9 +282,9 @@ export function runClaude(options: RunOptions): void {
   let remoteMcpConfigPath: string | null = null
   if (isRemoteSession && options.chatId) {
     let remoteCode: string | null = null
-    const pairing = getPairing(options.chatId, options.threadId)
-    if (pairing?.connected) {
-      remoteCode = pairing.code
+    const mcpPairing = getPairing(options.chatId, options.threadId, activeMchForSession)
+    if (mcpPairing?.connected) {
+      remoteCode = mcpPairing.code
     } else if (isVirtualChat(options.chatId)) {
       // Virtual Electron chat — look up the agent's code from virtual-chat-store
       remoteCode = getVirtualChatPairingCode(options.chatId)

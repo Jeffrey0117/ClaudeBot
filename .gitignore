@@ -25,3 +25,6 @@ claudebot-plugins/
 tmp-*
 test-*
 *.tsbuildinfo
+dist-electron/
+release/
+!claudebot-logo.png

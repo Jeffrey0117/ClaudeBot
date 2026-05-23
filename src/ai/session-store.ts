@@ -18,8 +18,10 @@ const lastActivity = new Map<string, number>()
 /** Track prompt count per session key (in-memory only) */
 const promptCounts = new Map<string, number>()
 
-/** Auto-rotate session after this many prompts to prevent context bloat */
-const MAX_PROMPTS_PER_SESSION = 20
+/** Auto-rotate session after this many prompts to prevent context bloat.
+ *  Raised from 20 → 50 so conversations can breathe longer before rotation.
+ *  CTX digest still provides continuity on rotation, but 20 was too eager. */
+const MAX_PROMPTS_PER_SESSION = 50
 
 /** In-memory cache of THIS bot's sessions only */
 const mySessions = new Map<string, string>()
@@ -137,7 +139,8 @@ export function getAISessionId(backend: AIBackend, projectPath: string): string 
 
   // Auto-expire: if idle too long, clear session and start fresh
   if (isExpired(key)) {
-    console.log(`[ai-session] auto-expired session for ${projectPath} (idle > 30min)`)
+    const hours = Math.round(SESSION_TTL_MS / 3600000)
+    console.log(`[ai-session] auto-expired session for ${projectPath} (idle > ${hours}h)`)
     mySessions.delete(key)
     lastActivity.delete(key)
     saveSessions()

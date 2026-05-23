@@ -12,7 +12,7 @@ import { scanProjects, resolveWorktreePath } from '../../config/projects.js'
 import { updateBotBio, pinProjectStatus } from '../bio-updater.js'
 import { recordActivity } from '../../plugins/stats/activity-logger.js'
 import { addText, clearBuffer } from '../ordered-message-buffer.js'
-import { getPairing } from '../../remote/pairing-store.js'
+import { getPairing, getPairings, remoteProjectPath } from '../../remote/pairing-store.js'
 import { getPluginModule } from '../../plugins/loader.js'
 import { detectParallelCandidate } from '../../utils/parallel-detector.js'
 import { getActiveJob } from '../parallel-store.js'
@@ -148,9 +148,9 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
     const chatPrompt = chatMatch[1].replace(/^\(|\)$/g, '').trim()
     if (chatPrompt) {
       // Use remote project if paired, otherwise general
-      const chatPairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId) : null
+      const chatPairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId, state.activeMachine) : null
       const chatProject = chatPairing?.connected
-        ? { name: 'remote', path: process.cwd() }
+        ? { name: 'remote', path: remoteProjectPath(chatPairing.label) }
         : { name: 'general', path: process.cwd() }
       const sessionId = getAISessionId(resolveBackend(state.ai.backend), chatProject.path)
       enqueue({
@@ -166,7 +166,7 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
   }
 
   // Remote pairing active — takes priority over local project selection
-  const pairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId) : null
+  const pairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId, state.activeMachine) : null
   if (pairing?.connected) {
     // Allot gate: check quota before enqueue (plugin may not be loaded)
     const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
@@ -186,7 +186,7 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
       }
     }
 
-    const remoteProject = { name: 'remote', path: process.cwd() }
+    const remoteProject = { name: 'remote', path: remoteProjectPath(pairing.label) }
 
     // Steer mode: "!" prefix cancels current remote process and replaces
     if (text.startsWith('!') && isProcessing(remoteProject.path)) {

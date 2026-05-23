@@ -12,6 +12,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
 
 /* --- Titlebar --- */
@@ -87,6 +88,113 @@ body {
   50% { opacity: 0.3; }
 }
 
+/* --- Project Button (Titlebar) --- */
+
+.project-btn {
+  width: auto !important;
+  max-width: 160px;
+  padding: 0 10px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #666;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+  margin-right: 2px;
+}
+
+.project-btn:hover {
+  color: #000;
+}
+
+/* --- Project Panel --- */
+
+.project-panel {
+  position: absolute;
+  top: 36px;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: #fff;
+  border-bottom: 3px solid #000;
+  padding: 12px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.project-panel-row {
+  display: flex;
+  gap: 8px;
+}
+
+.project-panel-row input {
+  flex: 1;
+  padding: 8px 12px;
+  background: #f5f5f0;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  color: #222;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.project-panel-row input:focus {
+  border-color: #000;
+}
+
+.project-panel-row input::placeholder {
+  color: #bbb;
+}
+
+.btn-project-go {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: #000;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transition: opacity 0.2s;
+}
+
+.btn-project-go:hover { opacity: 0.8; }
+
+.btn-browse {
+  padding: 8px 14px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: transparent;
+  color: #666;
+  font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.btn-browse:hover {
+  border-color: #000;
+  color: #000;
+}
+
+.project-hint {
+  font-size: 10px;
+  color: #aaa;
+  letter-spacing: 0.3px;
+}
+
 /* --- Connection Panel --- */
 
 .connect-panel {
@@ -154,6 +262,43 @@ body {
 
 .btn-primary:hover { opacity: 0.8; }
 .btn-primary:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.btn-secondary {
+  padding: 10px 16px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  background: transparent;
+  color: #666;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.btn-secondary:hover { border-color: #000; color: #000; }
+.btn-secondary:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.connect-divider {
+  display: flex;
+  align-items: center;
+  margin: 16px 0 12px;
+  color: #bbb;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.connect-divider::before,
+.connect-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid #ddd;
+}
+
+.connect-divider span {
+  padding: 0 10px;
+}
 
 .license-error {
   color: #e81123;

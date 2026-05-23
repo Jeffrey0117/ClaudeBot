@@ -20,6 +20,8 @@ import {
 } from '../vision/playbook-store.js'
 import { runPlaybookChain } from '../vision/playbook-runner.js'
 import { planPlaybookChain } from '../../ai/gemini-agent-vision.js'
+import { isCdpAvailable } from '../vision/chrome-cdp.js'
+import { runScreenAgent } from '../vision/screen-agent.js'
 
 function escapeMd(text: string): string {
   return text.replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, '\\$1')
@@ -128,6 +130,12 @@ export async function handleAgentMode(
   url: string,
   instruction: string,
 ): Promise<void> {
+  // No CDP? Fall back to screen mode — operate on whatever's on screen.
+  if (!(await isCdpAvailable())) {
+    await handleScreenMode(ctx, chatId, instruction)
+    return
+  }
+
   // Check if already running
   if (getActiveAgent(chatId)) {
     await ctx.reply('⚠️ 已有進行中的自動化任務。\n用 `/bv cancel` 取消後再試。', { parse_mode: 'Markdown' })
@@ -197,6 +205,58 @@ export async function handleAgentMode(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     await ctx.reply(`❌ 自動化失敗: ${msg}`)
+  }
+}
+
+/**
+ * Screen mode: screenshot → Gemini → click/type on actual desktop.
+ * No CDP, no browser restart. User has the target app already open.
+ */
+export async function handleScreenMode(
+  ctx: BotContext,
+  chatId: number,
+  instruction: string,
+): Promise<void> {
+  if (getActiveAgent(chatId)) {
+    await ctx.reply('⚠️ 已有進行中的自動化任務。\n用 `/bv cancel` 取消後再試。', { parse_mode: 'Markdown' })
+    return
+  }
+
+  const statusMsg = await ctx.reply(`🖥️ 螢幕模式啟動...\n🎯 ${instruction}\n💡 直接操作你螢幕上的畫面`)
+
+  const abortController = new AbortController()
+
+  setActiveAgent(chatId, {
+    chatId,
+    url: '(screen)',
+    instruction,
+    abortController,
+    startedAt: Date.now(),
+    currentStep: 0,
+    statusMessageId: statusMsg.message_id,
+  })
+
+  try {
+    const result = await runScreenAgent({
+      chatId,
+      instruction,
+      statusMessageId: statusMsg.message_id,
+      telegram: ctx.telegram,
+      abortSignal: abortController.signal,
+    })
+
+    setLastResult(chatId, {
+      url: '(screen)',
+      instruction,
+      steps: result.steps,
+      success: result.success,
+      timestamp: Date.now(),
+    })
+
+    await sendAgentResult(ctx, chatId, '(螢幕模式)', instruction, result)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await ctx.reply(`❌ 螢幕自動化失敗: ${msg}`)
   }
 }
 

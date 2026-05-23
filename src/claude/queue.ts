@@ -1,5 +1,6 @@
 import type { QueueItem } from '../types/index.js'
 import { acquireLock, releaseLock, waitForLock } from './file-lock.js'
+import { isRemotePath } from '../remote/pairing-store.js'
 
 type ProcessFn = (item: QueueItem) => Promise<void>
 type LockNotifyFn = (chatId: number, projectName: string, holder: string) => void
@@ -137,24 +138,29 @@ async function processNext(projectPath: string): Promise<void> {
     queues.delete(projectPath)
   }
 
+  // Remote paths don't need cross-process file locks — each bot has its own pairing
+  const needsLock = !isRemotePath(projectPath)
+
   try {
     // Task summary for lock file (so other bots can show what we're doing)
     const taskPreview = firstItem.prompt.slice(0, 60).replace(/\n/g, ' ')
 
-    // Try to acquire cross-process file lock
-    const acquired = await acquireLock(projectPath, taskPreview)
+    if (needsLock) {
+      // Try to acquire cross-process file lock
+      const acquired = await acquireLock(projectPath, taskPreview)
 
-    if (!acquired) {
-      // Another bot is working on this project — notify and wait
-      let notified = false
-      await waitForLock(projectPath, (holder) => {
-        if (!notified) {
-          notified = true
-          lockNotifyFn(firstItem.chatId, firstItem.project.name, holder)
-        }
-      })
-      // Re-acquire with our task info now that lock is free
-      await acquireLock(projectPath, taskPreview)
+      if (!acquired) {
+        // Another bot is working on this project — notify and wait
+        let notified = false
+        await waitForLock(projectPath, (holder) => {
+          if (!notified) {
+            notified = true
+            lockNotifyFn(firstItem.chatId, firstItem.project.name, holder)
+          }
+        })
+        // Re-acquire with our task info now that lock is free
+        await acquireLock(projectPath, taskPreview)
+      }
     }
 
     // Lock acquired — merge any prompts that accumulated during wait
@@ -164,7 +170,7 @@ async function processNext(projectPath: string): Promise<void> {
   } catch (error) {
     console.error(`Queue processing failed for chat ${firstItem.chatId}, project ${projectPath}:`, error)
   } finally {
-    await releaseLock(projectPath)
+    if (needsLock) await releaseLock(projectPath)
     processing.delete(projectPath)
     completionFn(projectPath)
     processNext(projectPath)

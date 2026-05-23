@@ -13,6 +13,7 @@
 
 import { WebSocket } from 'ws'
 import { resolve } from 'node:path'
+import { hostname } from 'node:os'
 import { createToolDispatcher } from './tool-handlers/index.js'
 import { appendAuditEntry, rotateAuditLog } from './audit-log.js'
 import type {
@@ -81,7 +82,7 @@ function connect(): void {
 
   socket.on('open', () => {
     lastPing = Date.now()
-    const msg: AgentRegister = { type: 'agent_register', code: PAIRING_CODE, baseDir: BASE_DIR }
+    const msg: AgentRegister = { type: 'agent_register', code: PAIRING_CODE, baseDir: BASE_DIR, hostname: hostname() }
     socket.send(JSON.stringify(msg))
   })
 

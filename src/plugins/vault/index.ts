@@ -36,7 +36,7 @@ import { enqueue } from '../../claude/queue.js'
 import { getAISessionId } from '../../ai/session-store.js'
 import { resolveBackend } from '../../ai/types.js'
 import { getThreadId } from '../../utils/callback-helpers.js'
-import { getPairing } from '../../remote/pairing-store.js'
+import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
 
 // --- Formatters ---
 
@@ -249,8 +249,9 @@ async function handleInject(ctx: BotContext, chatId: number, args: string): Prom
   const param = args.replace(/^(inject|回溯|注入)\s*/, '').trim()
   const threadId = getThreadId(ctx)
   const state = getUserState(chatId, threadId)
+  const injectPairing = getPairing(chatId, threadId, state.activeMachine)
   const project = state.selectedProject
-    ?? (getPairing(chatId, threadId)?.connected ? { name: 'remote', path: process.cwd() } : null)
+    ?? (injectPairing?.connected ? { name: 'remote', path: remoteProjectPath(injectPairing.label) } : null)
 
   if (!project) {
     await ctx.reply('❌ 尚未選擇專案')
@@ -358,8 +359,9 @@ async function handleSummary(ctx: BotContext, chatId: number, args: string): Pro
   const param = args.replace(/^(summary|摘要)\s*/, '').trim()
   const threadId = getThreadId(ctx)
   const state = getUserState(chatId, threadId)
+  const summaryPairing = getPairing(chatId, threadId, state.activeMachine)
   const project = state.selectedProject
-    ?? (getPairing(chatId, threadId)?.connected ? { name: 'remote', path: process.cwd() } : null)
+    ?? (summaryPairing?.connected ? { name: 'remote', path: remoteProjectPath(summaryPairing.label) } : null)
 
   if (!project) {
     await ctx.reply('❌ 尚未選擇專案')

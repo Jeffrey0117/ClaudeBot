@@ -16,12 +16,12 @@
 
   <div class="form-group">
     <label for="relay-url">Server</label>
-    <input type="text" id="relay-url" placeholder="ws://1.2.3.4:9877" value="ws://localhost:9877">
+    <input type="text" id="relay-url" placeholder="wss://xxx.trycloudflare.com">
   </div>
 
   <div class="form-group">
     <label for="pairing-code">Pairing Code</label>
-    <input type="text" id="pairing-code" placeholder="6-digit code" maxlength="6" autocomplete="off">
+    <input type="text" id="pairing-code" placeholder="Pairing code" maxlength="12" autocomplete="off">
   </div>
 
   <div class="form-group">
@@ -85,6 +85,7 @@
         appendLog('Please enter server URL and pairing code.')
         return
       }
+      api.setRelayUrl(url)
       api.connect(url, code, inputDir.value.trim())
     })
 
@@ -92,8 +93,11 @@
       api.disconnect()
     })
 
-    // Auto-focus pairing code input
-    inputCode.focus()
+    // Load last used relay URL, then focus code input
+    api.getRelayUrl().then(url => {
+      if (url) inputUrl.value = url
+      inputCode.focus()
+    })
   </script>
 </body>
 </html>

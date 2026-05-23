@@ -4,9 +4,10 @@ import { resolveBackend } from '../../ai/types.js'
 import { getAISessionId } from '../../ai/session-store.js'
 import { enqueue } from '../../claude/queue.js'
 import { downloadImage } from '../../utils/image-downloader.js'
-import { getPairing } from '../../remote/pairing-store.js'
+import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
 import { remoteToolCall } from '../../remote/relay-client.js'
 import { addBvFile } from '../vision/bv-file-store.js'
+import { saveIgTemplate } from '../commands/ig-post.js'
 
 const IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
@@ -26,17 +27,6 @@ export async function photoHandler(ctx: BotContext): Promise<void> {
     ? ctx.message.message_thread_id
     : undefined
 
-  const state = getUserState(chatId)
-  const project = state.selectedProject
-    ?? (getPairing(chatId, threadId)?.connected
-      ? { name: 'remote', path: process.cwd() }
-      : null)
-
-  if (!project) {
-    await ctx.reply('\u{7528} /projects \u{9078}\u{64C7}\u{5C08}\u{6848}\u{FF0C}\u{6216} /chat \u{9032}\u{5165}\u{901A}\u{7528}\u{5C0D}\u{8A71}\u{6A21}\u{5F0F}\u{3002}')
-    return
-  }
-
   const message = ctx.message
   if (!message || !('photo' in message) || !message.photo) return
 
@@ -48,6 +38,26 @@ export async function photoHandler(ctx: BotContext): Promise<void> {
   }
 
   const caption = message.caption || ''
+
+  // Intercept /ig save <name> — save photo as IG template (no project needed)
+  const igSaveMatch = caption.match(/^\/ig\s+save\s+(\S+)/i)
+  if (igSaveMatch) {
+    await handleIgSave(ctx, fileId, igSaveMatch[1])
+    return
+  }
+
+  const state = getUserState(chatId)
+  const photoPairing = getPairing(chatId, threadId, state.activeMachine)
+  const project = state.selectedProject
+    ?? (photoPairing?.connected
+      ? { name: 'remote', path: remoteProjectPath(photoPairing.label) }
+      : null)
+
+  if (!project) {
+    await ctx.reply('\u{7528} /projects \u{9078}\u{64C7}\u{5C08}\u{6848}\u{FF0C}\u{6216} /chat \u{9032}\u{5165}\u{901A}\u{7528}\u{5C0D}\u{8A71}\u{6A21}\u{5F0F}\u{3002}')
+    return
+  }
+
   const prompt = caption || DEFAULT_PROMPT
   const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
 
@@ -106,9 +116,10 @@ export async function documentHandler(ctx: BotContext): Promise<void> {
 
   // Image document → send to AI (original flow)
   const state = getUserState(chatId)
+  const docPairing = getPairing(chatId, threadId, state.activeMachine)
   const project = state.selectedProject
-    ?? (getPairing(chatId, threadId)?.connected
-      ? { name: 'remote', path: process.cwd() }
+    ?? (docPairing?.connected
+      ? { name: 'remote', path: remoteProjectPath(docPairing.label) }
       : null)
 
   if (!project) {
@@ -190,4 +201,18 @@ function getExtensionFromMime(mimeType: string): string {
     'image/bmp': 'bmp',
   }
   return map[mimeType] ?? 'jpg'
+}
+
+async function handleIgSave(ctx: BotContext, fileId: string, name: string): Promise<void> {
+  try {
+    const fileLink = await ctx.telegram.getFileLink(fileId)
+    const res = await fetch(fileLink.href)
+    if (!res.ok) throw new Error(`下載失敗: ${res.status}`)
+    const buffer = Buffer.from(await res.arrayBuffer())
+    await saveIgTemplate(name, buffer)
+    await ctx.reply(`✅ 已儲存範本: ${name}.png`)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await ctx.reply(`❌ 儲存失敗: ${msg}`)
+  }
 }

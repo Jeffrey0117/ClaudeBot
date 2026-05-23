@@ -12,6 +12,7 @@ const STATE_FILE = join(process.cwd(), '.user-states.json')
 interface UserState {
   selectedProject: ProjectInfo | null
   ai: AIModelSelection
+  activeMachine?: string
 }
 
 type PersistedStates = Record<string, UserState>
@@ -114,6 +115,17 @@ export function setUserAI(chatId: number, ai: AIModelSelection, threadId?: numbe
 /** Return all persisted user states for this bot instance (for restart notifications). */
 export function getActiveUserStates(): ReadonlyMap<string, Readonly<UserState>> {
   return userStates
+}
+
+export function setActiveMachine(chatId: number, machine: string | undefined, threadId?: number): void {
+  const key = sessionKey(chatId, threadId)
+  const state = getUserState(chatId, threadId)
+  userStates.set(key, { ...state, activeMachine: machine })
+  saveStates()
+}
+
+export function getActiveMachine(chatId: number, threadId?: number): string | undefined {
+  return getUserState(chatId, threadId).activeMachine
 }
 
 export function clearUserState(chatId: number, threadId?: number): void {
