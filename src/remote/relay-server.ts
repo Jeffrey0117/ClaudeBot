@@ -14,6 +14,7 @@ import {
   markConnected,
   markDisconnected,
   resetAllConnectedFlags,
+  remoteProjectPath,
 } from './pairing-store.js'
 import { env } from '../config/env.js'
 import { startTunnel, setPublicRelayUrl, getPublicRelayUrl } from './tunnel.js'
@@ -399,7 +400,7 @@ export function startRelayServer(port: number): void {
       registerVirtualChat(virtualChatId, chatWs, code)
 
       // Auto-set to remote mode so Claude has remote tools (MCP) for the Electron user's machine
-      setUserProject(virtualChatId, { name: 'remote', path: process.cwd() })
+      setUserProject(virtualChatId, { name: 'remote', path: remoteProjectPath(code) })
 
       const resp: ElectronChatRegistered = {
         type: 'electron_chat_registered',
@@ -430,7 +431,7 @@ export function startRelayServer(port: number): void {
 
       registerVirtualChat(virtualChatId, licWs, licenseKey)
 
-      setUserProject(virtualChatId, { name: 'remote', path: process.cwd() })
+      setUserProject(virtualChatId, { name: 'remote', path: remoteProjectPath(licenseKey) })
 
       const resp: LicenseRegistered = {
         type: 'license_registered',

@@ -1,7 +1,7 @@
 import type { BotContext } from '../../types/context.js'
 import { cancelAnyRunning, isAnyRunning } from '../../ai/registry.js'
 import { getUserState } from '../state.js'
-import { getPairing } from '../../remote/pairing-store.js'
+import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
 import { env } from '../../config/env.js'
 import { cancelActiveAgent } from '../vision/web-agent-store.js'
 
@@ -18,10 +18,9 @@ export async function cancelCommand(ctx: BotContext): Promise<void> {
   const threadId = ctx.message?.message_thread_id
   const state = getUserState(chatId, threadId)
 
-  // Remote pairing uses process.cwd() as project path (same as message-handler.ts)
   const pairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId) : null
   const project = pairing?.connected
-    ? { name: 'remote', path: process.cwd() }
+    ? { name: 'remote', path: remoteProjectPath(pairing.label) }
     : state.selectedProject
 
   if (project && isAnyRunning(project.path)) {

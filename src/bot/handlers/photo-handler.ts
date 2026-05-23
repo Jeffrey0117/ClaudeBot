@@ -4,7 +4,7 @@ import { resolveBackend } from '../../ai/types.js'
 import { getAISessionId } from '../../ai/session-store.js'
 import { enqueue } from '../../claude/queue.js'
 import { downloadImage } from '../../utils/image-downloader.js'
-import { getPairing } from '../../remote/pairing-store.js'
+import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
 import { remoteToolCall } from '../../remote/relay-client.js'
 import { addBvFile } from '../vision/bv-file-store.js'
 import { saveIgTemplate } from '../commands/ig-post.js'
@@ -47,9 +47,10 @@ export async function photoHandler(ctx: BotContext): Promise<void> {
   }
 
   const state = getUserState(chatId)
+  const photoPairing = getPairing(chatId, threadId, state.activeMachine)
   const project = state.selectedProject
-    ?? (getPairing(chatId, threadId)?.connected
-      ? { name: 'remote', path: process.cwd() }
+    ?? (photoPairing?.connected
+      ? { name: 'remote', path: remoteProjectPath(photoPairing.label) }
       : null)
 
   if (!project) {
@@ -115,9 +116,10 @@ export async function documentHandler(ctx: BotContext): Promise<void> {
 
   // Image document → send to AI (original flow)
   const state = getUserState(chatId)
+  const docPairing = getPairing(chatId, threadId, state.activeMachine)
   const project = state.selectedProject
-    ?? (getPairing(chatId, threadId)?.connected
-      ? { name: 'remote', path: process.cwd() }
+    ?? (docPairing?.connected
+      ? { name: 'remote', path: remoteProjectPath(docPairing.label) }
       : null)
 
   if (!project) {

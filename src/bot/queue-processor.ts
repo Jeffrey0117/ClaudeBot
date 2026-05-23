@@ -523,7 +523,9 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         )
 
     // One-time warning if project has no CLAUDE.md (slows down Claude significantly)
-    if (!isDashboard && !claudeMdWarned.has(item.project.path)) {
+    // Skip for remote paths (remote:label) — CLAUDE.md is on the remote machine
+    const isRemote = item.project.path.startsWith('remote:')
+    if (!isDashboard && !isRemote && !claudeMdWarned.has(item.project.path)) {
       claudeMdWarned.add(item.project.path)
       const hasClaude = existsSync(path.join(item.project.path, 'CLAUDE.md'))
       if (!hasClaude) {

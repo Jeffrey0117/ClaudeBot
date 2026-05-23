@@ -4,7 +4,7 @@ import { addPin, getPins, removePin, clearPins } from '../context-pin-store.js'
 import { getAISessionId, clearAISession } from '../../ai/session-store.js'
 import { resolveBackend } from '../../ai/types.js'
 import { enqueue } from '../../claude/queue.js'
-import { getPairing } from '../../remote/pairing-store.js'
+import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
 
 export async function contextCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -16,8 +16,9 @@ export async function contextCommand(ctx: BotContext): Promise<void> {
   const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
   const state = getUserState(chatId, threadId)
 
+  const pairing = getPairing(chatId, threadId, state.activeMachine)
   const project = state.selectedProject
-    ?? (getPairing(chatId, threadId)?.connected ? { name: 'remote', path: process.cwd() } : null)
+    ?? (pairing?.connected ? { name: 'remote', path: remoteProjectPath(pairing.label) } : null)
 
   if (!project) {
     await ctx.reply('⚠️ 尚未選擇專案。請先用 /projects。')

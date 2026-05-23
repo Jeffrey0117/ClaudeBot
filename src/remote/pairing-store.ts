@@ -17,6 +17,16 @@ import { sessionKey } from '../bot/state.js'
 /** BOT_ID prefix isolates pairings per bot instance */
 const BOT_ID = env.BOT_TOKEN.slice(-6)
 
+/** Build a machine-specific project path for queue isolation. */
+export function remoteProjectPath(label: string): string {
+  return `remote:${label || 'remote'}`
+}
+
+/** Check if a project path is a remote machine path. */
+export function isRemotePath(projectPath: string): boolean {
+  return projectPath.startsWith('remote:')
+}
+
 const PAIRING_TTL_MS = 5 * 60 * 1000 // 5 minutes
 const STORE_PATH = path.resolve('data', 'pairings.json')
 

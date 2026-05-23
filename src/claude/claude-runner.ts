@@ -10,7 +10,7 @@ import { getLastResponse } from '../bot/last-response-store.js'
 import { buildContextInjection } from '../bot/context-digest-store.js'
 import { getSystemPrompt } from '../utils/system-prompt.js'
 import { env } from '../config/env.js'
-import { getPairing, getPairings } from '../remote/pairing-store.js'
+import { getPairing, getPairings, isRemotePath } from '../remote/pairing-store.js'
 import { getActiveMachine } from '../bot/state.js'
 import { getRelayPort, getAgentBaseDir } from '../remote/relay-server.js'
 import { generateRemoteMcpConfig, cleanupRemoteMcpConfig } from '../remote/mcp-config-generator.js'
@@ -110,12 +110,17 @@ export function runClaude(options: RunOptions): void {
   const { prompt, projectPath, model, sessionId, imagePaths, onTextDelta, onToolUse, onResult, onError } =
     options
 
+  // Remote machine paths (remote:label) use bot's cwd as CLI working directory
   let validatedPath: string
-  try {
-    validatedPath = validateProjectPath(projectPath)
-  } catch (error) {
-    onError(`Invalid project path: ${error instanceof Error ? error.message : String(error)}`)
-    return
+  if (isRemotePath(projectPath)) {
+    validatedPath = process.cwd()
+  } else {
+    try {
+      validatedPath = validateProjectPath(projectPath)
+    } catch (error) {
+      onError(`Invalid project path: ${error instanceof Error ? error.message : String(error)}`)
+      return
+    }
   }
 
   const parts: string[] = []

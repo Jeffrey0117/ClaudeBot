@@ -3,7 +3,7 @@ import { getUserState } from '../state.js'
 import { getAISessionId } from '../../ai/session-store.js'
 import { resolveBackend } from '../../ai/types.js'
 import { enqueue } from '../../claude/queue.js'
-import { getPairing } from '../../remote/pairing-store.js'
+import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
 
 const CLAUDEMD_PROMPT = [
   '請掃描此專案並生成或更新 CLAUDE.md。',
@@ -37,8 +37,9 @@ export async function claudemdCommand(ctx: BotContext): Promise<void> {
 
   const threadId = ctx.message?.message_thread_id
   const state = getUserState(chatId, threadId)
+  const pairing = getPairing(chatId, threadId, state.activeMachine)
   const project = state.selectedProject
-    ?? (getPairing(chatId, threadId)?.connected ? { name: 'remote', path: process.cwd() } : null)
+    ?? (pairing?.connected ? { name: 'remote', path: remoteProjectPath(pairing.label) } : null)
 
   if (!project) {
     await ctx.reply('⚠️ 尚未選擇專案。請先用 /projects 或 /pair。')

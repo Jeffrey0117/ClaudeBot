@@ -72,7 +72,7 @@ import { startHeartbeat } from '../dashboard/heartbeat-writer.js'
 import { startCommandReader } from '../dashboard/command-reader.js'
 import { setAvailableCommands } from '../utils/system-prompt.js'
 import { scheduleRestartNotifications } from './restart-notifier.js'
-import { onPairingConnect, onPairingDisconnect, getPairings } from '../remote/pairing-store.js'
+import { onPairingConnect, onPairingDisconnect, getPairings, remoteProjectPath } from '../remote/pairing-store.js'
 import { setUserProject, getActiveMachine, setActiveMachine } from './state.js'
 import { createTelegramProxy } from '../remote/telegram-proxy.js'
 
@@ -376,7 +376,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   // Auto-switch to remote project when pairing connects.
   // Notification is now sent directly in pairing-store.ts using the stored botToken.
   onPairingConnect((session, label) => {
-    setUserProject(session.chatId, { name: 'remote', path: 'remote:remote' }, session.threadId)
+    setUserProject(session.chatId, { name: 'remote', path: remoteProjectPath(label) }, session.threadId)
     // Auto-set as active machine if it's the first connected machine
     const currentActive = getActiveMachine(session.chatId, session.threadId)
     if (!currentActive) {

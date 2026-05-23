@@ -16,14 +16,14 @@ import { Markup } from 'telegraf'
 import type { AIModelSelection, ProjectInfo } from '../../types/index.js'
 import { formatAILabel, resolveBackend } from '../../ai/types.js'
 import { getThreadId } from '../../utils/callback-helpers.js'
-import { getPairing, getPairings, getPairingByLabel, removePairing } from '../../remote/pairing-store.js'
+import { getPairing, getPairings, getPairingByLabel, removePairing, remoteProjectPath } from '../../remote/pairing-store.js'
 
 /** Get selected project, or fall back to remote project if paired. */
 function getEffectiveProject(chatId: number, threadId: number | undefined): ProjectInfo | null {
   const state = getUserState(chatId, threadId)
   if (state.selectedProject) return state.selectedProject
   const pairing = getPairing(chatId, threadId, state.activeMachine)
-  if (pairing?.connected) return { name: 'remote', path: process.cwd() }
+  if (pairing?.connected) return { name: 'remote', path: remoteProjectPath(pairing.label) }
   return null
 }
 

@@ -1,7 +1,7 @@
 import type { BotContext } from '../../types/context.js'
 import { getUserState } from '../state.js'
 import { clearAISession } from '../../ai/session-store.js'
-import { getPairing } from '../../remote/pairing-store.js'
+import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
 
 export async function newSessionCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -9,8 +9,9 @@ export async function newSessionCommand(ctx: BotContext): Promise<void> {
 
   const threadId = ctx.message?.message_thread_id
   const state = getUserState(chatId, threadId)
+  const pairing = getPairing(chatId, threadId, state.activeMachine)
   const project = state.selectedProject
-    ?? (getPairing(chatId, threadId)?.connected ? { name: 'remote', path: process.cwd() } : null)
+    ?? (pairing?.connected ? { name: 'remote', path: remoteProjectPath(pairing.label) } : null)
 
   if (!project) {
     await ctx.reply('⚠️ 尚未選擇專案。請先用 /projects。')

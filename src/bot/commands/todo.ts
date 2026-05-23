@@ -2,7 +2,7 @@ import type { BotContext } from '../../types/context.js'
 import { addTodo, getTodos, toggleTodo, clearDone, getAllTodos } from '../todo-store.js'
 import { getUserState } from '../state.js'
 import { findProject } from '../../config/projects.js'
-import { getPairing } from '../../remote/pairing-store.js'
+import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
 import { basename } from 'node:path'
 
 export async function todoCommand(ctx: BotContext): Promise<void> {
@@ -35,9 +35,10 @@ export async function todoCommand(ctx: BotContext): Promise<void> {
     const msg = ctx.message
     const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
     const state = getUserState(chatId, threadId)
+    const todoPairing = getPairing(chatId, threadId, state.activeMachine)
     const project = state.selectedProject
-      ?? (getPairing(chatId, threadId)?.connected
-        ? { name: 'remote', path: process.cwd() }
+      ?? (todoPairing?.connected
+        ? { name: 'remote', path: remoteProjectPath(todoPairing.label) }
         : null)
     if (!project) {
       await ctx.reply('\u{5C1A}\u{672A}\u{9078}\u{64C7}\u{5C08}\u{6848}\u{3002}\u{8ACB}\u{5148}\u{7528} /projects\u{FF0C}\u{6216}\u{7528} `/todo @\u{5C08}\u{6848}\u{540D} <\u{5167}\u{5BB9}>`', { parse_mode: 'Markdown' })
@@ -97,9 +98,10 @@ export async function todosCommand(ctx: BotContext): Promise<void> {
     const msg = ctx.message
     const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
     const state = getUserState(chatId, threadId)
+    const donePairing = getPairing(chatId, threadId, state.activeMachine)
     const doneProject = state.selectedProject
-      ?? (getPairing(chatId, threadId)?.connected
-        ? { name: 'remote', path: process.cwd() }
+      ?? (donePairing?.connected
+        ? { name: 'remote', path: remoteProjectPath(donePairing.label) }
         : null)
     if (!doneProject) {
       await ctx.reply('\u{5C1A}\u{672A}\u{9078}\u{64C7}\u{5C08}\u{6848}\u{3002}')
@@ -112,9 +114,10 @@ export async function todosCommand(ctx: BotContext): Promise<void> {
     const msg = ctx.message
     const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
     const state = getUserState(chatId, threadId)
+    const togglePairing = getPairing(chatId, threadId, state.activeMachine)
     const toggleProject = state.selectedProject
-      ?? (getPairing(chatId, threadId)?.connected
-        ? { name: 'remote', path: process.cwd() }
+      ?? (togglePairing?.connected
+        ? { name: 'remote', path: remoteProjectPath(togglePairing.label) }
         : null)
     if (!toggleProject) {
       await ctx.reply('\u{5C1A}\u{672A}\u{9078}\u{64C7}\u{5C08}\u{6848}\u{3002}')
@@ -135,9 +138,10 @@ export async function todosCommand(ctx: BotContext): Promise<void> {
     const msg = ctx.message
     const threadId = msg && 'message_thread_id' in msg ? msg.message_thread_id : undefined
     const state = getUserState(chatId, threadId)
+    const listPairing = getPairing(chatId, threadId, state.activeMachine)
     const listProject = state.selectedProject
-      ?? (getPairing(chatId, threadId)?.connected
-        ? { name: 'remote', path: process.cwd() }
+      ?? (listPairing?.connected
+        ? { name: 'remote', path: remoteProjectPath(listPairing.label) }
         : null)
     if (!listProject) {
       await ctx.reply('\u{5C1A}\u{672A}\u{9078}\u{64C7}\u{5C08}\u{6848}\u{3002}\u{8ACB}\u{5148}\u{7528} /projects\u{FF0C}\u{6216}\u{7528} `/todos @\u{5C08}\u{6848}\u{540D}`', { parse_mode: 'Markdown' })

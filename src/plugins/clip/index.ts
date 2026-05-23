@@ -9,7 +9,7 @@ import { getThreadId } from '../../utils/callback-helpers.js'
 import { enqueue } from '../../claude/queue.js'
 import { getAISessionId } from '../../ai/session-store.js'
 import { resolveBackend } from '../../ai/types.js'
-import { getPairing } from '../../remote/pairing-store.js'
+import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
 
 // --- Clip storage (bookmark layer) ---
 
@@ -159,8 +159,9 @@ async function handleCallback(ctx: BotContext, data: string): Promise<boolean> {
 
     case 'pin': {
       const state = getUserState(chatId, threadId)
+      const pinPairing = getPairing(chatId, threadId, state.activeMachine)
       const project = state.selectedProject
-        ?? (getPairing(chatId, threadId)?.connected ? { name: 'remote', path: process.cwd() } : null)
+        ?? (pinPairing?.connected ? { name: 'remote', path: remoteProjectPath(pinPairing.label) } : null)
 
       if (!project) {
         await ctx.editMessageText('❌ 尚未選擇專案，無法釘選')
@@ -179,8 +180,9 @@ async function handleCallback(ctx: BotContext, data: string): Promise<boolean> {
 
     case 'mem': {
       const state = getUserState(chatId, threadId)
+      const memPairing = getPairing(chatId, threadId, state.activeMachine)
       const project = state.selectedProject
-        ?? (getPairing(chatId, threadId)?.connected ? { name: 'remote', path: process.cwd() } : null)
+        ?? (memPairing?.connected ? { name: 'remote', path: remoteProjectPath(memPairing.label) } : null)
 
       if (!project) {
         await ctx.editMessageText('❌ 尚未選擇專案，無法使用 AI 記憶')

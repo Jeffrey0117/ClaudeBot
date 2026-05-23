@@ -14,7 +14,7 @@ import { resolveBackend } from '../ai/types.js'
 import { getAISessionId } from '../ai/session-store.js'
 import { enqueue, isProcessing, getQueueLength } from '../claude/queue.js'
 import { recordActivity } from '../plugins/stats/activity-logger.js'
-import { getPairing } from '../remote/pairing-store.js'
+import { getPairing, remoteProjectPath } from '../remote/pairing-store.js'
 import { getPluginModule } from '../plugins/loader.js'
 
 // Allot rejection notification callback (wired from bot.ts)
@@ -115,7 +115,7 @@ function flushEntries(entries: readonly BufferEntry[]): void {
   // Resolve project: local selection or remote pairing fallback
   const pairing = !state.selectedProject ? getPairing(chatId, threadId) : null
   const project = state.selectedProject
-    ?? (pairing?.connected ? { name: 'remote', path: process.cwd() } : null)
+    ?? (pairing?.connected ? { name: 'remote', path: remoteProjectPath(pairing.label) } : null)
   if (!project) return
 
   // Allot gate: check quota for remote requests
