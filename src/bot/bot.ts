@@ -35,6 +35,7 @@ import { uninstallCommand } from './commands/uninstall.js'
 import { deployCommand } from './commands/deploy.js'
 import { syncCommand } from './commands/sync.js'
 import { pairCommand, unpairCommand } from './commands/pair.js'
+import { machinesCommand } from './commands/machines.js'
 import { rpairCommand } from './commands/rpair.js'
 import { grabCommand } from './commands/grab.js'
 import { claudemdCommand } from './commands/claudemd.js'
@@ -71,8 +72,8 @@ import { startHeartbeat } from '../dashboard/heartbeat-writer.js'
 import { startCommandReader } from '../dashboard/command-reader.js'
 import { setAvailableCommands } from '../utils/system-prompt.js'
 import { scheduleRestartNotifications } from './restart-notifier.js'
-import { onPairingConnect, onPairingDisconnect } from '../remote/pairing-store.js'
-import { setUserProject } from './state.js'
+import { onPairingConnect, onPairingDisconnect, getPairings } from '../remote/pairing-store.js'
+import { setUserProject, getActiveMachine, setActiveMachine } from './state.js'
 import { createTelegramProxy } from '../remote/telegram-proxy.js'
 
 let botInstance: Telegraf<BotContext> | null = null
@@ -114,6 +115,7 @@ export const CORE_COMMANDS = [
   { command: 'sync', description: '同步所有 worktree' },
   { command: 'pair', description: '配對遠端電腦 (code@ip:port)' },
   { command: 'unpair', description: '斷開遠端配對' },
+  { command: 'machines', description: '已配對機器列表/切換' },
   { command: 'rpair', description: '重啟遠端 agent' },
   { command: 'grab', description: '從遠端下載檔案' },
   { command: 'claudemd', description: '自動生成/更新 CLAUDE.md' },
@@ -221,6 +223,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['sync', syncCommand],
     ['pair', pairCommand],
     ['unpair', unpairCommand],
+    ['machines', machinesCommand],
     ['rpair', rpairCommand],
     ['grab', grabCommand],
     ['claudemd', claudemdCommand],
@@ -372,8 +375,22 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
 
   // Auto-switch to remote project when pairing connects.
   // Notification is now sent directly in pairing-store.ts using the stored botToken.
-  onPairingConnect((session) => {
+  onPairingConnect((session, label) => {
     setUserProject(session.chatId, { name: 'remote', path: 'remote:remote' }, session.threadId)
+    // Auto-set as active machine if it's the first connected machine
+    const currentActive = getActiveMachine(session.chatId, session.threadId)
+    if (!currentActive) {
+      setActiveMachine(session.chatId, label, session.threadId)
+    }
+  })
+
+  // When active machine disconnects, auto-switch to next connected machine
+  onPairingDisconnect((session, label) => {
+    const currentActive = getActiveMachine(session.chatId, session.threadId)
+    if (currentActive === label) {
+      const remaining = getPairings(session.chatId, session.threadId).filter((s) => s.connected)
+      setActiveMachine(session.chatId, remaining[0]?.label, session.threadId)
+    }
   })
 
   return bot

@@ -414,6 +414,7 @@ const COMMANDS = [
   { cmd: '/chat',     desc: '通用對話模式' },
   { cmd: '/pair',     desc: '配對遠端電腦' },
   { cmd: '/unpair',   desc: '斷開遠端配對' },
+  { cmd: '/machines', desc: '已配對機器列表/切換' },
 ]
 
 let paletteEl = null

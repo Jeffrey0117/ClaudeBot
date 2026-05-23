@@ -1,7 +1,7 @@
 import type { BotContext } from '../../types/context.js'
 import { findProject } from '../../config/projects.js'
 import { validateProjectPath } from '../../utils/path-validator.js'
-import { getUserState, setUserProject, setUserAI } from '../state.js'
+import { getUserState, setUserProject, setUserAI, setActiveMachine, getActiveMachine } from '../state.js'
 import { addBookmark, removeBookmark, getBookmarks } from '../bookmarks.js'
 import { updateBotBio, pinProjectStatus } from '../bio-updater.js'
 import { getSuggestion, clearSuggestions } from '../suggestion-store.js'
@@ -16,13 +16,13 @@ import { Markup } from 'telegraf'
 import type { AIModelSelection, ProjectInfo } from '../../types/index.js'
 import { formatAILabel, resolveBackend } from '../../ai/types.js'
 import { getThreadId } from '../../utils/callback-helpers.js'
-import { getPairing } from '../../remote/pairing-store.js'
+import { getPairing, getPairings, getPairingByLabel, removePairing } from '../../remote/pairing-store.js'
 
 /** Get selected project, or fall back to remote project if paired. */
 function getEffectiveProject(chatId: number, threadId: number | undefined): ProjectInfo | null {
   const state = getUserState(chatId, threadId)
   if (state.selectedProject) return state.selectedProject
-  const pairing = getPairing(chatId, threadId)
+  const pairing = getPairing(chatId, threadId, state.activeMachine)
   if (pairing?.connected) return { name: 'remote', path: process.cwd() }
   return null
 }
@@ -57,6 +57,10 @@ export async function callbackHandler(ctx: BotContext): Promise<void> {
     await handleParallelSuggest(ctx, chatId, false)
   } else if (data.startsWith('parallel:')) {
     await handleParallelCallback(ctx, chatId, data)
+  } else if (data.startsWith('machine:')) {
+    await handleMachineSelect(ctx, chatId, data.slice('machine:'.length))
+  } else if (data.startsWith('unpair:')) {
+    await handleUnpairSelect(ctx, chatId, data.slice('unpair:'.length))
   } else if (data.startsWith('last_resend:')) {
     await handleLastResend(ctx, chatId)
   } else if (data.startsWith('last_cancel:')) {
@@ -371,6 +375,47 @@ async function handleParallelSuggest(ctx: BotContext, chatId: number, useParalle
     await ctx.editMessageText('➡️ 照常發送到 Claude')
     // Send original text through the normal buffer
     addText(chatId, suggestion.messageId, suggestion.threadId, suggestion.originalText, '')
+  }
+}
+
+async function handleMachineSelect(ctx: BotContext, chatId: number, label: string): Promise<void> {
+  const threadId = getThreadId(ctx)
+
+  const pairing = getPairingByLabel(chatId, threadId, label)
+  if (!pairing?.connected) {
+    await ctx.answerCbQuery('該機器已斷線')
+    return
+  }
+
+  setActiveMachine(chatId, label, threadId)
+
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {})
+  await ctx.answerCbQuery(`已切換到 ${label}`)
+  await ctx.editMessageText(`✅ 已切換到 *${label}*`, { parse_mode: 'Markdown' }).catch(() => {})
+}
+
+async function handleUnpairSelect(ctx: BotContext, chatId: number, label: string): Promise<void> {
+  const threadId = getThreadId(ctx)
+
+  if (label === '__all__') {
+    removePairing(chatId, threadId)
+    setActiveMachine(chatId, undefined, threadId)
+    await ctx.editMessageText('🔌 已斷開所有遠端配對。')
+    await ctx.answerCbQuery('已全部斷開')
+    return
+  }
+
+  const removed = removePairing(chatId, threadId, label)
+  if (removed) {
+    const activeMch = getActiveMachine(chatId, threadId)
+    if (activeMch === label) {
+      const remaining = getPairings(chatId, threadId).filter((s) => s.connected)
+      setActiveMachine(chatId, remaining[0]?.label, threadId)
+    }
+    await ctx.editMessageText(`🔌 已斷開 ${label}`)
+    await ctx.answerCbQuery(`已斷開 ${label}`)
+  } else {
+    await ctx.answerCbQuery('找不到該機器')
   }
 }
 

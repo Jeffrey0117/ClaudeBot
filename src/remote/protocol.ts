@@ -9,6 +9,7 @@ export interface AgentRegister {
   readonly type: 'agent_register'
   readonly code: string
   readonly baseDir?: string
+  readonly hostname?: string
 }
 
 export interface AgentRegistered {
