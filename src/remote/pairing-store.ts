@@ -131,6 +131,15 @@ export function createPairingCode(
   const pairings = { ...store.pairings }
   const codeIndex = { ...store.codeIndex }
 
+  // Purge expired entries for this chat to prevent accumulation
+  const baseKey = basePairingKey(chatId, threadId)
+  for (const [key, session] of Object.entries(pairings)) {
+    if (keyBelongsToChat(key, baseKey) && isExpired(session)) {
+      delete codeIndex[session.code]
+      delete pairings[key]
+    }
+  }
+
   // Don't remove previous pairings — allow multiple machines
   // Use the code itself as temporary label suffix until agent connects
   const code = randomBytes(5).toString('base64url').slice(0, 8).toUpperCase()
