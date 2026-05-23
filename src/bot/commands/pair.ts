@@ -59,40 +59,21 @@ export async function pairCommand(ctx: BotContext): Promise<void> {
     return
   }
 
-  // Generate new pairing code
   const code = createPairingCode(chatId, threadId)
   const { url: wsUrl, isPublic } = getRelayUrl()
-
-  // First-time setup command (clone + install + run)
-  const setupCmd = `git clone https://github.com/Jeffrey0117/ClaudeBot.git && cd ClaudeBot && npm install && npx tsx src/remote/agent.ts ${wsUrl} ${code}`
-
-  // Reconnect command (already in ClaudeBot dir — pull latest first)
-  const reconnectCmd = `git stash && git pull && npx tsx src/remote/agent.ts ${wsUrl} ${code}`
 
   const networkNote = isPublic
     ? '🌐 公開 URL — 跨網路可用'
     : '🏠 區網 URL — 需同個 WiFi（設 `RELAY_TUNNEL=true` 開啟跨網路）'
 
-  // Send URL and code as separate messages for easy tap-to-copy
   await ctx.reply(
     `🔑 *配對資訊*\n\n` +
-    `📡 Server:\n\`${wsUrl}\`\n\n` +
-    `🔐 配對碼:\n\`${code}\`\n\n` +
-    `_在 Electron 桌面客戶端貼上以上資訊即可連線_\n` +
-    `_配對碼 5 分鐘後過期_`,
-    { parse_mode: 'Markdown' },
-  )
-
-  await ctx.reply(
-    `👇 *Terminal 連線（進階）*\n\n` +
-    `*首次:*\n` +
-    '```\n' +
-    `${setupCmd}\n` +
-    '```\n\n' +
-    `*已裝過:*\n` +
-    '```\n' +
-    `${reconnectCmd}\n` +
-    '```\n\n' +
+    `📡 *Server:*\n` +
+    '```\n' + wsUrl + '\n```\n\n' +
+    `🔐 *配對碼:*\n` +
+    '```\n' + code + '\n```\n\n' +
+    `_在 Electron 桌面客戶端貼上即可連線_\n` +
+    `_配對碼 5 分鐘後過期_\n\n` +
     `${networkNote}`,
     { parse_mode: 'Markdown' },
   )
@@ -152,9 +133,11 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
 
   await ctx.reply(
     `💬 *桌面聊天客戶端*\n\n` +
-    `📡 Server:\n\`${wsUrl}\`\n\n` +
-    `🔐 配對碼:\n\`${code}\`\n\n` +
-    `_在 Electron 桌面客戶端貼上以上資訊即可連線_\n` +
+    `📡 *Server:*\n` +
+    '```\n' + wsUrl + '\n```\n\n' +
+    `🔐 *配對碼:*\n` +
+    '```\n' + code + '\n```\n\n' +
+    `_在 Electron 桌面客戶端貼上即可連線_\n` +
     `_配對碼 5 分鐘後過期_\n\n` +
     `${networkNote}`,
     { parse_mode: 'Markdown' },
