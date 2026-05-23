@@ -522,9 +522,14 @@ messageInput.addEventListener('keydown', (e) => {
   }
 })
 
-// Load saved relay URL, then focus code input
-api.getRelayUrl().then((url) => {
-  if (url) inputPairUrl.value = url
+// Load saved relay URL, or auto-discover from rawtxt
+api.getRelayUrl().then(async (url) => {
+  if (url) {
+    inputPairUrl.value = url
+  } else if (api.discoverRelayUrl) {
+    const discovered = await api.discoverRelayUrl()
+    if (discovered) inputPairUrl.value = discovered
+  }
   inputPairCode.focus()
 })
 

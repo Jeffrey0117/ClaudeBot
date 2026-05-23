@@ -31,10 +31,10 @@ export function createPathValidator(baseDir: string): (targetPath: string) => st
     const isAbs = isAbsolute(targetPath) || /^[a-zA-Z]:/.test(targetPath)
     const resolved = isAbs ? resolve(targetPath) : resolve(normalizedBase, targetPath)
 
-    // Absolute paths: must be within user's home directory
+    // Absolute paths: must be within home directory OR baseDir
     if (isAbs) {
-      if (!isUnderDir(resolved, homeDir)) {
-        throw new Error(`Absolute path must be within home directory (${homeDir})`)
+      if (!isUnderDir(resolved, homeDir) && !isUnderDir(resolved, normalizedBase)) {
+        throw new Error(`Absolute path must be within home directory (${homeDir}) or base directory (${normalizedBase})`)
       }
       return resolved
     }

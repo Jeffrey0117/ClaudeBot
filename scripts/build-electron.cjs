@@ -44,6 +44,13 @@ cpSync(
   { recursive: true },
 )
 
+// Copy icon to dist-electron for BrowserWindow icon
+const pngSrc = join(root, 'claudebot-logo.png')
+if (existsSync(pngSrc)) {
+  copyFileSync(pngSrc, join(outDir, 'claudebot-logo.png'))
+  console.log('  Copied claudebot-logo.png to dist-electron/')
+}
+
 // 4. Generate .ico from .png (PNG-in-ICO format)
 console.log('[3/4] Generating icon...')
 const pngPath = join(root, 'claudebot-logo.png')

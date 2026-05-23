@@ -93,9 +93,14 @@
       api.disconnect()
     })
 
-    // Load last used relay URL, then focus code input
-    api.getRelayUrl().then(url => {
-      if (url) inputUrl.value = url
+    // Load last used relay URL, or auto-discover from rawtxt
+    api.getRelayUrl().then(async (url) => {
+      if (url) {
+        inputUrl.value = url
+      } else if (api.discoverRelayUrl) {
+        const discovered = await api.discoverRelayUrl()
+        if (discovered) inputUrl.value = discovered
+      }
       inputCode.focus()
     })
   </script>

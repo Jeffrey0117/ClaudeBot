@@ -551,6 +551,15 @@ ipcMain.handle('get-relay-url', () => {
   return loadConfig().relayUrl ?? ''
 })
 
+ipcMain.handle('discover-relay-url', async () => {
+  const url = await discoverRelayUrl()
+  if (url) {
+    // Convert wss:// relay URL back for display/storage
+    saveConfig({ relayUrl: url })
+  }
+  return url ?? ''
+})
+
 ipcMain.handle('set-relay-url', (_event, url: string) => {
   saveConfig({ relayUrl: url })
   return url
@@ -609,6 +618,15 @@ function resolveAsset(...parts: string[]): string {
   return resolve(process.cwd(), 'src', 'remote', 'electron', ...parts)
 }
 
+function resolveIcon(): string | undefined {
+  // Try dist-electron/ first (packaged), then project root (dev)
+  const distIcon = resolve(__dirname, 'claudebot-logo.png')
+  if (existsSync(distIcon)) return distIcon
+  const rootIcon = resolve(process.cwd(), 'claudebot-logo.png')
+  if (existsSync(rootIcon)) return rootIcon
+  return undefined
+}
+
 function createWindow(): void {
   const chatMode = isChatMode()
   const cwd = process.cwd()
@@ -616,16 +634,19 @@ function createWindow(): void {
   const preloadPath = resolveAsset('preload.cjs')
   const htmlFile = chatMode ? 'chat.html' : 'index.html'
   const htmlPath = resolveAsset('renderer', htmlFile)
+  const iconPath = resolveIcon()
 
   elog(`[electron] mode=${chatMode ? 'chat' : 'agent'} cwd=${cwd}`)
   elog(`[electron] preload=${preloadPath} exists=${existsSync(preloadPath)}`)
   elog(`[electron] html=${htmlPath} exists=${existsSync(htmlPath)}`)
+  elog(`[electron] icon=${iconPath ?? 'none'}`)
 
   mainWindow = new BrowserWindow({
     width: chatMode ? 420 : 600,
     height: chatMode ? 640 : 500,
     title: chatMode ? 'ClaudeBot Chat' : 'ClaudeBot Remote Agent',
     resizable: true,
+    ...(iconPath ? { icon: iconPath } : {}),
     ...(chatMode ? { frame: false, titleBarStyle: 'hidden' as const } : {}),
     webPreferences: {
       preload: preloadPath,
