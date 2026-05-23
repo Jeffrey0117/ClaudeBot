@@ -99,6 +99,24 @@ function killActiveBackend(): void {
   activeBackend = null
 }
 
+/** Publish relay URL to rawtxt so Electron clients can discover it after tunnel rotation. */
+async function publishRelayUrl(wsUrl: string): Promise<void> {
+  try {
+    const res = await fetch('https://rawtxt.jeffdev.cc/api/paste', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: wsUrl, slug: 'relay-url' }),
+    })
+    if (!res.ok) {
+      console.error(`[tunnel] rawtxt publish failed: ${res.status}`)
+    } else {
+      console.log('[tunnel] Published relay URL to rawtxt')
+    }
+  } catch (err) {
+    console.error(`[tunnel] rawtxt publish error: ${err instanceof Error ? err.message : err}`)
+  }
+}
+
 function setTunnelUrl(url: string): void {
   // Convert https:// to wss:// for WebSocket
   const wsUrl = url.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:')
@@ -107,6 +125,8 @@ function setTunnelUrl(url: string): void {
   reconnectAttempt = 0
   startHealthCheck()
   console.log(`[tunnel] Public relay URL: ${wsUrl}`)
+  // Best-effort publish to rawtxt for Electron auto-discovery
+  publishRelayUrl(wsUrl).catch(() => {})
 }
 
 function startHealthCheck(): void {

@@ -705,6 +705,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       runner.run({
         prompt: item.prompt,
         projectPath: item.project.path,
+        projectName: item.project.name,
         model: resolvedAI.model,
         sessionId: freshSessionId,
         imagePaths: item.imagePaths,

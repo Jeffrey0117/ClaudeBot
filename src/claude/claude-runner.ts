@@ -32,6 +32,7 @@ export type OnError = (error: string) => void
 interface RunOptions {
   readonly prompt: string
   readonly projectPath: string
+  readonly projectName?: string
   readonly model: ClaudeModel
   readonly sessionId: string | null
   readonly imagePaths: readonly string[]
@@ -137,6 +138,14 @@ export function runClaude(options: RunOptions): void {
   const pinnedContext = formatPinsForPrompt(validatedPath)
   if (pinnedContext) {
     parts.push(pinnedContext)
+  }
+
+  // Inject current project context (so Claude knows which project it's working on)
+  if (options.projectName) {
+    const projectLine = isRemotePath(projectPath)
+      ? `[當前專案: ${options.projectName}]\n路徑: ${projectPath.replace(/^remote:/, '')}`
+      : `[當前專案: ${options.projectName}]\n路徑: ${projectPath}`
+    parts.push(projectLine)
   }
 
   // Inject remote pairing context — Telegram users need REMOTE_ENABLED,
