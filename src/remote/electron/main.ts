@@ -426,6 +426,10 @@ ipcMain.handle('get-license-key', () => {
   return loadConfig().licenseKey ?? null
 })
 
+ipcMain.handle('get-relay-url', () => {
+  return loadConfig().relayUrl ?? ''
+})
+
 ipcMain.handle('set-relay-url', (_event, url: string) => {
   saveConfig({ relayUrl: url })
   return url
