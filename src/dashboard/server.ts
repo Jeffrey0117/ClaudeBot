@@ -183,11 +183,8 @@ async function handleApi(req: IncomingMessage, res: ServerResponse): Promise<voi
     try {
       const raw = JSON.parse(await readBody(req))
       const validated = CreateCommandSchema.parse(raw)
-      // Dashboard prompt commands always route through main bot
-      // to keep response-broker events in the same process
-      const effectiveTarget = validated.type === 'prompt'
-        ? 'main'
-        : (validated.targetBot ?? null)
+      // Use targetBot from request if specified, otherwise null (any bot can claim)
+      const effectiveTarget = validated.targetBot ?? null
       const cmd: DashboardCommand = {
         id: `cmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         targetBot: effectiveTarget,

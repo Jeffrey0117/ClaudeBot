@@ -41,6 +41,7 @@ interface RunOptions {
   readonly onToolUse: OnToolUse
   readonly onResult: OnResult
   readonly onError: OnError
+  readonly onStaleRetry?: () => void
 }
 
 function resolveClaudeCli(): { cmd: string; prefix: readonly string[] } {
@@ -228,7 +229,6 @@ export function runClaude(options: RunOptions): void {
 
   const args = [
     '-p',
-    fullPrompt,
     '--output-format',
     'stream-json',
     '--verbose',
@@ -293,14 +293,18 @@ export function runClaude(options: RunOptions): void {
   }
 
   console.log('[claude-runner] spawning claude, cwd:', validatedPath)
-  console.log('[claude-runner] prompt:', prompt.slice(0, 50))
+  console.log('[claude-runner] prompt length:', fullPrompt.length, 'preview:', prompt.slice(0, 50))
 
   const proc = spawn(claudeCli.cmd, [...claudeCli.prefix, ...args], {
     cwd: validatedPath,
     shell: false,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   })
+
+  // Pipe prompt via stdin to avoid Windows 32K command-line length limit
+  proc.stdin?.write(fullPrompt)
+  proc.stdin?.end()
 
   console.log('[claude-runner] process spawned, pid:', proc.pid)
 
@@ -316,6 +320,8 @@ export function runClaude(options: RunOptions): void {
       console.log('[claude-runner] stale session detected, clearing and retrying without --resume')
       clearAISession('claude', validatedPath)
       activeProcesses.delete(validatedPath)
+      // Notify the UI layer BEFORE retrying so the user knows the bot just forgot
+      try { options.onStaleRetry?.() } catch {}
       runClaude({ ...options, sessionId: null })
       return
     }
