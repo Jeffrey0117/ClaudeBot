@@ -70,7 +70,7 @@
     "win": {
       "target": "nsis",
       "icon": "claudebot-logo.ico",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": true
     },
     "nsis": {
       "oneClick": true,
