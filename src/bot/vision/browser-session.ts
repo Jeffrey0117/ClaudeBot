@@ -6,7 +6,7 @@
  * One active session per chatId.
  */
 
-import { getBrowser } from './browser-pool.js'
+import { getBrowser, isAttachedMode } from './browser-pool.js'
 import { isSsrfBlocked } from './ssrf-guard.js'
 import type { Page, Frame, Locator } from 'playwright'
 
@@ -20,8 +20,20 @@ const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 
 export interface BrowserSession {
   readonly chatId: number
-  readonly page: Page
+  /** Current active page. MUTABLE in attached mode — sessionNavigate can swap to an existing tab. */
+  page: Page
   readonly createdAt: number
+  /**
+   * True if the CURRENT `page` was created by us (safe to close on cleanup).
+   * False if `page` points at one of the user's real tabs (never close).
+   * Flipped to false when sessionNavigate swaps to an existing user tab.
+   */
+  createdByUs: boolean
+}
+
+/** Safe hostname extract — returns empty string on any parse error. */
+function safeHostname(url: string): string {
+  try { return new URL(url).hostname } catch { return '' }
 }
 
 const sessions = new Map<number, { session: BrowserSession; idleTimer: ReturnType<typeof setTimeout> }>()
@@ -61,44 +73,61 @@ export async function createSession(chatId: number): Promise<BrowserSession> {
   }
 
   const browser = await getBrowser()
-  const page = await browser.newPage({
-    viewport: VIEWPORT,
-    userAgent: USER_AGENT,
-  })
+  const attached = isAttachedMode()
 
-  // --- Stealth: reduce bot detection fingerprint ---
-  await page.addInitScript(`
-    // Remove webdriver flag
-    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+  let page: Page
+  let createdByUs: boolean
 
-    // Fake plugins (empty = obvious bot)
-    Object.defineProperty(navigator, 'plugins', {
-      get: () => [
-        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
-      ],
-    });
+  if (attached) {
+    // Attached: create a new tab inside the user's existing Chrome context
+    // (inherits cookies, login state, profile). Never touch their existing tabs.
+    const contexts = browser.contexts()
+    const ctx = contexts[0] ?? (await browser.newContext())
+    page = await ctx.newPage()
+    createdByUs = true
+    // NO stealth init script — this IS real Chrome, no fingerprint faking needed
+    // NO viewport override — let user's real window size apply
+  } else {
+    page = await browser.newPage({
+      viewport: VIEWPORT,
+      userAgent: USER_AGENT,
+    })
+    createdByUs = true
 
-    // Fake languages
-    Object.defineProperty(navigator, 'languages', { get: () => ['zh-TW', 'zh', 'en-US', 'en'] });
+    // --- Stealth: reduce bot detection fingerprint (owned headless only) ---
+    await page.addInitScript(`
+      // Remove webdriver flag
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
 
-    // Fake chrome object
-    if (!window.chrome) {
-      window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
-    }
+      // Fake plugins (empty = obvious bot)
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [
+          { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+          { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+          { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+        ],
+      });
 
-    // Fake permissions query
-    const origQuery = window.navigator.permissions?.query;
-    if (origQuery) {
-      window.navigator.permissions.query = (params) => {
-        if (params.name === 'notifications') {
-          return Promise.resolve({ state: 'prompt', onchange: null });
-        }
-        return origQuery.call(window.navigator.permissions, params);
-      };
-    }
-  `)
+      // Fake languages
+      Object.defineProperty(navigator, 'languages', { get: () => ['zh-TW', 'zh', 'en-US', 'en'] });
+
+      // Fake chrome object
+      if (!window.chrome) {
+        window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
+      }
+
+      // Fake permissions query
+      const origQuery = window.navigator.permissions?.query;
+      if (origQuery) {
+        window.navigator.permissions.query = (params) => {
+          if (params.name === 'notifications') {
+            return Promise.resolve({ state: 'prompt', onchange: null });
+          }
+          return origQuery.call(window.navigator.permissions, params);
+        };
+      }
+    `)
+  }
 
   // Auto-accept native dialogs (alert, confirm, prompt)
   page.on('dialog', (dialog) => {
@@ -124,6 +153,7 @@ export async function createSession(chatId: number): Promise<BrowserSession> {
     chatId,
     page,
     createdAt: Date.now(),
+    createdByUs,
   }
 
   const idleTimer = setTimeout(() => closeSession(chatId), IDLE_TIMEOUT_MS)
@@ -137,7 +167,51 @@ export async function sessionNavigate(session: BrowserSession, url: string): Pro
     throw new Error('不允許存取內部網路位址')
   }
   resetSessionIdle(session.chatId)
+
+  // Attached mode: look for an existing tab with matching hostname → switch to it
+  // This is the key UX: user has IG logged in → /bv IG → jump straight to their IG tab
+  if (isAttachedMode()) {
+    const matched = await findMatchingTab(session, url)
+    if (matched) {
+      // Orphan cleanup: if we had created a blank tab, close it — we're swapping to a real user tab
+      const oldPage = session.page
+      const oldWasOurs = session.createdByUs
+      session.page = matched
+      session.createdByUs = false  // user's tab — never close
+      if (oldWasOurs && oldPage !== matched && !oldPage.isClosed()) {
+        oldPage.close().catch(() => {})
+      }
+      await matched.bringToFront().catch(() => {})
+      resetSessionIdle(session.chatId)
+      // If the current URL already matches the target, skip navigation (preserve user state)
+      if (matched.url() === url) return
+      // Same host, different path → navigate that tab to the target URL
+      await matched.goto(url, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS })
+      return
+    }
+  }
+
   await session.page.goto(url, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS })
+}
+
+/**
+ * Scan all existing tabs across all contexts for one matching the target URL's hostname.
+ * Excludes the session's current page. Returns first match or null.
+ */
+async function findMatchingTab(session: BrowserSession, targetUrl: string): Promise<Page | null> {
+  const targetHost = safeHostname(targetUrl)
+  if (!targetHost) return null
+
+  const browser = await getBrowser()
+  for (const ctx of browser.contexts()) {
+    for (const p of ctx.pages()) {
+      if (p === session.page) continue
+      if (p.isClosed()) continue
+      const h = safeHostname(p.url())
+      if (h === targetHost) return p
+    }
+  }
+  return null
 }
 
 export async function sessionScreenshot(session: BrowserSession, withGrid = false): Promise<string> {
@@ -384,10 +458,15 @@ export async function closeSession(chatId: number): Promise<void> {
   if (!entry) return
   clearTimeout(entry.idleTimer)
   sessions.delete(chatId)
-  try {
-    await entry.session.page.close()
-  } catch {
-    // page already closed
+  // Only close the page if we created it. In attached mode after
+  // sessionNavigate swap, `page` may point at one of the user's real tabs —
+  // closing that would destroy their work.
+  if (entry.session.createdByUs) {
+    try {
+      await entry.session.page.close()
+    } catch {
+      // page already closed
+    }
   }
 }
 

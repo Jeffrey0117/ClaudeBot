@@ -298,9 +298,9 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
             ),
           ])
         } else {
-          ctx.telegram.sendMessage(ctx.item.chatId,
-            `⚠️ 未知指令: \`${cmd.command}\``, { parse_mode: 'Markdown' }
-          ).catch(() => {})
+          // AI 自己下了不存在的指令 — 不騷擾使用者，只記 log 方便除錯
+          // 常見原因：該 bot 沒啟用對應 plugin（例如 bot2~bot6 沒啟用 vault）
+          console.error(`[queue] @cmd skipped — unknown command: ${cmd.command} (plugin may not be enabled)`)
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -739,6 +739,17 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         },
         onResult: (result) => { handleRunnerResult(ctx, result) },
         onError: (error) => { handleRunnerError(ctx, error) },
+        onStaleRetry: () => {
+          // Claude CLI 那邊的 session 檔過期了 — 已自動清 session 重跑，
+          // 這裡通知使用者「剛剛真的忘了」，避免莫名其妙的失憶感。
+          if (!isDashboard) {
+            telegram.sendMessage(
+              item.chatId,
+              '🧠 Claude session 過期，已自動重啟新對話（上下文可能不完整）',
+              { disable_notification: true },
+            ).catch(() => {})
+          }
+        },
       })
     })
   })

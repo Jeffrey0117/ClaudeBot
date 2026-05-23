@@ -30,6 +30,7 @@ export const claudeAdapter: AIRunner = {
         })
       },
       onError: options.onError,
+      onStaleRetry: options.onStaleRetry,
     })
   },
 

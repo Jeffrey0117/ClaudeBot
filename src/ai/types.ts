@@ -19,6 +19,10 @@ export interface AIRunOptions {
   readonly onToolUse: (toolName: string) => void
   readonly onResult: (result: AIResult) => void
   readonly onError: (error: string) => void
+  /** Fired when a stale session is auto-cleared and the run is retried fresh.
+   *  Gives the UI layer a chance to tell the user the bot just forgot.
+   *  Claude-specific; other backends may never call this. */
+  readonly onStaleRetry?: () => void
 }
 
 export interface AIResult {

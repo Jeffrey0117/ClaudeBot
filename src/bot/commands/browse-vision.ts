@@ -14,7 +14,9 @@
  */
 
 import type { BotContext } from '../../types/context.js'
-import { captureScreenshot, cleanupScreenshot } from '../vision/browser-pool.js'
+import { captureScreenshot, cleanupScreenshot, isAttachedMode } from '../vision/browser-pool.js'
+import { isCdpAvailable, patchChromeShortcuts } from '../vision/chrome-cdp.js'
+import { handleScreenMode } from './bv-agent-handlers.js'
 import { analyzeImageFromPath } from '../../ai/gemini-vision.js'
 import { isSsrfBlocked } from '../vision/ssrf-guard.js'
 import { cancelActiveAgent } from '../vision/web-agent-store.js'
@@ -67,6 +69,8 @@ export async function browseVisionCommand(ctx: BotContext): Promise<void> {
       '`/bv <指令>` — 不給網址，自動 Google 搜尋\n\n' +
       '*連續指令:*\n' +
       '`/bv <指令>` — 有 session 時：繼續操作\n\n' +
+      '*接上你的 Chrome:*\n' +
+      '`/bv attach` — 讓 /bv 操作你本機 Chrome 的實際分頁（保留登入狀態）\n\n' +
       '*Playbook \\(動作回放\\):*\n' +
       '`/bv save` — AI 自動拆分儲存 playbook\n' +
       '`/bv save <名稱>` — 手動儲存為單一 playbook\n' +
@@ -89,6 +93,12 @@ export async function browseVisionCommand(ctx: BotContext): Promise<void> {
     } else {
       await ctx.reply('💤 沒有進行中的網頁自動化任務')
     }
+    return
+  }
+
+  // Attach to user's real Chrome via CDP
+  if (args.toLowerCase() === 'attach') {
+    await handleAttachCommand(ctx)
     return
   }
 
@@ -120,7 +130,7 @@ export async function browseVisionCommand(ctx: BotContext): Promise<void> {
   // Parse URL and optional instruction
   const { url, instruction } = parseArgs(args)
 
-  // No valid URL → continuation mode OR URL-less search mode
+  // No valid URL → continuation mode OR screen mode OR URL-less search
   if (!url) {
     const existingSession = getSession(chatId)
     if (existingSession) {
@@ -129,7 +139,13 @@ export async function browseVisionCommand(ctx: BotContext): Promise<void> {
       return
     }
 
-    // URL-less mode: open Google and let Gemini search + navigate
+    // No CDP? Screen mode — operate on whatever's on screen right now.
+    if (!(await isCdpAvailable())) {
+      await handleScreenMode(ctx, chatId, args)
+      return
+    }
+
+    // CDP available, no session: open Google and let Gemini search + navigate
     await handleAgentMode(ctx, chatId, 'https://www.google.com', args)
     return
   }
@@ -173,6 +189,43 @@ function parseArgs(args: string): { url: string | null; instruction: string } {
 
   const instruction = parts.slice(1).join(' ').trim()
   return { url: rawUrl, instruction }
+}
+
+// --- Attach command: wire /bv to user's real Chrome via CDP ---
+
+async function handleAttachCommand(ctx: BotContext): Promise<void> {
+  // Already connected? Nothing to do.
+  if (isAttachedMode()) {
+    await ctx.reply('✅ 已連到你的 Chrome。直接用 /bv <URL> <指令> 就會操作你的分頁。')
+    return
+  }
+
+  // CDP already listening? Just tell user it's ready.
+  if (await isCdpAvailable()) {
+    await ctx.reply('✅ Chrome CDP 已就緒。/bv 會自動連到你的 Chrome 分頁。')
+    return
+  }
+
+  // No CDP — patch shortcuts and instruct user to restart Chrome manually.
+  // No auto-kill/restart — too error-prone on Windows.
+  try {
+    const patched = await patchChromeShortcuts()
+    const patchLine = patched
+      ? '已幫你改好 Chrome 捷徑（加了 CDP flag）。\n\n'
+      : ''
+    await ctx.reply(
+      `${patchLine}` +
+      '請手動操作：\n' +
+      '1. 關掉所有 Chrome 視窗\n' +
+      '2. 從工具列或桌面重新打開 Chrome\n' +
+      '3. 開好你要操作的頁面（例如 IG）\n' +
+      '4. 再用 /bv <URL> <指令>\n\n' +
+      '只需要做一次，之後 Chrome 每次開都會帶 CDP。',
+    )
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await ctx.reply(`❌ 捷徑修改失敗: ${msg}`)
+  }
 }
 
 // --- One-shot mode ---

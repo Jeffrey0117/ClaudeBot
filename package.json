@@ -21,7 +21,12 @@
     "test:watch": "vitest",
     "remote": "tsx src/remote/agent.ts",
     "electron:dev": "electron dist/remote/electron/main.cjs",
-    "chat": "node run-electron.cjs dist/remote/electron/main.cjs --chat"
+    "chat": "node run-electron.cjs dist/remote/electron/main.cjs --chat",
+    "build:electron": "node scripts/build-electron.cjs",
+    "pack": "npm run build:electron && electron-builder --win",
+    "pack:mac": "npm run build:electron && electron-builder --mac",
+    "pack:linux": "npm run build:electron && electron-builder --linux",
+    "pack:dir": "npm run build:electron && electron-builder --dir"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
@@ -46,6 +51,39 @@
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
+  },
+  "build": {
+    "appId": "app.claudebot.desktop",
+    "productName": "ClaudeBot",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**/*"
+    ],
+    "extraMetadata": {
+      "main": "dist-electron/main.cjs"
+    },
+    "asarUnpack": [
+      "dist-electron/preload.cjs"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "claudebot-logo.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "claudebot-logo.png"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "claudebot-logo.png"
+    }
   },
   "pnpm": {
     "onlyBuiltDependencies": [

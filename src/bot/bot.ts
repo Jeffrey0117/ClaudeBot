@@ -44,6 +44,8 @@ import { parallelCommand } from './commands/parallel.js'
 import { ctxCommand } from './commands/ctx.js'
 import { deepCommand } from './commands/deep.js'
 import { browseVisionCommand } from './commands/browse-vision.js'
+import { igCommand } from './commands/ig-post.js'
+import { setIgSchedulerSendFn, startIgScheduler } from './commands/ig-scheduler.js'
 import { lastCommand } from './commands/last.js'
 import { licenseCommand } from './commands/license.js'
 import { messageHandler } from './handlers/message-handler.js'
@@ -228,6 +230,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['ctx', ctxCommand],
     ['deep', deepCommand],
     ['bv', browseVisionCommand],
+    ['ig', igCommand],
     ['last', lastCommand],
     ['last1', lastCommand],
     ['last2', lastCommand],
@@ -267,6 +270,12 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   wireReminderSendFn(bot)
   wireSchedulerSendFn(bot)
   wireTaskSendFn(bot)
+
+  // Wire IG scheduler
+  setIgSchedulerSendFn(async (chatId, text) => {
+    await bot.telegram.sendMessage(chatId, text)
+  })
+  startIgScheduler()
 
   // Wire allot reject notification (ordered-message-buffer → Telegram)
   setAllotRejectNotify((chatId, text) => {
