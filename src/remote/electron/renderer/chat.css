@@ -155,6 +155,43 @@ body {
 .btn-primary:hover { opacity: 0.8; }
 .btn-primary:disabled { opacity: 0.3; cursor: not-allowed; }
 
+.btn-secondary {
+  padding: 10px 16px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  background: transparent;
+  color: #666;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.btn-secondary:hover { border-color: #000; color: #000; }
+.btn-secondary:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.connect-divider {
+  display: flex;
+  align-items: center;
+  margin: 16px 0 12px;
+  color: #bbb;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.connect-divider::before,
+.connect-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid #ddd;
+}
+
+.connect-divider span {
+  padding: 0 10px;
+}
+
 .license-error {
   color: #e81123;
   font-size: 12px;

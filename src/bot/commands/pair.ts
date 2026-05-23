@@ -73,21 +73,27 @@ export async function pairCommand(ctx: BotContext): Promise<void> {
     ? '🌐 公開 URL — 跨網路可用'
     : '🏠 區網 URL — 需同個 WiFi（設 `RELAY_TUNNEL=true` 開啟跨網路）'
 
+  // Send URL and code as separate messages for easy tap-to-copy
   await ctx.reply(
-    `🔑 *配對碼: \`${code}\`*\n\n` +
-    `👇 *首次* — 複製貼到 terminal:\n` +
+    `🔑 *配對資訊*\n\n` +
+    `📡 Server:\n\`${wsUrl}\`\n\n` +
+    `🔐 配對碼:\n\`${code}\`\n\n` +
+    `_在 Electron 桌面客戶端貼上以上資訊即可連線_\n` +
+    `_配對碼 5 分鐘後過期_`,
+    { parse_mode: 'Markdown' },
+  )
+
+  await ctx.reply(
+    `👇 *Terminal 連線（進階）*\n\n` +
+    `*首次:*\n` +
     '```\n' +
     `${setupCmd}\n` +
     '```\n\n' +
-    `👇 *已裝過* — 直接連:\n` +
+    `*已裝過:*\n` +
     '```\n' +
     `${reconnectCmd}\n` +
     '```\n\n' +
-    `💡 指定專案目錄加在最後面，例如:\n` +
-    `\`...${code} C:\\\\path\\\\to\\\\project\`\n\n` +
-    `💬 桌面聊天客戶端: \`/pair chat\`\n\n` +
-    `${networkNote}\n` +
-    `_配對碼 5 分鐘後過期_`,
+    `${networkNote}`,
     { parse_mode: 'Markdown' },
   )
 }
@@ -146,13 +152,11 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
 
   await ctx.reply(
     `💬 *桌面聊天客戶端*\n\n` +
-    `在 ClaudeBot 目錄下貼上:\n` +
-    '```\n' +
-    `${electronCmd}\n` +
-    '```\n\n' +
-    `💡 首次需先 \`npm install\` 裝 electron\n\n` +
-    `${networkNote}\n` +
-    `_配對碼 5 分鐘後過期_`,
+    `📡 Server:\n\`${wsUrl}\`\n\n` +
+    `🔐 配對碼:\n\`${code}\`\n\n` +
+    `_在 Electron 桌面客戶端貼上以上資訊即可連線_\n` +
+    `_配對碼 5 分鐘後過期_\n\n` +
+    `${networkNote}`,
     { parse_mode: 'Markdown' },
   )
 }

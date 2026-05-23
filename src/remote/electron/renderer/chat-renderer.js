@@ -30,7 +30,10 @@ const messagesEl = document.getElementById('messages')
 const typingIndicator = document.getElementById('typing-indicator')
 const messageInput = document.getElementById('message-input')
 const btnActivate = document.getElementById('btn-activate')
+const btnPair = document.getElementById('btn-pair')
 const btnSend = document.getElementById('btn-send')
+const inputPairUrl = document.getElementById('pair-url')
+const inputPairCode = document.getElementById('pair-code')
 const inputLicenseKey = document.getElementById('license-key')
 const licenseError = document.getElementById('license-error')
 
@@ -269,6 +272,13 @@ api.onLog((message) => {
 
 // --- DOM Events ---
 
+btnPair.addEventListener('click', () => {
+  const url = inputPairUrl.value.trim()
+  const code = inputPairCode.value.trim()
+  if (!url || !code) return
+  api.pairConnect(url, code)
+})
+
 btnActivate.addEventListener('click', () => {
   const key = inputLicenseKey.value.trim().toUpperCase()
   if (!key) return
@@ -426,12 +436,18 @@ messageInput.addEventListener('keydown', (e) => {
   }
 })
 
-// Auto-focus license key input
-inputLicenseKey.focus()
+// Load saved relay URL, then focus code input
+api.getRelayUrl().then((url) => {
+  if (url) inputPairUrl.value = url
+  inputPairCode.focus()
+})
 
-// Check for saved license key — auto-connect
+// Enter on pair code → connect
+inputPairCode.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') btnPair.click()
+})
+
+// Check for saved license key
 api.getLicenseKey().then((key) => {
-  if (key) {
-    inputLicenseKey.value = key
-  }
+  if (key) inputLicenseKey.value = key
 })

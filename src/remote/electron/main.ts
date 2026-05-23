@@ -311,6 +311,25 @@ ipcMain.handle('chat-connect', (_event, relayUrl: string, code: string) => {
   connectChat(relayUrl, code)
 })
 
+ipcMain.handle('pair-connect', async (_event, relayUrl: string, code: string) => {
+  // Save URL for next session
+  saveConfig({ relayUrl })
+
+  // Chat connection (messaging)
+  chatRelayUrl = relayUrl
+  chatCode = code
+  chatShouldReconnect = true
+  chatClientMsgId = 1
+  connectChat(relayUrl, code)
+
+  // Agent connection (tool execution on this machine)
+  const projDir = getProjectsBaseDir()
+  const { createToolDispatcher } = await import('../tool-handlers/index.js')
+  toolDispatcher = createToolDispatcher(projDir)
+  shouldReconnect = true
+  connectToRelay(relayUrl, code)
+})
+
 ipcMain.handle('send-message', (_event, text: string) => {
   if (!chatWs || chatWs.readyState !== chatWs.OPEN) return
   chatWs.send(JSON.stringify({
@@ -477,6 +496,7 @@ ipcMain.handle('toggle-compact', () => {
 // --- Window ---
 
 function isChatMode(): boolean {
+  if (app.isPackaged) return true
   return process.argv.includes('--chat')
 }
 
