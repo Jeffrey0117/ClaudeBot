@@ -14,7 +14,8 @@ import { getPairing, getPairings, isRemotePath } from '../remote/pairing-store.j
 import { getActiveMachine } from '../bot/state.js'
 import { getRelayPort, getAgentBaseDir } from '../remote/relay-server.js'
 import { generateRemoteMcpConfig, cleanupRemoteMcpConfig } from '../remote/mcp-config-generator.js'
-import { isVirtualChat, getVirtualChatPairingCode } from '../remote/virtual-chat-store.js'
+import { isVirtualChat, getVirtualChatPairingCode, getVirtualChatLicenseKey } from '../remote/virtual-chat-store.js'
+import { isAdminLicense } from '../remote/license-store.js'
 
 /** Detect affirmative/agreement replies that reference the previous message. */
 const AFFIRMATIVE_RE = /^(好|可以|沒問題|沒差|OK|ok|Yes|yes|對|嗯|行|做吧|來吧|就這樣|同意|贊成|go|就醬|開始|動手|沒錯|是的|確定|sure|yep|yeah|做啊|加吧|弄吧|改吧|要|proceed|continue|繼續)/i
@@ -154,7 +155,8 @@ export function runClaude(options: RunOptions): void {
     const activeMch = getActiveMachine(options.chatId, options.threadId)
     const pairing = env.REMOTE_ENABLED ? getPairing(options.chatId, options.threadId, activeMch) : null
     const isRemote = pairing?.connected === true || isVirtualChat(options.chatId)
-    const isAdmin = env.ADMIN_CHAT_ID === options.chatId
+    const isAdmin = env.ADMIN_CHAT_ID === options.chatId ||
+      (isVirtualChat(options.chatId) && isAdminLicense(getVirtualChatLicenseKey(options.chatId) ?? ''))
     if (isRemote) {
       // Look up agent baseDir for remote prompt context
       let remoteBaseDir: string | undefined
