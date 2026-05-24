@@ -102,15 +102,15 @@ function killActiveBackend(): void {
 const RAWTXT_BASE = 'https://rawtxt.isnowfriend.com'
 const RELAY_PASTE_ID_FILE = join(process.cwd(), 'data', '.relay-paste-id')
 
-/** Publish relay URL to rawtxt so Electron clients can discover it after tunnel rotation. */
+/** Publish relay URL to rawtxt so Electron clients can discover it after tunnel rotation.
+ *
+ * Old paste is kept alive (not deleted) so Electron clients with stale paste IDs
+ * can still reach rawtxt (even though the URL in the old paste is dead).
+ * The scan-based discovery in Electron will find the newest paste containing wss://.
+ */
 async function publishRelayUrl(wsUrl: string): Promise<void> {
   try {
-    // Delete previous paste if we have an ID
-    const prevId = readPasteId()
-    if (prevId) {
-      fetch(`${RAWTXT_BASE}/api/paste/${prevId}`, { method: 'DELETE' }).catch(() => {})
-    }
-    // Create new paste (30d expiry)
+    // Create new paste (30d expiry) — don't delete old one so stale clients can still hit rawtxt
     const res = await fetch(`${RAWTXT_BASE}/api/paste`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

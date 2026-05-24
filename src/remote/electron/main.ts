@@ -95,6 +95,7 @@ async function fetchText(url: string, timeoutMs = 8_000): Promise<string | null>
  * Discover the current relay URL by trying multiple sources:
  * 1. rawtxt paste via saved paste ID (public, works from any network)
  * 2. Current tunnel's HTTP /relay-url (works if tunnel still alive)
+ * 3. Scan all rawtxt pastes for the newest wss:// URL (handles paste ID rotation)
  */
 async function discoverRelayUrl(): Promise<string | null> {
   const config = loadConfig()
@@ -113,6 +114,27 @@ async function discoverRelayUrl(): Promise<string | null> {
     const text = await fetchText(`${httpUrl}/relay-url`)
     if (text && (text.startsWith('wss://') || text.startsWith('ws://'))) return text
   }
+
+  // 3. Scan rawtxt pastes — server may have created a new paste with different ID
+  try {
+    const listText = await fetchText(`${RAWTXT_BASE}/api/pastes`, 10_000)
+    if (listText) {
+      const json = JSON.parse(listText) as { success?: boolean; data?: Array<{ id: string; sizeBytes: number }> }
+      if (json.success && json.data) {
+        // Pastes are sorted newest-first; relay URLs are typically 40-80 bytes
+        const candidates = json.data.filter(p => p.sizeBytes >= 30 && p.sizeBytes <= 120)
+        for (const paste of candidates) {
+          const raw = await fetchText(`${RAWTXT_BASE}/${paste.id}/raw`, 5_000)
+          if (raw && (raw.startsWith('wss://') || raw.startsWith('ws://'))) {
+            log(`Discovered relay URL from rawtxt scan (paste: ${paste.id})`)
+            // Update stored paste ID for faster discovery next time
+            saveConfig({ relayPasteId: paste.id })
+            return raw
+          }
+        }
+      }
+    }
+  } catch { /* scan is best-effort */ }
 
   return null
 }
