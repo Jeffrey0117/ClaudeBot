@@ -20,9 +20,11 @@ import { isAdminLicense } from '../remote/license-store.js'
 
 /** Detect affirmative/agreement replies that reference the previous message. */
 const AFFIRMATIVE_RE = /^(好|可以|沒問題|沒差|OK|ok|Yes|yes|對|嗯|行|做吧|來吧|就這樣|同意|贊成|go|就醬|開始|動手|沒錯|是的|確定|sure|yep|yeah|做啊|加吧|弄吧|改吧|要|proceed|continue|繼續)/i
+const AFFIRMATIVE_EMOJI = /^[👍✅✔️👌🫡💪🤙☑️]+$/u
 
 function looksAffirmative(text: string): boolean {
   const stripped = text.replace(/^[\[（(【]語音輸入[\]）)】]\s*/i, '').trim()
+  if (AFFIRMATIVE_EMOJI.test(stripped)) return true
   return AFFIRMATIVE_RE.test(stripped)
 }
 
@@ -109,6 +111,110 @@ export function getElapsedMs(projectPath: string): number {
   return active ? Date.now() - active.startedAt : 0
 }
 
+/**
+ * Build remote tool documentation for system prompt.
+ * Moved from user message to system prompt to save ~2K tokens per turn.
+ */
+function buildRemoteSystemBlock(
+  isAdmin: boolean,
+  remoteBaseDir: string | undefined,
+  hasBrowser: boolean,
+): string {
+  return (
+    `[遠端配對模式]\n` +
+    (remoteBaseDir ? `遠端工作目錄: ${remoteBaseDir}\n` : '') +
+    `你已配對一台遠端電腦，所有操作都針對遠端。使用 remote_* MCP 工具：\n` +
+    `\n` +
+    `檔案操作：\n` +
+    `- remote_read_file(path, offset?, limit?): 讀取檔案（限 500KB，支援 byte-range 區段讀取）\n` +
+    `- remote_write_file(path, content): 寫入檔案\n` +
+    `- remote_list_directory(path): 列出目錄（含檔案大小和修改時間）\n` +
+    `- remote_search_files(path, pattern, contentPattern?): 搜尋檔案\n` +
+    `- remote_delete(path, recursive?): 刪除檔案或目錄（目錄需 recursive:true）\n` +
+    `- remote_move_file(src, dest): 移動/重新命名檔案\n` +
+    `\n` +
+    `搜尋與分析：\n` +
+    `- remote_grep(pattern, path?, include?, maxResults?): 快速內容搜尋（正則、行號、自動排除 node_modules）\n` +
+    `- remote_project_overview(path?): 一次看專案全貌（目錄樹 + CLAUDE.md + package.json + git status）\n` +
+    `- remote_system_info(): 遠端系統資訊（OS、磁碟、記憶體、網路）\n` +
+    `\n` +
+    `執行與傳輸：\n` +
+    `- remote_execute_command(command, cwd?): 執行指令（內建危險指令防護）\n` +
+    `- remote_fetch_file(path): 下載檔案（base64，限 20MB）\n` +
+    `- remote_push_file(path, base64): 上傳檔案（base64，限 20MB）\n` +
+    `- remote_fetch_archive(path, format?): 壓縮下載（zip/tar.gz，限 20MB）\n` +
+    `- remote_spawn_detached(command, cwd?): 啟動獨立行程（不受 bot 重啟影響）\n` +
+    `\n` +
+    `系統互動：\n` +
+    `- remote_clipboard(action, text?): 讀寫剪貼簿（action: "read"/"write"）\n` +
+    `- remote_notify(title, body): 桌面通知\n` +
+    `\n` +
+    (isAdmin
+      ? `[雙機器模式]\n` +
+        `你可以同時操作兩台機器：\n` +
+        `\n` +
+        `  🖥️ 本機（Bot 伺服器）\n` +
+        `     路徑: ${process.cwd()}\n` +
+        `     工具: Read, Write, Edit, Bash, Glob, Grep\n` +
+        `\n` +
+        `  💻 遠端（使用者的電腦）\n` +
+        (remoteBaseDir ? `     路徑: ${remoteBaseDir}\n` : '') +
+        `     工具: remote_* 系列\n` +
+        `\n` +
+        `判斷規則（按優先序）：\n` +
+        `1. 使用者明確指定 → 照做\n` +
+        `   本機關鍵字：「本地」「伺服器」「bot 那台」「這台伺服器」「A機器」(若已定義)\n` +
+        `   遠端關鍵字：「遠端」「我的電腦」「那邊」「B機器」(若已定義)\n` +
+        `2. 使用者用自定義名稱（如「A機器」「B機器」）→ 從上下文推斷是哪台，並在回覆中確認\n` +
+        `3. 路徑來自 remote_* 工具的回傳 → 一定是遠端路徑 → 用 remote_*\n` +
+        `4. 沒有明確指定 → 預設用遠端工具\n` +
+        `\n` +
+        `⚠️ 跨機器工作流：\n` +
+        `- 切換機器時，在回覆中明確標示：「現在切到本機操作」「切回遠端」\n` +
+        `- 如果 Read/Bash 出現 "no such file" → 你可能用錯機器了，改用 remote_* 重試\n` +
+        `- 跨機器傳檔：remote_read_file → Write（遠端→本機）或 Read → remote_write_file（本機→遠端）\n` +
+        `[/雙機器模式]\n`
+      : `[單機遠端模式]\n` +
+        `⚠️ 嚴禁使用本地工具（Read/Write/Edit/Bash/Glob/Grep）！\n` +
+        `你的本地檔案系統是 Bot 伺服器，不是使用者的電腦。\n` +
+        `對話中所有路徑都在使用者的遠端機器上 → 只能用 remote_* 工具。\n` +
+        `"no such file" / ENOENT = 你用錯了工具。\n` +
+        `\n` +
+        `唯一例外：修改 ClaudeBot 自身程式碼（需重啟 bot 才生效的改動）→ 用本地工具。\n` +
+        `[/單機遠端模式]\n`) +
+    `\n` +
+    `操作守則：\n` +
+    `1. 使用者可能在操作電腦（找檔案、傳東西、看狀態），不一定在做專案開發。\n` +
+    `2. 做專案開發時，先用 remote_project_overview 了解全貌，特別是 CLAUDE.md。\n` +
+    `3. 搜尋程式碼用 remote_grep，比 remote_search_files 快很多。\n` +
+    `4. 修改檔案前先 remote_read_file 讀取完整內容。\n` +
+    `\n` +
+    (hasBrowser
+      ? `瀏覽器操作（遠端機器）：\n` +
+        `- ab_connect_browser(): 連接使用者的 Chrome（帶登入狀態）。需要登入的網站必須先呼叫。\n` +
+        `- ab_open(url): 開啟網頁\n` +
+        `- ab_snapshot(): 取得頁面元素清單（互動元素 ref）\n` +
+        `- ab_click(ref): 點擊元素\n` +
+        `- ab_fill(ref, text): 填寫輸入欄位\n` +
+        `- ab_press(key): 按鍵（Enter, Escape, Tab）\n` +
+        `- ab_screenshot(): 截圖（頁面截圖）\n` +
+        `- ab_back(): 回上一頁\n` +
+        `- ab_get_url(): 取得當前網址\n` +
+        `\n` +
+        `瀏覽器使用規則（嚴格遵守，不要自行發明替代方案）：\n` +
+        `1. 需要登入的網站 → ab_connect_browser() → ab_open(url) → ab_snapshot() → 操作\n` +
+        `2. 不需要登入 → 直接 ab_open(url)\n` +
+        `3. ab_connect_browser 內部會：殺 daemon → 關 Chrome → 刪 lockfile → 重開帶 CDP → 確認連線。\n` +
+        `   你只需要呼叫一次，不要自己用 remote_execute_command 去殺 Chrome 或改設定。\n` +
+        `4. 如果 ab_connect_browser 失敗，直接回報錯誤訊息。不要自行嘗試修復。\n` +
+        `5. 如果 ab_* 工具 timeout，可能是頁面太重。用 ab_screenshot 確認狀態後再操作。\n` +
+        `6. 絕對不要建議使用者「手動操作」。你有完整的瀏覽器控制能力，用它。\n` +
+        `\n`
+      : '') +
+    `[/遠端配對模式]`
+  )
+}
+
 export function runClaude(options: RunOptions): void {
   const { prompt, projectPath, model, sessionId, imagePaths, onTextDelta, onToolUse, onResult, onError } =
     options
@@ -130,6 +236,7 @@ export function runClaude(options: RunOptions): void {
   // This MUST match what queue-processor uses for setContext/setLastResponse,
   // otherwise remote sessions get amnesia (stores use remote:xxx, lookups use cwd).
   const contextKey = projectPath
+  let remoteSystemBlock: string | null = null
 
   const parts: string[] = []
 
@@ -182,77 +289,14 @@ export function runClaude(options: RunOptions): void {
         if (vcCode) remoteBaseDir = getAgentBaseDir(vcCode)
       }
 
+      // Remote tool docs → system prompt (saves ~2K per user turn)
+      remoteSystemBlock = buildRemoteSystemBlock(isAdmin, remoteBaseDir, !!env.MCP_AGENT_BROWSER)
+      // Compact user-message indicator (full tool docs in system prompt)
       parts.push(
-        `[遠端配對模式]\n` +
-        (remoteBaseDir ? `遠端工作目錄: ${remoteBaseDir}\n` : '') +
-        `你已配對一台遠端電腦，所有操作都針對遠端。使用 remote_* MCP 工具：\n` +
-        `\n` +
-        `檔案操作：\n` +
-        `- remote_read_file(path, offset?, limit?): 讀取檔案（限 500KB，支援 byte-range 區段讀取）\n` +
-        `- remote_write_file(path, content): 寫入檔案\n` +
-        `- remote_list_directory(path): 列出目錄（含檔案大小和修改時間）\n` +
-        `- remote_search_files(path, pattern, contentPattern?): 搜尋檔案\n` +
-        `- remote_delete(path, recursive?): 刪除檔案或目錄（目錄需 recursive:true）\n` +
-        `- remote_move_file(src, dest): 移動/重新命名檔案\n` +
-        `\n` +
-        `搜尋與分析：\n` +
-        `- remote_grep(pattern, path?, include?, maxResults?): 快速內容搜尋（正則、行號、自動排除 node_modules）\n` +
-        `- remote_project_overview(path?): 一次看專案全貌（目錄樹 + CLAUDE.md + package.json + git status）\n` +
-        `- remote_system_info(): 遠端系統資訊（OS、磁碟、記憶體、網路）\n` +
-        `\n` +
-        `執行與傳輸：\n` +
-        `- remote_execute_command(command, cwd?): 執行指令（內建危險指令防護）\n` +
-        `- remote_fetch_file(path): 下載檔案（base64，限 20MB）\n` +
-        `- remote_push_file(path, base64): 上傳檔案（base64，限 20MB）\n` +
-        `- remote_fetch_archive(path, format?): 壓縮下載（zip/tar.gz，限 20MB）\n` +
-        `- remote_spawn_detached(command, cwd?): 啟動獨立行程（不受 bot 重啟影響）\n` +
-        `\n` +
-        `系統互動：\n` +
-        `- remote_clipboard(action, text?): 讀寫剪貼簿（action: "read"/"write"）\n` +
-        `- remote_notify(title, body): 桌面通知\n` +
-        `\n` +
-        `規則：\n` +
-        (isAdmin
-          ? `1. 你同時擁有「遠端工具 (remote_*)」和「本地工具 (Read/Write/Edit/Bash)」。\n` +
-            `   - 遠端工具 → 操作使用者的電腦（遠端機器）\n` +
-            `   - 本地工具 → 操作 Bot 伺服器（本地機器）\n` +
-            `2. 預設操作遠端。使用者說「本地」「伺服器」「bot 那台」→ 用本地工具。\n` +
-            `3. 跨機器協作：可以從遠端讀檔 → 本地寫入，或反過來。\n`
-          : `1. 不要用 Read/Write/Edit/Bash 工具，那些是操作本地的。\n`) +
-        `${isAdmin ? '4' : '2'}. 使用者可能在操作電腦（找檔案、傳東西、看狀態），不一定在做專案開發。根據需求選擇合適的工具。\n` +
-        `${isAdmin ? '5' : '3'}. 如果使用者要做專案開發，先用 remote_project_overview 了解專案全貌，特別是 CLAUDE.md。\n` +
-        `${isAdmin ? '6' : '4'}. 搜尋程式碼用 remote_grep，比 remote_search_files 快很多。\n` +
-        `${isAdmin ? '7' : '5'}. 修改檔案前先 remote_read_file 讀取完整內容。\n` +
-        `\n` +
-        (env.MCP_AGENT_BROWSER
-          ? `瀏覽器操作（遠端機器）：\n` +
-            `- ab_connect_browser(): 連接使用者的 Chrome（帶登入狀態）。需要登入的網站必須先呼叫。\n` +
-            `- ab_open(url): 開啟網頁\n` +
-            `- ab_snapshot(): 取得頁面元素清單（互動元素 ref）\n` +
-            `- ab_click(ref): 點擊元素\n` +
-            `- ab_fill(ref, text): 填寫輸入欄位\n` +
-            `- ab_press(key): 按鍵（Enter, Escape, Tab）\n` +
-            `- ab_screenshot(): 截圖（頁面截圖）\n` +
-            `- ab_back(): 回上一頁\n` +
-            `- ab_get_url(): 取得當前網址\n` +
-            `\n` +
-            `瀏覽器使用規則（嚴格遵守，不要自行發明替代方案）：\n` +
-            `1. 需要登入的網站 → ab_connect_browser() → ab_open(url) → ab_snapshot() → 操作\n` +
-            `2. 不需要登入 → 直接 ab_open(url)\n` +
-            `3. ab_connect_browser 內部會：殺 daemon → 關 Chrome → 刪 lockfile → 重開帶 CDP → 確認連線。\n` +
-            `   你只需要呼叫一次，不要自己用 remote_execute_command 去殺 Chrome 或改設定。\n` +
-            `4. 如果 ab_connect_browser 失敗，直接回報錯誤訊息。不要自行嘗試修復。\n` +
-            `5. 如果 ab_* 工具 timeout，可能是頁面太重。用 ab_screenshot 確認狀態後再操作。\n` +
-            `6. 絕對不要建議使用者「手動操作」。你有完整的瀏覽器控制能力，用它。\n` +
-            `\n`
-          : '') +
-        (isAdmin
-          ? ''
-          : `⚠️ 自我修改例外：\n` +
-            `如果需要修改 ClaudeBot 專案本身的程式碼（當前工作目錄下的檔案），\n` +
-            `一律使用本地工具（Read/Write/Edit/Bash），不要用 remote_* 工具。\n` +
-            `判斷方式：改動需要「重啟 bot 才生效」→ 用本地工具。\n`) +
-        `[/遠端配對模式]`,
+        `[遠端模式]` +
+        (remoteBaseDir ? ` 工作目錄: ${remoteBaseDir}` : '') +
+        (isAdmin ? ` | 本機: ${process.cwd()}` : '') +
+        `[/遠端模式]`,
       )
     }
   }
@@ -289,7 +333,10 @@ export function runClaude(options: RunOptions): void {
     args.push('--dangerously-skip-permissions')
   }
 
-  const systemPrompt = getSystemPrompt()
+  const baseSystemPrompt = getSystemPrompt()
+  const systemPrompt = remoteSystemBlock
+    ? (baseSystemPrompt ? `${baseSystemPrompt}\n\n${remoteSystemBlock}` : remoteSystemBlock)
+    : baseSystemPrompt
   if (systemPrompt) {
     args.push('--append-system-prompt', systemPrompt)
   }
