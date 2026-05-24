@@ -99,6 +99,57 @@ function killActiveBackend(): void {
   activeBackend = null
 }
 
+const RAWTXT_BASE = 'https://rawtxt.isnowfriend.com'
+const RELAY_PASTE_ID_FILE = join(process.cwd(), 'data', '.relay-paste-id')
+
+/** Publish relay URL to rawtxt so Electron clients can discover it after tunnel rotation. */
+async function publishRelayUrl(wsUrl: string): Promise<void> {
+  try {
+    // Delete previous paste if we have an ID
+    const prevId = readPasteId()
+    if (prevId) {
+      fetch(`${RAWTXT_BASE}/api/paste/${prevId}`, { method: 'DELETE' }).catch(() => {})
+    }
+    // Create new paste (30d expiry)
+    const res = await fetch(`${RAWTXT_BASE}/api/paste`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: wsUrl, expiresIn: '30d' }),
+    })
+    if (!res.ok) {
+      console.error(`[tunnel] rawtxt publish failed: ${res.status}`)
+      return
+    }
+    const json = await res.json() as { data?: { id?: string } }
+    const newId = json.data?.id
+    if (newId) {
+      writePasteId(newId)
+      console.log(`[tunnel] Published relay URL to rawtxt (id: ${newId})`)
+    }
+  } catch (err) {
+    console.error(`[tunnel] rawtxt publish error: ${err instanceof Error ? err.message : err}`)
+  }
+}
+
+function readPasteId(): string {
+  try {
+    return readFileSync(RELAY_PASTE_ID_FILE, 'utf-8').trim()
+  } catch {
+    return ''
+  }
+}
+
+function writePasteId(id: string): void {
+  try {
+    writeFileSync(RELAY_PASTE_ID_FILE, id, 'utf-8')
+  } catch { /* best effort */ }
+}
+
+/** Read the last published paste ID (for Electron discovery). */
+export function getRelayPasteId(): string {
+  return readPasteId()
+}
+
 function setTunnelUrl(url: string): void {
   // Convert https:// to wss:// for WebSocket
   const wsUrl = url.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:')
@@ -107,6 +158,8 @@ function setTunnelUrl(url: string): void {
   reconnectAttempt = 0
   startHealthCheck()
   console.log(`[tunnel] Public relay URL: ${wsUrl}`)
+  // Best-effort publish to rawtxt for Electron auto-discovery
+  publishRelayUrl(wsUrl).catch(() => {})
 }
 
 function startHealthCheck(): void {

@@ -148,11 +148,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: 'remote_read_file',
-      description: 'Read a file on the remote computer. Returns file content (truncated at 500KB).',
+      description: 'Read a file on the remote computer. Returns file content (truncated at 500KB). Supports byte-range reads with offset/limit.',
       inputSchema: {
         type: 'object' as const,
         properties: {
           path: { type: 'string', description: 'File path (relative to remote working dir)' },
+          offset: { type: 'number', description: 'Optional byte offset to start reading from' },
+          limit: { type: 'number', description: 'Optional max bytes to read (default/max 500KB)' },
         },
         required: ['path'],
       },
@@ -171,7 +173,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'remote_list_directory',
-      description: 'List files and directories at a path on the remote computer.',
+      description: 'List files and directories at a path on the remote computer. Shows file size and last modified time.',
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -259,6 +261,78 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           base64: { type: 'string', description: 'Base64-encoded file content' },
         },
         required: ['path', 'base64'],
+      },
+    },
+    {
+      name: 'remote_delete',
+      description: 'Delete a file or directory on the remote computer. Directories require recursive: true. Protected against deleting system paths, home dir, and base working dir.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          path: { type: 'string', description: 'Path to delete (relative to remote working dir)' },
+          recursive: { type: 'boolean', description: 'Set true to delete directories recursively (default: false)' },
+        },
+        required: ['path'],
+      },
+    },
+    {
+      name: 'remote_move_file',
+      description: 'Move or rename a file/directory on the remote computer. Auto-creates destination parent directory. Works across devices.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          src: { type: 'string', description: 'Source path' },
+          dest: { type: 'string', description: 'Destination path' },
+        },
+        required: ['src', 'dest'],
+      },
+    },
+    {
+      name: 'remote_clipboard',
+      description: 'Read or write the remote computer\'s clipboard. Cross-platform (Windows/macOS/Linux).',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          action: { type: 'string', description: '"read" to get clipboard content, "write" to set it' },
+          text: { type: 'string', description: 'Text to write to clipboard (required when action is "write")' },
+        },
+        required: ['action'],
+      },
+    },
+    {
+      name: 'remote_notify',
+      description: 'Show a desktop notification on the remote computer. Cross-platform (Windows toast/macOS notification/Linux notify-send).',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          title: { type: 'string', description: 'Notification title' },
+          body: { type: 'string', description: 'Notification body text' },
+        },
+        required: ['body'],
+      },
+    },
+    {
+      name: 'remote_spawn_detached',
+      description: 'Spawn a detached process on the remote computer that runs independently (survives bot restart). Use for launching applications.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          command: { type: 'string', description: 'Command to spawn' },
+          cwd: { type: 'string', description: 'Optional working directory' },
+        },
+        required: ['command'],
+      },
+    },
+    {
+      name: 'remote_fetch_archive',
+      description: 'Compress a file/directory on the remote computer and download as base64. Max 20MB. Uses zip (Windows: Compress-Archive, Unix: zip/tar).',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          path: { type: 'string', description: 'Path to compress' },
+          format: { type: 'string', description: 'Archive format: "zip" (default) or "tar.gz" (Unix only)' },
+        },
+        required: ['path'],
       },
     },
     {

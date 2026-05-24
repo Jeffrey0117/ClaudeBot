@@ -8,6 +8,7 @@ export interface AIModelSelection {
 export interface AIRunOptions {
   readonly prompt: string
   readonly projectPath: string
+  readonly projectName?: string
   readonly model: string
   readonly sessionId: string | null
   readonly imagePaths: readonly string[]

@@ -10,6 +10,7 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { resolve } from 'node:path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import { hostname } from 'node:os'
 import { WebSocket } from 'ws'
 
 // --- GPU workaround: remote desktop / VM environments hang on GPU init ---
@@ -70,6 +71,50 @@ interface ElectronConfig {
   readonly projectsBaseDir?: string
   readonly licenseKey?: string
   readonly relayUrl?: string
+  readonly discoveryUrl?: string
+  readonly relayPasteId?: string
+}
+
+const RAWTXT_BASE = 'https://rawtxt.isnowfriend.com'
+
+/** Try fetching text from a URL with timeout. */
+async function fetchText(url: string, timeoutMs = 8_000): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
+    const res = await fetch(url, { signal: controller.signal })
+    clearTimeout(timeout)
+    if (!res.ok) return null
+    return (await res.text()).trim()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Discover the current relay URL by trying multiple sources:
+ * 1. rawtxt paste via saved paste ID (public, works from any network)
+ * 2. Current tunnel's HTTP /relay-url (works if tunnel still alive)
+ */
+async function discoverRelayUrl(): Promise<string | null> {
+  const config = loadConfig()
+
+  // 1. rawtxt — read relay URL from known paste ID
+  const pasteId = config.relayPasteId
+  if (pasteId) {
+    const url = config.discoveryUrl || `${RAWTXT_BASE}/${pasteId}/raw`
+    const text = await fetchText(url)
+    if (text && (text.startsWith('wss://') || text.startsWith('ws://'))) return text
+  }
+
+  // 2. Try current tunnel's HTTP /relay-url endpoint
+  if (agentRelayUrl) {
+    const httpUrl = agentRelayUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:')
+    const text = await fetchText(`${httpUrl}/relay-url`)
+    if (text && (text.startsWith('wss://') || text.startsWith('ws://'))) return text
+  }
+
+  return null
 }
 
 function loadConfig(): ElectronConfig {
@@ -120,14 +165,18 @@ function setStatus(status: 'disconnected' | 'connecting' | 'connected'): void {
 
 // --- WebSocket connection ---
 
-function connectToRelay(relayUrl: string, code: string): void {
-  setStatus('connecting')
-  log(`Connecting to ${relayUrl}...`)
+let agentRelayUrl = ''
+let agentReconnectFails = 0
 
-  const socket = new WebSocket(relayUrl)
+function connectToRelay(relayUrl: string, code: string): void {
+  agentRelayUrl = relayUrl
+  setStatus('connecting')
+  log(`Connecting to ${agentRelayUrl}...`)
+
+  const socket = new WebSocket(agentRelayUrl)
 
   socket.on('open', () => {
-    const msg: AgentRegister = { type: 'agent_register', code, baseDir: getProjectsBaseDir() }
+    const msg: AgentRegister = { type: 'agent_register', code, baseDir: getProjectsBaseDir(), hostname: hostname() }
     socket.send(JSON.stringify(msg))
   })
 
@@ -141,8 +190,13 @@ function connectToRelay(relayUrl: string, code: string): void {
 
     if (msg.type === 'agent_registered') {
       ws = socket
+      agentReconnectFails = 0
       setStatus('connected')
       log('Connected and paired!')
+      // Save relay paste ID for URL discovery on reconnect
+      if (msg.relayPasteId && typeof msg.relayPasteId === 'string') {
+        saveConfig({ relayPasteId: msg.relayPasteId })
+      }
       return
     }
 
@@ -175,11 +229,24 @@ function connectToRelay(relayUrl: string, code: string): void {
   socket.on('close', () => {
     ws = null
     setStatus('disconnected')
-    if (shouldReconnect) {
-      log('Disconnected. Reconnecting in 3s...')
-      setTimeout(() => connectToRelay(relayUrl, code), 3_000)
-    } else {
+    if (!shouldReconnect) {
       log('Disconnected.')
+      return
+    }
+    agentReconnectFails++
+    if (agentReconnectFails >= 3) {
+      log(`Reconnect failed ${agentReconnectFails} times, discovering new URL...`)
+      discoverRelayUrl().then((newUrl) => {
+        if (newUrl && newUrl !== agentRelayUrl) {
+          agentRelayUrl = newUrl
+          agentReconnectFails = 0
+          log(`Discovered new relay URL`)
+        }
+        setTimeout(() => connectToRelay(agentRelayUrl, code), 3_000)
+      })
+    } else {
+      log('Disconnected. Reconnecting in 3s...')
+      setTimeout(() => connectToRelay(agentRelayUrl, code), 3_000)
     }
   })
 
@@ -231,12 +298,15 @@ function getClientId(): string {
 
 // --- Chat mode: WebSocket connection ---
 
+let chatReconnectFails = 0
+
 function connectChat(relayUrl: string, code: string): void {
+  chatRelayUrl = relayUrl
   setStatus('connecting')
   log('Connecting to chat...')
 
   const clientId = getClientId()
-  const socket = new WebSocket(relayUrl)
+  const socket = new WebSocket(chatRelayUrl)
 
   socket.on('open', () => {
     const msg: ElectronChatRegister = { type: 'electron_chat_register', code, clientId }
@@ -253,6 +323,7 @@ function connectChat(relayUrl: string, code: string): void {
 
     if (msg.type === 'electron_chat_registered') {
       chatWs = socket
+      chatReconnectFails = 0
       setStatus('connected')
       log(`Chat connected! (virtual ID: ${msg.virtualChatId})`)
       return
@@ -279,11 +350,24 @@ function connectChat(relayUrl: string, code: string): void {
   socket.on('close', () => {
     chatWs = null
     setStatus('disconnected')
-    if (chatShouldReconnect) {
-      log('Chat disconnected. Reconnecting in 3s...')
-      setTimeout(() => connectChat(relayUrl, code), 3_000)
-    } else {
+    if (!chatShouldReconnect) {
       log('Chat disconnected.')
+      return
+    }
+    chatReconnectFails++
+    if (chatReconnectFails >= 3) {
+      log(`Chat reconnect failed ${chatReconnectFails} times, discovering new URL...`)
+      discoverRelayUrl().then((newUrl) => {
+        if (newUrl && newUrl !== chatRelayUrl) {
+          chatRelayUrl = newUrl
+          chatReconnectFails = 0
+          log(`Discovered new chat relay URL`)
+        }
+        setTimeout(() => connectChat(chatRelayUrl, code), 3_000)
+      })
+    } else {
+      log('Chat disconnected. Reconnecting in 3s...')
+      setTimeout(() => connectChat(chatRelayUrl, code), 3_000)
     }
   })
 
@@ -352,12 +436,16 @@ ipcMain.handle('send-callback', (_event, data: string, msgId: number) => {
 
 const DEFAULT_RELAY_URL = 'wss://relay.claudebot.app'
 
+let licenseRelayUrl = ''
+let licenseReconnectFails = 0
+
 function connectLicense(relayUrl: string, licenseKey: string): void {
+  licenseRelayUrl = relayUrl
   setStatus('connecting')
   log('正在連線...')
 
   const clientId = getClientId()
-  const socket = new WebSocket(relayUrl)
+  const socket = new WebSocket(licenseRelayUrl)
 
   socket.on('open', () => {
     const msg: LicenseRegister = { type: 'license_register', licenseKey, clientId }
@@ -374,6 +462,7 @@ function connectLicense(relayUrl: string, licenseKey: string): void {
 
     if (msg.type === 'license_registered') {
       chatWs = socket
+      licenseReconnectFails = 0
       setStatus('connected')
       log(`已連線! (方案: ${msg.plan})`)
       sendToRenderer('license:connected', { plan: msg.plan })
@@ -409,11 +498,24 @@ function connectLicense(relayUrl: string, licenseKey: string): void {
   socket.on('close', () => {
     chatWs = null
     setStatus('disconnected')
-    if (chatShouldReconnect) {
-      log('連線中斷，3 秒後重新連線...')
-      setTimeout(() => connectLicense(relayUrl, licenseKey), 3_000)
-    } else {
+    if (!chatShouldReconnect) {
       log('已斷線')
+      return
+    }
+    licenseReconnectFails++
+    if (licenseReconnectFails >= 3) {
+      log(`連線失敗 ${licenseReconnectFails} 次，嘗試發現新 URL...`)
+      discoverRelayUrl().then((newUrl) => {
+        if (newUrl && newUrl !== licenseRelayUrl) {
+          licenseRelayUrl = newUrl
+          licenseReconnectFails = 0
+          log('發現新的 relay URL')
+        }
+        setTimeout(() => connectLicense(licenseRelayUrl, licenseKey), 3_000)
+      })
+    } else {
+      log('連線中斷，3 秒後重新連線...')
+      setTimeout(() => connectLicense(licenseRelayUrl, licenseKey), 3_000)
     }
   })
 
@@ -447,6 +549,15 @@ ipcMain.handle('get-license-key', () => {
 
 ipcMain.handle('get-relay-url', () => {
   return loadConfig().relayUrl ?? ''
+})
+
+ipcMain.handle('discover-relay-url', async () => {
+  const url = await discoverRelayUrl()
+  if (url) {
+    // Convert wss:// relay URL back for display/storage
+    saveConfig({ relayUrl: url })
+  }
+  return url ?? ''
 })
 
 ipcMain.handle('set-relay-url', (_event, url: string) => {
@@ -507,6 +618,15 @@ function resolveAsset(...parts: string[]): string {
   return resolve(process.cwd(), 'src', 'remote', 'electron', ...parts)
 }
 
+function resolveIcon(): string | undefined {
+  // Try dist-electron/ first (packaged), then project root (dev)
+  const distIcon = resolve(__dirname, 'claudebot-logo.png')
+  if (existsSync(distIcon)) return distIcon
+  const rootIcon = resolve(process.cwd(), 'claudebot-logo.png')
+  if (existsSync(rootIcon)) return rootIcon
+  return undefined
+}
+
 function createWindow(): void {
   const chatMode = isChatMode()
   const cwd = process.cwd()
@@ -514,16 +634,19 @@ function createWindow(): void {
   const preloadPath = resolveAsset('preload.cjs')
   const htmlFile = chatMode ? 'chat.html' : 'index.html'
   const htmlPath = resolveAsset('renderer', htmlFile)
+  const iconPath = resolveIcon()
 
   elog(`[electron] mode=${chatMode ? 'chat' : 'agent'} cwd=${cwd}`)
   elog(`[electron] preload=${preloadPath} exists=${existsSync(preloadPath)}`)
   elog(`[electron] html=${htmlPath} exists=${existsSync(htmlPath)}`)
+  elog(`[electron] icon=${iconPath ?? 'none'}`)
 
   mainWindow = new BrowserWindow({
     width: chatMode ? 420 : 600,
     height: chatMode ? 640 : 500,
     title: chatMode ? 'ClaudeBot Chat' : 'ClaudeBot Remote Agent',
     resizable: true,
+    ...(iconPath ? { icon: iconPath } : {}),
     ...(chatMode ? { frame: false, titleBarStyle: 'hidden' as const } : {}),
     webPreferences: {
       preload: preloadPath,

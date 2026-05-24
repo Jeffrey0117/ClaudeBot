@@ -14,6 +14,7 @@ export interface AgentRegister {
 
 export interface AgentRegistered {
   readonly type: 'agent_registered'
+  readonly relayPasteId?: string
 }
 
 // --- Relay handshake: Proxy (A-side) connects through relay ---

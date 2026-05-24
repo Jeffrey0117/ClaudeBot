@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLicenseKey: () => ipcRenderer.invoke('get-license-key'),
   getRelayUrl: () => ipcRenderer.invoke('get-relay-url'),
   setRelayUrl: (url) => ipcRenderer.invoke('set-relay-url', url),
+  discoverRelayUrl: () => ipcRenderer.invoke('discover-relay-url'),
 
   onLicenseConnected: (callback) => {
     const handler = (_event, data) => callback(data)

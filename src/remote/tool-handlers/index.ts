@@ -5,8 +5,8 @@
  */
 
 import { createPathValidator } from './path-validator.js'
-import { handleReadFile, handleWriteFile, handleListDirectory, handleSearchFiles, handleFetchFile, handlePushFile, handleListProjects } from './file-tools.js'
-import { handleExecuteCommand, handleGrep, handleSystemInfo, handleProjectOverview } from './exec-tools.js'
+import { handleReadFile, handleWriteFile, handleListDirectory, handleSearchFiles, handleFetchFile, handlePushFile, handleListProjects, handleDelete, handleMoveFile, handleFetchArchive } from './file-tools.js'
+import { handleExecuteCommand, handleGrep, handleSystemInfo, handleProjectOverview, handleClipboard, handleNotify } from './exec-tools.js'
 import { handleBrowserOpen, handleBrowserSnapshot, handleBrowserClick, handleBrowserFill, handleBrowserPress, handleBrowserScreenshot, handleBrowserBack, handleBrowserGetUrl, handleBrowserConnect, handleSpawnDetached } from './browser-tools.js'
 
 export { createPathValidator } from './path-validator.js'
@@ -39,6 +39,11 @@ export function createToolDispatcher(baseDir: string): ToolDispatcher {
         case 'remote_fetch_file': return handleFetchFile(args, validatePath)
         case 'remote_push_file': return handlePushFile(args, validatePath)
         case 'remote_list_projects': return handleListProjects(baseDir)
+        case 'remote_delete': return handleDelete(args, validatePath, baseDir)
+        case 'remote_move_file': return handleMoveFile(args, validatePath, baseDir)
+        case 'remote_fetch_archive': return handleFetchArchive(args, validatePath)
+        case 'remote_clipboard': return handleClipboard(args)
+        case 'remote_notify': return handleNotify(args)
         case 'ab_open': return handleBrowserOpen(args)
         case 'ab_snapshot': return handleBrowserSnapshot()
         case 'ab_click': return handleBrowserClick(args)

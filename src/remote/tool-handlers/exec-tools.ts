@@ -8,6 +8,39 @@ import { exec, execFile, spawn } from 'node:child_process'
 import { join, sep } from 'node:path'
 import { EXEC_TIMEOUT_MS, MAX_OUTPUT_SIZE, IS_WIN } from './index.js'
 
+// --- Dangerous command blacklist ---
+
+const DANGEROUS_PATTERNS: readonly RegExp[] = [
+  // Destructive file operations
+  /rm\s+(-[a-z]*r[a-z]*\s+(-[a-z]*f[a-z]*\s+)?|(-[a-z]*f[a-z]*\s+)?-[a-z]*r[a-z]*\s+)[/\\]/i,
+  /\brm\s+-rf\s+\/(?!\w)/i,
+  /\bformat\s+[a-z]:/i,
+  /\bmkfs\b/i,
+  /\bdd\s+if=\/dev\/(zero|random)/i,
+  // Fork bombs
+  /:\(\)\s*\{\s*:\|:\s*&\s*\}\s*;?\s*:/,
+  /\bfork\s*bomb/i,
+  // Kill node/electron processes (blocks all variants)
+  /taskkill\s+[/\\]+f\s+[/\\]+im\s+(node|electron)\.exe/i,
+  /Get-Process\s+(node|electron)\s*\|\s*Stop-Process/i,
+  /Stop-Process\s+-Name\s+(node|electron)/i,
+  /\bpkill\s+(node|electron)\b/i,
+  /\bkillall\s+(node|electron)\b/i,
+  // System shutdown/reboot
+  /\bshutdown\b/i,
+  /\breboot\b/i,
+  /\binit\s+[06]\b/,
+]
+
+function isDangerousCommand(command: string): string | null {
+  for (const pattern of DANGEROUS_PATTERNS) {
+    if (pattern.test(command)) {
+      return `Blocked dangerous command matching: ${pattern.source}`
+    }
+  }
+  return null
+}
+
 // Cache whether rg is available (checked once at first grep call)
 let rgAvailable: boolean | null = null
 
@@ -23,6 +56,13 @@ export async function handleExecuteCommand(
   baseDir: string,
 ): Promise<string> {
   const command = String(args.command)
+
+  // Check dangerous command blacklist
+  const danger = isDangerousCommand(command)
+  if (danger) {
+    throw new Error(danger)
+  }
+
   const cwd = args.cwd ? validatePath(String(args.cwd)) : baseDir
   const timeoutMs = Math.min(
     Math.max(Number(args.timeout) || EXEC_TIMEOUT_MS, 5_000),
@@ -204,4 +244,77 @@ export async function handleProjectOverview(
   }
 
   return sections.join('\n\n') || '(no project info found)'
+}
+
+// --- P1-6: Clipboard ---
+
+export async function handleClipboard(args: Record<string, unknown>): Promise<string> {
+  const action = String(args.action)
+
+  if (action === 'read') {
+    const cmd = IS_WIN
+      ? 'powershell -NoProfile -Command "Get-Clipboard"'
+      : process.platform === 'darwin'
+        ? 'pbpaste'
+        : 'xclip -selection clipboard -o'
+
+    return new Promise((res) => {
+      exec(cmd, { timeout: 10_000, windowsHide: true }, (err, stdout) => {
+        if (err) res(`Error reading clipboard: ${err.message}`)
+        else res(stdout || '(clipboard empty)')
+      })
+    })
+  }
+
+  if (action === 'write') {
+    const text = String(args.text ?? '')
+    const cmd = IS_WIN
+      ? 'powershell'
+      : process.platform === 'darwin'
+        ? 'pbcopy'
+        : 'xclip -selection clipboard'
+
+    const cmdArgs = IS_WIN
+      ? ['-NoProfile', '-Command', 'Set-Clipboard -Value $input']
+      : []
+
+    return new Promise((res) => {
+      const child = spawn(cmd, cmdArgs, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      })
+      child.stdin.write(text)
+      child.stdin.end()
+      child.on('close', (code) => {
+        res(code === 0
+          ? `Copied ${text.length} characters to clipboard`
+          : `Clipboard write failed (exit code: ${code})`)
+      })
+      child.on('error', (err) => {
+        res(`Clipboard write error: ${err.message}`)
+      })
+    })
+  }
+
+  throw new Error(`Unknown clipboard action: ${action}. Use "read" or "write".`)
+}
+
+// --- P1-7: Notify ---
+
+export async function handleNotify(args: Record<string, unknown>): Promise<string> {
+  const title = String(args.title ?? 'ClaudeBot')
+  const body = String(args.body ?? '')
+
+  const cmd = IS_WIN
+    ? `powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; $n.Visible = $true; $n.ShowBalloonTip(5000, '${title.replace(/'/g, "''")}', '${body.replace(/'/g, "''")}', 'Info'); Start-Sleep -Seconds 3; $n.Dispose()"`
+    : process.platform === 'darwin'
+      ? `osascript -e 'display notification "${body.replace(/"/g, '\\"')}" with title "${title.replace(/"/g, '\\"')}"'`
+      : `notify-send "${title.replace(/"/g, '\\"')}" "${body.replace(/"/g, '\\"')}"`
+
+  return new Promise((res) => {
+    exec(cmd, { timeout: 15_000, windowsHide: true }, (err) => {
+      if (err) res(`Notification failed: ${err.message}`)
+      else res(`Notification sent: ${title}`)
+    })
+  })
 }

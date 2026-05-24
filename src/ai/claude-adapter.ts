@@ -14,6 +14,7 @@ export const claudeAdapter: AIRunner = {
     runClaude({
       prompt: options.prompt,
       projectPath: options.projectPath,
+      projectName: options.projectName,
       model: options.model as ClaudeModel,
       sessionId: options.sessionId,
       imagePaths: options.imagePaths,

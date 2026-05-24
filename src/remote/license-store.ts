@@ -29,6 +29,7 @@ export interface License {
   readonly expiresAt: number
   readonly revoked: boolean
   readonly label: string
+  readonly admin?: boolean
   readonly rateUsage: readonly UsageRecord[]
   readonly weeklyUsage: readonly UsageRecord[]
   readonly pendingReserve: number
@@ -145,6 +146,12 @@ export function validateLicense(key: string): ValidateResult {
   if (license.revoked) return { valid: false, reason: '序號已停用' }
   if (Date.now() > license.expiresAt) return { valid: false, reason: '序號已過期' }
   return { valid: true, license }
+}
+
+/** Check if a license key has admin privileges. */
+export function isAdminLicense(key: string): boolean {
+  const license = getLicense(key)
+  return license?.admin === true
 }
 
 // --- Quota ---

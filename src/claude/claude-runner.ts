@@ -5,7 +5,8 @@ import type { StreamEvent, StreamResult, StreamContentBlockDelta, StreamAssistan
 import { setAISessionId, clearAISession } from '../ai/session-store.js'
 import { validateProjectPath } from '../utils/path-validator.js'
 import { getTodos } from '../bot/todo-store.js'
-import { formatPinsForPrompt } from '../bot/context-pin-store.js'
+import { formatPinsForPrompt, touchPins } from '../bot/context-pin-store.js'
+import { formatRulesForPrompt, touchLearnedRules } from '../bot/learned-rules-store.js'
 import { getLastResponse } from '../bot/last-response-store.js'
 import { buildContextInjection } from '../bot/context-digest-store.js'
 import { getSystemPrompt } from '../utils/system-prompt.js'
@@ -14,7 +15,8 @@ import { getPairing, getPairings, isRemotePath } from '../remote/pairing-store.j
 import { getActiveMachine } from '../bot/state.js'
 import { getRelayPort, getAgentBaseDir } from '../remote/relay-server.js'
 import { generateRemoteMcpConfig, cleanupRemoteMcpConfig } from '../remote/mcp-config-generator.js'
-import { isVirtualChat, getVirtualChatPairingCode } from '../remote/virtual-chat-store.js'
+import { isVirtualChat, getVirtualChatPairingCode, getVirtualChatLicenseKey } from '../remote/virtual-chat-store.js'
+import { isAdminLicense } from '../remote/license-store.js'
 
 /** Detect affirmative/agreement replies that reference the previous message. */
 const AFFIRMATIVE_RE = /^(好|可以|沒問題|沒差|OK|ok|Yes|yes|對|嗯|行|做吧|來吧|就這樣|同意|贊成|go|就醬|開始|動手|沒錯|是的|確定|sure|yep|yeah|做啊|加吧|弄吧|改吧|要|proceed|continue|繼續)/i
@@ -32,6 +34,7 @@ export type OnError = (error: string) => void
 interface RunOptions {
   readonly prompt: string
   readonly projectPath: string
+  readonly projectName?: string
   readonly model: ClaudeModel
   readonly sessionId: string | null
   readonly imagePaths: readonly string[]
@@ -123,20 +126,41 @@ export function runClaude(options: RunOptions): void {
     }
   }
 
+  // contextKey = projectPath (remote:xxx or real path) — used for all context store lookups
+  // This MUST match what queue-processor uses for setContext/setLastResponse,
+  // otherwise remote sessions get amnesia (stores use remote:xxx, lookups use cwd).
+  const contextKey = projectPath
+
   const parts: string[] = []
 
   // Inject project todos as context
-  const todos = getTodos(validatedPath)
+  const todos = getTodos(contextKey)
   const pendingTodos = todos.filter((t) => !t.done)
   if (pendingTodos.length > 0) {
     const todoLines = pendingTodos.map((t, i) => `${i + 1}. ${t.text}`).join('\n')
     parts.push(`[專案待辦清單]\n${todoLines}`)
   }
 
-  // Inject pinned context
-  const pinnedContext = formatPinsForPrompt(validatedPath)
+  // Inject pinned context + track usage
+  const pinnedContext = formatPinsForPrompt(contextKey)
   if (pinnedContext) {
+    touchPins(contextKey)
     parts.push(pinnedContext)
+  }
+
+  // Inject learned behavior rules
+  const rulesContext = formatRulesForPrompt(contextKey)
+  if (rulesContext) {
+    touchLearnedRules(contextKey)
+    parts.push(rulesContext)
+  }
+
+  // Inject current project context (so Claude knows which project it's working on)
+  if (options.projectName) {
+    const projectLine = isRemotePath(projectPath)
+      ? `[當前專案: ${options.projectName}]\n路徑: ${projectPath.replace(/^remote:/, '')}`
+      : `[當前專案: ${options.projectName}]\n路徑: ${projectPath}`
+    parts.push(projectLine)
   }
 
   // Inject remote pairing context — Telegram users need REMOTE_ENABLED,
@@ -145,6 +169,8 @@ export function runClaude(options: RunOptions): void {
     const activeMch = getActiveMachine(options.chatId, options.threadId)
     const pairing = env.REMOTE_ENABLED ? getPairing(options.chatId, options.threadId, activeMch) : null
     const isRemote = pairing?.connected === true || isVirtualChat(options.chatId)
+    const isAdmin = env.ADMIN_CHAT_ID === options.chatId ||
+      (isVirtualChat(options.chatId) && isAdminLicense(getVirtualChatLicenseKey(options.chatId) ?? ''))
     if (isRemote) {
       // Look up agent baseDir for remote prompt context
       let remoteBaseDir: string | undefined
@@ -162,10 +188,12 @@ export function runClaude(options: RunOptions): void {
         `你已配對一台遠端電腦，所有操作都針對遠端。使用 remote_* MCP 工具：\n` +
         `\n` +
         `檔案操作：\n` +
-        `- remote_read_file(path): 讀取檔案（限 500KB）\n` +
+        `- remote_read_file(path, offset?, limit?): 讀取檔案（限 500KB，支援 byte-range 區段讀取）\n` +
         `- remote_write_file(path, content): 寫入檔案\n` +
-        `- remote_list_directory(path): 列出目錄\n` +
+        `- remote_list_directory(path): 列出目錄（含檔案大小和修改時間）\n` +
         `- remote_search_files(path, pattern, contentPattern?): 搜尋檔案\n` +
+        `- remote_delete(path, recursive?): 刪除檔案或目錄（目錄需 recursive:true）\n` +
+        `- remote_move_file(src, dest): 移動/重新命名檔案\n` +
         `\n` +
         `搜尋與分析：\n` +
         `- remote_grep(pattern, path?, include?, maxResults?): 快速內容搜尋（正則、行號、自動排除 node_modules）\n` +
@@ -173,16 +201,28 @@ export function runClaude(options: RunOptions): void {
         `- remote_system_info(): 遠端系統資訊（OS、磁碟、記憶體、網路）\n` +
         `\n` +
         `執行與傳輸：\n` +
-        `- remote_execute_command(command, cwd?): 執行任意指令\n` +
+        `- remote_execute_command(command, cwd?): 執行指令（內建危險指令防護）\n` +
         `- remote_fetch_file(path): 下載檔案（base64，限 20MB）\n` +
         `- remote_push_file(path, base64): 上傳檔案（base64，限 20MB）\n` +
+        `- remote_fetch_archive(path, format?): 壓縮下載（zip/tar.gz，限 20MB）\n` +
+        `- remote_spawn_detached(command, cwd?): 啟動獨立行程（不受 bot 重啟影響）\n` +
+        `\n` +
+        `系統互動：\n` +
+        `- remote_clipboard(action, text?): 讀寫剪貼簿（action: "read"/"write"）\n` +
+        `- remote_notify(title, body): 桌面通知\n` +
         `\n` +
         `規則：\n` +
-        `1. 不要用 Read/Write/Edit/Bash 工具，那些是操作本地的。\n` +
-        `2. 使用者可能在操作電腦（找檔案、傳東西、看狀態），不一定在做專案開發。根據需求選擇合適的工具。\n` +
-        `3. 如果使用者要做專案開發，先用 remote_project_overview 了解專案全貌，特別是 CLAUDE.md。\n` +
-        `4. 搜尋程式碼用 remote_grep，比 remote_search_files 快很多。\n` +
-        `5. 修改檔案前先 remote_read_file 讀取完整內容。\n` +
+        (isAdmin
+          ? `1. 你同時擁有「遠端工具 (remote_*)」和「本地工具 (Read/Write/Edit/Bash)」。\n` +
+            `   - 遠端工具 → 操作使用者的電腦（遠端機器）\n` +
+            `   - 本地工具 → 操作 Bot 伺服器（本地機器）\n` +
+            `2. 預設操作遠端。使用者說「本地」「伺服器」「bot 那台」→ 用本地工具。\n` +
+            `3. 跨機器協作：可以從遠端讀檔 → 本地寫入，或反過來。\n`
+          : `1. 不要用 Read/Write/Edit/Bash 工具，那些是操作本地的。\n`) +
+        `${isAdmin ? '4' : '2'}. 使用者可能在操作電腦（找檔案、傳東西、看狀態），不一定在做專案開發。根據需求選擇合適的工具。\n` +
+        `${isAdmin ? '5' : '3'}. 如果使用者要做專案開發，先用 remote_project_overview 了解專案全貌，特別是 CLAUDE.md。\n` +
+        `${isAdmin ? '6' : '4'}. 搜尋程式碼用 remote_grep，比 remote_search_files 快很多。\n` +
+        `${isAdmin ? '7' : '5'}. 修改檔案前先 remote_read_file 讀取完整內容。\n` +
         `\n` +
         (env.MCP_AGENT_BROWSER
           ? `瀏覽器操作（遠端機器）：\n` +
@@ -206,10 +246,12 @@ export function runClaude(options: RunOptions): void {
             `6. 絕對不要建議使用者「手動操作」。你有完整的瀏覽器控制能力，用它。\n` +
             `\n`
           : '') +
-        `⚠️ 自我修改例外：\n` +
-        `如果需要修改 ClaudeBot 專案本身的程式碼（當前工作目錄下的檔案），\n` +
-        `一律使用本地工具（Read/Write/Edit/Bash），不要用 remote_* 工具。\n` +
-        `判斷方式：改動需要「重啟 bot 才生效」→ 用本地工具。\n` +
+        (isAdmin
+          ? ''
+          : `⚠️ 自我修改例外：\n` +
+            `如果需要修改 ClaudeBot 專案本身的程式碼（當前工作目錄下的檔案），\n` +
+            `一律使用本地工具（Read/Write/Edit/Bash），不要用 remote_* 工具。\n` +
+            `判斷方式：改動需要「重啟 bot 才生效」→ 用本地工具。\n`) +
         `[/遠端配對模式]`,
       )
     }
@@ -220,7 +262,7 @@ export function runClaude(options: RunOptions): void {
   // Prefers structured [CTX] digest; falls back to raw response tail.
   if (prompt.length <= 15 || (prompt.length <= 80 && looksAffirmative(prompt))) {
     const isAffirmative = looksAffirmative(prompt)
-    const injection = buildContextInjection(validatedPath, isAffirmative)
+    const injection = buildContextInjection(contextKey, isAffirmative)
     if (injection) {
       parts.push(injection)
     }

@@ -10,9 +10,10 @@
  * Persisted to data/context-digest.json so context survives bot restarts.
  */
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { env } from '../config/env.js'
+import { getLastResponseFilePath } from './last-response-store.js'
 
 export interface ContextDigest {
   readonly status: 'proposal' | 'question' | 'options' | 'done' | 'error' | 'info'
@@ -140,10 +141,18 @@ export function clearContext(projectPath: string): void {
 /**
  * Build the context injection string for a short/affirmative reply.
  * Uses digest if available, falls back to raw tail.
+ * Always includes the full response file path so Claude can Read() the complete text.
  */
 export function buildContextInjection(projectPath: string, isAffirmative: boolean): string | null {
   const ctx = store.get(projectPath)
   if (!ctx) return null
+
+  // Full response file hint — Claude can Read() this for the complete previous response
+  const fullFilePath = getLastResponseFilePath(projectPath)
+  const hasFullFile = existsSync(fullFilePath)
+  const fileHint = hasFullFile
+    ? `\n完整前次回覆檔案: ${fullFilePath}\n如果摘要不夠詳細，用 Read 工具讀取完整回覆。`
+    : ''
 
   // Prefer structured digest
   if (ctx.digest) {
@@ -164,6 +173,7 @@ export function buildContextInjection(projectPath: string, isAffirmative: boolea
     }
 
     lines.push(actionHint)
+    if (fileHint) lines.push(fileHint)
     lines.push(`[/前次對話摘要]`)
 
     return lines.join('\n')
@@ -174,7 +184,7 @@ export function buildContextInjection(projectPath: string, isAffirmative: boolea
     const hint = isAffirmative
       ? '使用者的短回覆是在確認/同意你上次提出的內容。請根據上次回覆繼續執行，不要只回「收到」。'
       : '以下是你上次的回覆，使用者的訊息是針對這個內容。'
-    return `[前次回覆參考]\n${hint}\n${ctx.rawTail}\n[/前次回覆參考]`
+    return `[前次回覆參考]\n${hint}\n${ctx.rawTail}${fileHint}\n[/前次回覆參考]`
   }
 
   return null

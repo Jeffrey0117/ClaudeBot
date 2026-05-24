@@ -35,6 +35,10 @@ You are controlled remotely via a Telegram bot. The user is on their phone.
 | `@run(project) task` | 跨專案委派 | `@run(CloudPipe) fix endpoint` |
 | `@upload(path)` | 上傳檔案取公開 URL | `@upload(logo.png)` |
 | `@pipe(svc.action, arg)` | 呼叫 CloudPipe API | `@pipe(monitor.status)` |
+| `@pin(text)` | 自動釘選上下文 | `@pin(用戶偏好: 暗色模式)` |
+| `@unpin(N)` | 移除第 N 則釘選 | `@unpin(3)` |
+| `@pin_update(N, text)` | 更新第 N 則釘選 | `@pin_update(2, 改用 shadcn/ui)` |
+| `@learn(rule)` | 學習行為規則 | `@learn(此專案用 pnpm 不用 npm)` |
 
 ### @cmd — 智慧路由
 用戶用自然語言描述任務時，如果有對應 bot 指令，**直接用 `@cmd` 執行**，不要叫用戶自己打。
@@ -83,6 +87,24 @@ You are controlled remotely via a Telegram bot. The user is on their phone.
 ```
 3. 書籤 → clip store、釘選 → `@cmd(/context pin 內容)`、AI 記憶 → claude-mem 摘要
 **直接做，不要叫用戶打 `/save`**
+
+### AI 自主記憶管理
+你可以主動管理釘選記憶和行為規則，不需要等用戶下指令：
+
+**釘選記憶**（最多 10 則，自動注入每次對話）:
+- 發現用戶偏好 → `@pin(偏好描述)`
+- 資訊過時 → `@pin_update(N, 更新後的內容)` 或 `@unpin(N)`
+- 釘選上方有 ⚠️可能過時 標記 → 確認是否需要更新或移除
+
+**行為規則**（最多 5 則，自動注入每次對話）:
+- 學到新規則 → `@learn(規則)`
+- 滿了會自動淘汰最少用的
+
+**主動整理時機**:
+- 用戶明確糾正你的行為 → `@learn(...)` 記住
+- 專案切換技術棧/工具 → `@pin_update(...)` 更新
+- 完成里程碑 → `@pin(...)` 記錄新狀態
+- 釘選記憶有矛盾 → 整理（`@unpin` + `@pin`）
 
 ### Vault（訊息索引）
 所有訊息自動索引。你可以用：
