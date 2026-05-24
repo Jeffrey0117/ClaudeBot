@@ -5,7 +5,8 @@ import type { StreamEvent, StreamResult, StreamContentBlockDelta, StreamAssistan
 import { setAISessionId, clearAISession } from '../ai/session-store.js'
 import { validateProjectPath } from '../utils/path-validator.js'
 import { getTodos } from '../bot/todo-store.js'
-import { formatPinsForPrompt } from '../bot/context-pin-store.js'
+import { formatPinsForPrompt, touchPins } from '../bot/context-pin-store.js'
+import { formatRulesForPrompt, touchLearnedRules } from '../bot/learned-rules-store.js'
 import { getLastResponse } from '../bot/last-response-store.js'
 import { buildContextInjection } from '../bot/context-digest-store.js'
 import { getSystemPrompt } from '../utils/system-prompt.js'
@@ -125,20 +126,33 @@ export function runClaude(options: RunOptions): void {
     }
   }
 
+  // contextKey = projectPath (remote:xxx or real path) — used for all context store lookups
+  // This MUST match what queue-processor uses for setContext/setLastResponse,
+  // otherwise remote sessions get amnesia (stores use remote:xxx, lookups use cwd).
+  const contextKey = projectPath
+
   const parts: string[] = []
 
   // Inject project todos as context
-  const todos = getTodos(validatedPath)
+  const todos = getTodos(contextKey)
   const pendingTodos = todos.filter((t) => !t.done)
   if (pendingTodos.length > 0) {
     const todoLines = pendingTodos.map((t, i) => `${i + 1}. ${t.text}`).join('\n')
     parts.push(`[專案待辦清單]\n${todoLines}`)
   }
 
-  // Inject pinned context
-  const pinnedContext = formatPinsForPrompt(validatedPath)
+  // Inject pinned context + track usage
+  const pinnedContext = formatPinsForPrompt(contextKey)
   if (pinnedContext) {
+    touchPins(contextKey)
     parts.push(pinnedContext)
+  }
+
+  // Inject learned behavior rules
+  const rulesContext = formatRulesForPrompt(contextKey)
+  if (rulesContext) {
+    touchLearnedRules(contextKey)
+    parts.push(rulesContext)
   }
 
   // Inject current project context (so Claude knows which project it's working on)
@@ -174,10 +188,12 @@ export function runClaude(options: RunOptions): void {
         `你已配對一台遠端電腦，所有操作都針對遠端。使用 remote_* MCP 工具：\n` +
         `\n` +
         `檔案操作：\n` +
-        `- remote_read_file(path): 讀取檔案（限 500KB）\n` +
+        `- remote_read_file(path, offset?, limit?): 讀取檔案（限 500KB，支援 byte-range 區段讀取）\n` +
         `- remote_write_file(path, content): 寫入檔案\n` +
-        `- remote_list_directory(path): 列出目錄\n` +
+        `- remote_list_directory(path): 列出目錄（含檔案大小和修改時間）\n` +
         `- remote_search_files(path, pattern, contentPattern?): 搜尋檔案\n` +
+        `- remote_delete(path, recursive?): 刪除檔案或目錄（目錄需 recursive:true）\n` +
+        `- remote_move_file(src, dest): 移動/重新命名檔案\n` +
         `\n` +
         `搜尋與分析：\n` +
         `- remote_grep(pattern, path?, include?, maxResults?): 快速內容搜尋（正則、行號、自動排除 node_modules）\n` +
@@ -185,9 +201,15 @@ export function runClaude(options: RunOptions): void {
         `- remote_system_info(): 遠端系統資訊（OS、磁碟、記憶體、網路）\n` +
         `\n` +
         `執行與傳輸：\n` +
-        `- remote_execute_command(command, cwd?): 執行任意指令\n` +
+        `- remote_execute_command(command, cwd?): 執行指令（內建危險指令防護）\n` +
         `- remote_fetch_file(path): 下載檔案（base64，限 20MB）\n` +
         `- remote_push_file(path, base64): 上傳檔案（base64，限 20MB）\n` +
+        `- remote_fetch_archive(path, format?): 壓縮下載（zip/tar.gz，限 20MB）\n` +
+        `- remote_spawn_detached(command, cwd?): 啟動獨立行程（不受 bot 重啟影響）\n` +
+        `\n` +
+        `系統互動：\n` +
+        `- remote_clipboard(action, text?): 讀寫剪貼簿（action: "read"/"write"）\n` +
+        `- remote_notify(title, body): 桌面通知\n` +
         `\n` +
         `規則：\n` +
         (isAdmin
@@ -240,7 +262,7 @@ export function runClaude(options: RunOptions): void {
   // Prefers structured [CTX] digest; falls back to raw response tail.
   if (prompt.length <= 15 || (prompt.length <= 80 && looksAffirmative(prompt))) {
     const isAffirmative = looksAffirmative(prompt)
-    const injection = buildContextInjection(validatedPath, isAffirmative)
+    const injection = buildContextInjection(contextKey, isAffirmative)
     if (injection) {
       parts.push(injection)
     }

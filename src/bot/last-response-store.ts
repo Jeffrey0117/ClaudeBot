@@ -5,6 +5,10 @@
  * Used when user sends a short reply like "好" or "做吧",
  * so Claude knows what was being discussed.
  *
+ * Two storage layers:
+ * 1. In-memory map (truncated tail) — for quick context injection
+ * 2. Full response file (data/last-response-full/*.md) — Claude can Read() it
+ *
  * Persisted to data/last-responses.json so context survives bot restarts.
  */
 
@@ -14,6 +18,7 @@ import { env } from '../config/env.js'
 
 const BOT_ID = env.BOT_TOKEN.slice(-6)
 const STORE_FILE = join(process.cwd(), 'data', 'last-responses.json')
+const FULL_RESPONSE_DIR = join(process.cwd(), 'data', 'last-response-full')
 const MAX_STORE_LENGTH = 1500
 
 type PersistedData = Record<string, string>
@@ -59,9 +64,32 @@ function persistStore(): void {
 
 const lastResponses = loadStore()
 
+/** Sanitize project path to a safe filename. */
+function toFileName(projectPath: string): string {
+  return projectPath
+    .replace(/[<>:"/\\|?*]/g, '_')
+    .replace(/^\.+/, '')
+    .slice(0, 100)
+}
+
+/** Get the file path for a project's full last response. */
+export function getLastResponseFilePath(projectPath: string): string {
+  return join(FULL_RESPONSE_DIR, `${BOT_ID}_${toFileName(projectPath)}.md`)
+}
+
 export function setLastResponse(projectPath: string, text: string): void {
+  // Truncated tail for in-memory quick access
   lastResponses.set(projectPath, text.slice(-MAX_STORE_LENGTH))
   persistStore()
+
+  // Full response to file — Claude can Read() this
+  try {
+    mkdirSync(FULL_RESPONSE_DIR, { recursive: true })
+    const filePath = getLastResponseFilePath(projectPath)
+    writeFileSync(filePath, text, 'utf-8')
+  } catch (err) {
+    console.error('[last-response] failed to save full response:', err)
+  }
 }
 
 export function getLastResponse(projectPath: string): string {

@@ -3,14 +3,40 @@
  * Read, write, list, search, fetch, push, list_projects.
  */
 
-import { readFile, writeFile, readdir, stat, mkdir, open } from 'node:fs/promises'
-import { resolve, join, relative, sep, isAbsolute } from 'node:path'
-import { homedir } from 'node:os'
-import { MAX_FILE_SIZE, MAX_TRANSFER_SIZE, MAX_SEARCH_RESULTS } from './index.js'
+import { readFile, writeFile, readdir, stat, mkdir, open, rm, rename, copyFile } from 'node:fs/promises'
+import { resolve, join, relative, sep, isAbsolute, dirname } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { exec } from 'node:child_process'
+import { MAX_FILE_SIZE, MAX_TRANSFER_SIZE, MAX_SEARCH_RESULTS, IS_WIN } from './index.js'
 
 export async function handleReadFile(args: Record<string, unknown>, validatePath: (p: string) => string): Promise<string> {
   const filePath = validatePath(String(args.path))
   const stats = await stat(filePath)
+
+  // Byte-range read when offset/limit provided
+  const hasOffset = args.offset !== undefined && args.offset !== null
+  const hasLimit = args.limit !== undefined && args.limit !== null
+  if (hasOffset || hasLimit) {
+    const byteOffset = Math.max(Number(args.offset) || 0, 0)
+    const byteLimit = hasLimit
+      ? Math.min(Math.max(Number(args.limit) || MAX_FILE_SIZE, 1), MAX_FILE_SIZE)
+      : MAX_FILE_SIZE
+    const readSize = Math.min(byteLimit, stats.size - byteOffset)
+    if (readSize <= 0) {
+      return `[bytes ${byteOffset}-${byteOffset} of ${stats.size}]\n(empty range)`
+    }
+    const fh = await open(filePath, 'r')
+    try {
+      const buffer = Buffer.alloc(readSize)
+      const { bytesRead } = await fh.read(buffer, 0, readSize, byteOffset)
+      const endByte = byteOffset + bytesRead
+      return `[bytes ${byteOffset}-${endByte} of ${stats.size}]\n` +
+        buffer.toString('utf-8', 0, bytesRead)
+    } finally {
+      await fh.close()
+    }
+  }
+
   if (stats.size > MAX_FILE_SIZE) {
     const fh = await open(filePath, 'r')
     try {
@@ -38,13 +64,36 @@ export async function handleWriteFile(
   return `Written ${content.length} bytes to ${relative(baseDir, filePath)}`
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`
+}
+
+function formatMtime(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  const h = String(date.getHours()).padStart(2, '0')
+  const min = String(date.getMinutes()).padStart(2, '0')
+  return `${y}-${m}-${d} ${h}:${min}`
+}
+
 export async function handleListDirectory(args: Record<string, unknown>, validatePath: (p: string) => string): Promise<string> {
   const dirPath = validatePath(String(args.path))
   const entries = await readdir(dirPath, { withFileTypes: true })
-  const lines = entries.map((entry) => {
+  const lines = await Promise.all(entries.map(async (entry) => {
     const type = entry.isDirectory() ? 'dir' : 'file'
-    return `[${type}] ${entry.name}`
-  })
+    try {
+      const fullPath = join(dirPath, entry.name)
+      const s = await stat(fullPath)
+      const size = entry.isDirectory() ? '' : ` ${formatFileSize(s.size)}`
+      return `[${type}] ${entry.name} (${formatMtime(s.mtime)}${size ? ',' + size : ''})`
+    } catch {
+      return `[${type}] ${entry.name}`
+    }
+  }))
   return lines.join('\n') || '(empty directory)'
 }
 
@@ -131,4 +180,124 @@ export async function handleListProjects(baseDir: string): Promise<string> {
     projects.push(entry.name)
   }
   return JSON.stringify(projects)
+}
+
+// --- P0-3: Delete ---
+
+const SYSTEM_PATHS = IS_WIN
+  ? [/^[a-z]:\\$/i, /^[a-z]:\\windows/i, /^[a-z]:\\program files/i, /^[a-z]:\\users$/i]
+  : [/^\/$/, /^\/bin$/, /^\/sbin$/, /^\/usr$/, /^\/etc$/, /^\/var$/, /^\/dev$/, /^\/proc$/, /^\/sys$/]
+
+function isSystemPath(p: string): boolean {
+  const normalized = p.replace(/[\\/]+$/, '')
+  return SYSTEM_PATHS.some((re) => re.test(normalized))
+}
+
+export async function handleDelete(
+  args: Record<string, unknown>,
+  validatePath: (p: string) => string,
+  baseDir: string,
+): Promise<string> {
+  const filePath = validatePath(String(args.path))
+  const recursive = args.recursive === true
+
+  // Safety: block system paths
+  if (isSystemPath(filePath)) {
+    throw new Error('Cannot delete system path')
+  }
+
+  // Safety: block deleting baseDir itself
+  const normBase = resolve(baseDir)
+  const normTarget = resolve(filePath)
+  if (normTarget === normBase) {
+    throw new Error('Cannot delete the base working directory')
+  }
+
+  // Safety: block deleting home dir root
+  const normHome = resolve(homedir())
+  if (normTarget === normHome) {
+    throw new Error('Cannot delete the home directory')
+  }
+
+  const stats = await stat(filePath)
+  if (stats.isDirectory() && !recursive) {
+    throw new Error('Target is a directory — set recursive: true to delete directories')
+  }
+
+  await rm(filePath, { recursive, force: false })
+  const relPath = relative(baseDir, filePath)
+  return `Deleted ${stats.isDirectory() ? 'directory' : 'file'}: ${relPath}`
+}
+
+// --- P1-5: Move file ---
+
+export async function handleMoveFile(
+  args: Record<string, unknown>,
+  validatePath: (p: string) => string,
+  baseDir: string,
+): Promise<string> {
+  const srcPath = validatePath(String(args.src))
+  const destPath = validatePath(String(args.dest))
+
+  // Ensure source exists
+  await stat(srcPath)
+
+  // Auto-create destination parent directory
+  const destDir = dirname(destPath)
+  await mkdir(destDir, { recursive: true })
+
+  try {
+    await rename(srcPath, destPath)
+  } catch (err) {
+    // Cross-device fallback: copy + delete
+    if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
+      await copyFile(srcPath, destPath)
+      await rm(srcPath, { force: true })
+    } else {
+      throw err
+    }
+  }
+
+  return `Moved ${relative(baseDir, srcPath)} → ${relative(baseDir, destPath)}`
+}
+
+// --- P1-9: Fetch archive ---
+
+export async function handleFetchArchive(
+  args: Record<string, unknown>,
+  validatePath: (p: string) => string,
+): Promise<string> {
+  const targetPath = validatePath(String(args.path))
+  const format = String(args.format || 'zip')
+
+  // Validate target exists
+  await stat(targetPath)
+
+  const tmpPath = join(tmpdir(), `remote-archive-${Date.now()}.${format === 'tar.gz' ? 'tar.gz' : 'zip'}`)
+
+  const cmd = IS_WIN
+    ? `powershell -NoProfile -Command "Compress-Archive -Path '${targetPath.replace(/'/g, "''")}' -DestinationPath '${tmpPath.replace(/'/g, "''")}' -Force"`
+    : format === 'tar.gz'
+      ? `tar -czf "${tmpPath}" -C "${dirname(targetPath)}" "${targetPath.split('/').pop()}"`
+      : `cd "${dirname(targetPath)}" && zip -r "${tmpPath}" "${targetPath.split('/').pop()}"`
+
+  await new Promise<void>((res, rej) => {
+    exec(cmd, { timeout: 60_000, windowsHide: true }, (err) => {
+      if (err) rej(new Error(`Archive creation failed: ${err.message}`))
+      else res()
+    })
+  })
+
+  try {
+    const archiveStats = await stat(tmpPath)
+    if (archiveStats.size > MAX_TRANSFER_SIZE) {
+      throw new Error(`Archive too large: ${formatFileSize(archiveStats.size)} (max ${formatFileSize(MAX_TRANSFER_SIZE)})`)
+    }
+
+    const buffer = await readFile(tmpPath)
+    const name = tmpPath.split(sep).pop() ?? 'archive'
+    return JSON.stringify({ name, size: archiveStats.size, base64: buffer.toString('base64') })
+  } finally {
+    await rm(tmpPath, { force: true }).catch(() => {})
+  }
 }

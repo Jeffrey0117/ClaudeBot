@@ -32,6 +32,7 @@ import { recordActivity } from '../plugins/stats/activity-logger.js'
 import { emitResponseChunk, emitResponseComplete, emitResponseError } from '../dashboard/response-broker.js'
 import { setLastResponse } from './last-response-store.js'
 import { extractDigest, setContext } from './context-digest-store.js'
+import { recordResponse } from './memory-consolidator.js'
 import { autoCommitAndPush } from '../utils/auto-commit.js'
 import { env } from '../config/env.js'
 import { startDraft, updateDraft, finalizeDraft, cancelDraft, hasDraft } from './draft-sender.js'
@@ -316,6 +317,11 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
     // the PREVIOUS response's digest instead of the current one
     if (hookedText) {
       setContext(ctx.item.project.path, digestCleaned || hookedText, digest)
+    }
+
+    // Trigger background memory consolidation (non-blocking)
+    if (responseText) {
+      recordResponse(ctx.item.project.path, responseText)
     }
 
     ctx.done()
