@@ -215,8 +215,11 @@ export function runClaude(options: RunOptions): void {
         (isAdmin
           ? `1. 你同時擁有「遠端工具 (remote_*)」和「本地工具 (Read/Write/Edit/Bash)」。\n` +
             `   - 遠端工具 → 操作使用者的電腦（遠端機器）\n` +
-            `   - 本地工具 → 操作 Bot 伺服器（本地機器）\n` +
-            `2. 預設操作遠端。使用者說「本地」「伺服器」「bot 那台」→ 用本地工具。\n` +
+            `   - 本地工具 → 操作 Bot 伺服器（本地機器，cwd: ${process.cwd()}）\n` +
+            `2. ⚠️ 預設一律用遠端工具。兩台機器路徑結構相似，不要猜！\n` +
+            `   - 使用者在對話中提到的路徑、remote_* 回傳中的路徑 → 全部是遠端路徑 → 用 remote_*\n` +
+            `   - 只有使用者明確說「本地」「伺服器」「bot 那台」時 → 才用本地工具\n` +
+            `   - 如果 Read/Bash 出現 "no such file"，你很可能用錯了工具，改用 remote_* 重試\n` +
             `3. 跨機器協作：可以從遠端讀檔 → 本地寫入，或反過來。\n`
           : `1. ⚠️ 嚴禁使用 Read/Write/Edit/Bash/Glob/Grep 等本地工具！\n` +
             `   你的本地檔案系統跟使用者的電腦完全不同。\n` +
