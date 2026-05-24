@@ -20,9 +20,11 @@ import { isAdminLicense } from '../remote/license-store.js'
 
 /** Detect affirmative/agreement replies that reference the previous message. */
 const AFFIRMATIVE_RE = /^(好|可以|沒問題|沒差|OK|ok|Yes|yes|對|嗯|行|做吧|來吧|就這樣|同意|贊成|go|就醬|開始|動手|沒錯|是的|確定|sure|yep|yeah|做啊|加吧|弄吧|改吧|要|proceed|continue|繼續)/i
+const AFFIRMATIVE_EMOJI = /^[👍✅✔️👌🫡💪🤙☑️]+$/u
 
 function looksAffirmative(text: string): boolean {
   const stripped = text.replace(/^[\[（(【]語音輸入[\]）)】]\s*/i, '').trim()
+  if (AFFIRMATIVE_EMOJI.test(stripped)) return true
   return AFFIRMATIVE_RE.test(stripped)
 }
 

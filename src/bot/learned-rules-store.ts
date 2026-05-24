@@ -33,13 +33,14 @@ export function addLearnedRule(
 
   let evicted: string | null = null
   if (list.length >= MAX_RULES) {
-    // Evict lowest hitCount
-    let minIdx = 0
+    // Evict oldest rule (FIFO) — newest rules reflect current needs,
+    // oldest are most likely outdated. learnedAt is always set.
+    let oldestIdx = 0
     for (let i = 1; i < list.length; i++) {
-      if (list[i].hitCount < list[minIdx].hitCount) minIdx = i
+      if (list[i].learnedAt < list[oldestIdx].learnedAt) oldestIdx = i
     }
-    evicted = list[minIdx].rule
-    list.splice(minIdx, 1)
+    evicted = list[oldestIdx].rule
+    list.splice(oldestIdx, 1)
   }
 
   const item: LearnedRule = {
@@ -58,13 +59,10 @@ export function getLearnedRules(projectPath: string): readonly LearnedRule[] {
   return data[projectPath] ?? []
 }
 
-export function touchLearnedRules(projectPath: string): void {
-  const data = store.load()
-  const list = data[projectPath] ?? []
-  if (list.length === 0) return
-
-  const updated = list.map((r) => ({ ...r, hitCount: r.hitCount + 1 }))
-  store.save({ ...data, [projectPath]: updated })
+/** No-op — hitCount was incremented for ALL rules equally (useless).
+ *  Eviction now uses FIFO (oldest first) via learnedAt. */
+export function touchLearnedRules(_projectPath: string): void {
+  // intentionally empty — kept for API compatibility
 }
 
 export function formatRulesForPrompt(projectPath: string): string {
