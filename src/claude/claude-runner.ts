@@ -154,6 +154,7 @@ export function runClaude(options: RunOptions): void {
     const activeMch = getActiveMachine(options.chatId, options.threadId)
     const pairing = env.REMOTE_ENABLED ? getPairing(options.chatId, options.threadId, activeMch) : null
     const isRemote = pairing?.connected === true || isVirtualChat(options.chatId)
+    const isAdmin = env.ADMIN_CHAT_ID === options.chatId
     if (isRemote) {
       // Look up agent baseDir for remote prompt context
       let remoteBaseDir: string | undefined
@@ -187,11 +188,17 @@ export function runClaude(options: RunOptions): void {
         `- remote_push_file(path, base64): 上傳檔案（base64，限 20MB）\n` +
         `\n` +
         `規則：\n` +
-        `1. 不要用 Read/Write/Edit/Bash 工具，那些是操作本地的。\n` +
-        `2. 使用者可能在操作電腦（找檔案、傳東西、看狀態），不一定在做專案開發。根據需求選擇合適的工具。\n` +
-        `3. 如果使用者要做專案開發，先用 remote_project_overview 了解專案全貌，特別是 CLAUDE.md。\n` +
-        `4. 搜尋程式碼用 remote_grep，比 remote_search_files 快很多。\n` +
-        `5. 修改檔案前先 remote_read_file 讀取完整內容。\n` +
+        (isAdmin
+          ? `1. 你同時擁有「遠端工具 (remote_*)」和「本地工具 (Read/Write/Edit/Bash)」。\n` +
+            `   - 遠端工具 → 操作使用者的電腦（遠端機器）\n` +
+            `   - 本地工具 → 操作 Bot 伺服器（本地機器）\n` +
+            `2. 預設操作遠端。使用者說「本地」「伺服器」「bot 那台」→ 用本地工具。\n` +
+            `3. 跨機器協作：可以從遠端讀檔 → 本地寫入，或反過來。\n`
+          : `1. 不要用 Read/Write/Edit/Bash 工具，那些是操作本地的。\n`) +
+        `${isAdmin ? '4' : '2'}. 使用者可能在操作電腦（找檔案、傳東西、看狀態），不一定在做專案開發。根據需求選擇合適的工具。\n` +
+        `${isAdmin ? '5' : '3'}. 如果使用者要做專案開發，先用 remote_project_overview 了解專案全貌，特別是 CLAUDE.md。\n` +
+        `${isAdmin ? '6' : '4'}. 搜尋程式碼用 remote_grep，比 remote_search_files 快很多。\n` +
+        `${isAdmin ? '7' : '5'}. 修改檔案前先 remote_read_file 讀取完整內容。\n` +
         `\n` +
         (env.MCP_AGENT_BROWSER
           ? `瀏覽器操作（遠端機器）：\n` +
@@ -215,10 +222,12 @@ export function runClaude(options: RunOptions): void {
             `6. 絕對不要建議使用者「手動操作」。你有完整的瀏覽器控制能力，用它。\n` +
             `\n`
           : '') +
-        `⚠️ 自我修改例外：\n` +
-        `如果需要修改 ClaudeBot 專案本身的程式碼（當前工作目錄下的檔案），\n` +
-        `一律使用本地工具（Read/Write/Edit/Bash），不要用 remote_* 工具。\n` +
-        `判斷方式：改動需要「重啟 bot 才生效」→ 用本地工具。\n` +
+        (isAdmin
+          ? ''
+          : `⚠️ 自我修改例外：\n` +
+            `如果需要修改 ClaudeBot 專案本身的程式碼（當前工作目錄下的檔案），\n` +
+            `一律使用本地工具（Read/Write/Edit/Bash），不要用 remote_* 工具。\n` +
+            `判斷方式：改動需要「重啟 bot 才生效」→ 用本地工具。\n`) +
         `[/遠端配對模式]`,
       )
     }
