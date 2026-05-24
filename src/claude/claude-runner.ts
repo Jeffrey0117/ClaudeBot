@@ -211,24 +211,45 @@ export function runClaude(options: RunOptions): void {
         `- remote_clipboard(action, text?): 讀寫剪貼簿（action: "read"/"write"）\n` +
         `- remote_notify(title, body): 桌面通知\n` +
         `\n` +
-        `規則：\n` +
         (isAdmin
-          ? `1. 你同時擁有「遠端工具 (remote_*)」和「本地工具 (Read/Write/Edit/Bash)」。\n` +
-            `   - 遠端工具 → 操作使用者的電腦（遠端機器）\n` +
-            `   - 本地工具 → 操作 Bot 伺服器（本地機器，cwd: ${process.cwd()}）\n` +
-            `2. ⚠️ 預設一律用遠端工具。兩台機器路徑結構相似，不要猜！\n` +
-            `   - 使用者在對話中提到的路徑、remote_* 回傳中的路徑 → 全部是遠端路徑 → 用 remote_*\n` +
-            `   - 只有使用者明確說「本地」「伺服器」「bot 那台」時 → 才用本地工具\n` +
-            `   - 如果 Read/Bash 出現 "no such file"，你很可能用錯了工具，改用 remote_* 重試\n` +
-            `3. 跨機器協作：可以從遠端讀檔 → 本地寫入，或反過來。\n`
-          : `1. ⚠️ 嚴禁使用 Read/Write/Edit/Bash/Glob/Grep 等本地工具！\n` +
-            `   你的本地檔案系統跟使用者的電腦完全不同。\n` +
-            `   對話中出現的所有路徑都在遠端機器上，只能用 remote_* 工具操作。\n` +
-            `   如果你看到 "no such file" 或 ENOENT，代表你用錯了工具。\n`) +
-        `${isAdmin ? '4' : '2'}. 使用者可能在操作電腦（找檔案、傳東西、看狀態），不一定在做專案開發。根據需求選擇合適的工具。\n` +
-        `${isAdmin ? '5' : '3'}. 如果使用者要做專案開發，先用 remote_project_overview 了解專案全貌，特別是 CLAUDE.md。\n` +
-        `${isAdmin ? '6' : '4'}. 搜尋程式碼用 remote_grep，比 remote_search_files 快很多。\n` +
-        `${isAdmin ? '7' : '5'}. 修改檔案前先 remote_read_file 讀取完整內容。\n` +
+          ? `[雙機器模式]\n` +
+            `你可以同時操作兩台機器：\n` +
+            `\n` +
+            `  🖥️ 本機（Bot 伺服器）\n` +
+            `     路徑: ${process.cwd()}\n` +
+            `     工具: Read, Write, Edit, Bash, Glob, Grep\n` +
+            `\n` +
+            `  💻 遠端（使用者的電腦）\n` +
+            (remoteBaseDir ? `     路徑: ${remoteBaseDir}\n` : '') +
+            `     工具: remote_* 系列\n` +
+            `\n` +
+            `判斷規則（按優先序）：\n` +
+            `1. 使用者明確指定 → 照做\n` +
+            `   本機關鍵字：「本地」「伺服器」「bot 那台」「這台伺服器」「A機器」(若已定義)\n` +
+            `   遠端關鍵字：「遠端」「我的電腦」「那邊」「B機器」(若已定義)\n` +
+            `2. 使用者用自定義名稱（如「A機器」「B機器」）→ 從上下文推斷是哪台，並在回覆中確認\n` +
+            `3. 路徑來自 remote_* 工具的回傳 → 一定是遠端路徑 → 用 remote_*\n` +
+            `4. 沒有明確指定 → 預設用遠端工具\n` +
+            `\n` +
+            `⚠️ 跨機器工作流：\n` +
+            `- 切換機器時，在回覆中明確標示：「現在切到本機操作」「切回遠端」\n` +
+            `- 如果 Read/Bash 出現 "no such file" → 你可能用錯機器了，改用 remote_* 重試\n` +
+            `- 跨機器傳檔：remote_read_file → Write（遠端→本機）或 Read → remote_write_file（本機→遠端）\n` +
+            `[/雙機器模式]\n`
+          : `[單機遠端模式]\n` +
+            `⚠️ 嚴禁使用本地工具（Read/Write/Edit/Bash/Glob/Grep）！\n` +
+            `你的本地檔案系統是 Bot 伺服器，不是使用者的電腦。\n` +
+            `對話中所有路徑都在使用者的遠端機器上 → 只能用 remote_* 工具。\n` +
+            `"no such file" / ENOENT = 你用錯了工具。\n` +
+            `\n` +
+            `唯一例外：修改 ClaudeBot 自身程式碼（需重啟 bot 才生效的改動）→ 用本地工具。\n` +
+            `[/單機遠端模式]\n`) +
+        `\n` +
+        `操作守則：\n` +
+        `1. 使用者可能在操作電腦（找檔案、傳東西、看狀態），不一定在做專案開發。\n` +
+        `2. 做專案開發時，先用 remote_project_overview 了解全貌，特別是 CLAUDE.md。\n` +
+        `3. 搜尋程式碼用 remote_grep，比 remote_search_files 快很多。\n` +
+        `4. 修改檔案前先 remote_read_file 讀取完整內容。\n` +
         `\n` +
         (env.MCP_AGENT_BROWSER
           ? `瀏覽器操作（遠端機器）：\n` +
@@ -252,12 +273,6 @@ export function runClaude(options: RunOptions): void {
             `6. 絕對不要建議使用者「手動操作」。你有完整的瀏覽器控制能力，用它。\n` +
             `\n`
           : '') +
-        (isAdmin
-          ? ''
-          : `⚠️ 自我修改例外：\n` +
-            `如果需要修改 ClaudeBot 專案本身的程式碼（當前工作目錄下的檔案），\n` +
-            `一律使用本地工具（Read/Write/Edit/Bash），不要用 remote_* 工具。\n` +
-            `判斷方式：改動需要「重啟 bot 才生效」→ 用本地工具。\n`) +
         `[/遠端配對模式]`,
       )
     }
