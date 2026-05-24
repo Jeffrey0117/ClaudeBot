@@ -153,15 +153,19 @@ function handleProxyConnect(ws: WebSocket, code: string): void {
   console.log(`[relay] Proxy connected: code=${code}`)
 
   // Forward messages from proxy → agent (with origin tracking)
+  // Parse only to extract type + id for routing, then forward raw to avoid re-serialization
   ws.on('message', (raw) => {
     try {
-      const msg = JSON.parse(raw.toString()) as RelayInbound
+      const rawStr = typeof raw === 'string' ? raw : raw.toString()
+      const msg = JSON.parse(rawStr) as RelayInbound
       if (msg.type === 'tool_call') {
         const origins = requestOrigins.get(code)
         if (origins) {
           origins.set((msg as ToolCallRequest).id, ws)
         }
-        send(agent.ws, msg)
+        if (agent.ws.readyState === agent.ws.OPEN) {
+          agent.ws.send(rawStr)
+        }
       }
     } catch {
       // ignore malformed
@@ -173,7 +177,7 @@ function handleProxyConnect(ws: WebSocket, code: string): void {
   })
 }
 
-function handleAgentMessage(_ws: WebSocket, code: string, msg: RelayInbound): void {
+function handleAgentMessage(_ws: WebSocket, code: string, msg: RelayInbound, rawStr: string): void {
   // Graceful shutdown notification from agent
   if (msg.type === 'agent_shutdown') {
     const reason = (msg as AgentShutdown).reason || '手動關閉'
@@ -182,7 +186,10 @@ function handleAgentMessage(_ws: WebSocket, code: string, msg: RelayInbound): vo
     return
   }
 
-  // Route tool_result / tool_error to the ORIGINATING proxy only
+  // Route tool_result / tool_error to the ORIGINATING proxy only.
+  // Forward raw string to avoid re-serialization overhead.
+  // INVARIANT: msg must not be modified between parse and forward.
+  // If any transformation is needed in the future, switch back to send(ws, msg).
   if (msg.type === 'tool_result' || msg.type === 'tool_error') {
     // Check if this is a bot-initiated call first
     if (tryRouteBotResult(msg as ToolCallResult | ToolCallError)) return
@@ -191,7 +198,9 @@ function handleAgentMessage(_ws: WebSocket, code: string, msg: RelayInbound): vo
     if (origins) {
       const originProxy = origins.get(msg.id)
       if (originProxy) {
-        send(originProxy, msg)
+        if (originProxy.readyState === originProxy.OPEN) {
+          originProxy.send(rawStr)
+        }
         origins.delete(msg.id)
       }
     }
@@ -336,9 +345,10 @@ export function startRelayServer(port: number): void {
     const ip = req.socket.remoteAddress ?? 'unknown'
 
     ws.on('message', (raw) => {
+      const rawStr = typeof raw === 'string' ? raw : raw.toString()
       let msg: RelayInbound
       try {
-        msg = JSON.parse(raw.toString()) as RelayInbound
+        msg = JSON.parse(rawStr) as RelayInbound
       } catch {
         send(ws, { type: 'error', error: 'Invalid JSON' })
         return
@@ -380,7 +390,7 @@ export function startRelayServer(port: number): void {
       if (role === 'proxy') return
 
       if (role === 'agent') {
-        handleAgentMessage(ws, assignedCode, msg)
+        handleAgentMessage(ws, assignedCode, msg, rawStr)
       }
 
       if (role === 'electron_chat') {
