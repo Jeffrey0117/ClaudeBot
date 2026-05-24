@@ -36,6 +36,7 @@ import { autoCommitAndPush } from '../utils/auto-commit.js'
 import { env } from '../config/env.js'
 import { startDraft, updateDraft, finalizeDraft, cancelDraft, hasDraft } from './draft-sender.js'
 import path from 'node:path'
+import { isVirtualChat } from '../remote/virtual-chat-store.js'
 
 const TIMEOUT_MS = 30 * 60 * 1000
 
@@ -647,7 +648,8 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       }, LONG_RUN_MS)
 
       // Idle entertainment: send fun tidbits during long waits (silent — no notification)
-      if (!isDashboard) {
+      // Skip for dashboard and Electron virtual chats (annoying in desktop app)
+      if (!isDashboard && !isVirtualChat(item.chatId)) {
         const TIDBIT_DELAY_MS = 15_000
         const TIDBIT_INTERVAL_MS = 30_000 + Math.random() * 15_000
 
