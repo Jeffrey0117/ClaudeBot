@@ -218,7 +218,10 @@ export function runClaude(options: RunOptions): void {
             `   - 本地工具 → 操作 Bot 伺服器（本地機器）\n` +
             `2. 預設操作遠端。使用者說「本地」「伺服器」「bot 那台」→ 用本地工具。\n` +
             `3. 跨機器協作：可以從遠端讀檔 → 本地寫入，或反過來。\n`
-          : `1. 不要用 Read/Write/Edit/Bash 工具，那些是操作本地的。\n`) +
+          : `1. ⚠️ 嚴禁使用 Read/Write/Edit/Bash/Glob/Grep 等本地工具！\n` +
+            `   你的本地檔案系統跟使用者的電腦完全不同。\n` +
+            `   對話中出現的所有路徑都在遠端機器上，只能用 remote_* 工具操作。\n` +
+            `   如果你看到 "no such file" 或 ENOENT，代表你用錯了工具。\n`) +
         `${isAdmin ? '4' : '2'}. 使用者可能在操作電腦（找檔案、傳東西、看狀態），不一定在做專案開發。根據需求選擇合適的工具。\n` +
         `${isAdmin ? '5' : '3'}. 如果使用者要做專案開發，先用 remote_project_overview 了解專案全貌，特別是 CLAUDE.md。\n` +
         `${isAdmin ? '6' : '4'}. 搜尋程式碼用 remote_grep，比 remote_search_files 快很多。\n` +
