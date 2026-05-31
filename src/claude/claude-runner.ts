@@ -1,5 +1,6 @@
 import { spawn, execSync, type ChildProcess } from 'node:child_process'
 import path from 'node:path'
+import fs from 'node:fs'
 import type { ClaudeModel, ClaudeResult } from '../types/index.js'
 import type { StreamEvent, StreamResult, StreamContentBlockDelta, StreamAssistantMessage } from '../types/claude-stream.js'
 import { setAISessionId, clearAISession } from '../ai/session-store.js'
@@ -57,8 +58,17 @@ function resolveClaudeCli(): { cmd: string; prefix: readonly string[] } {
   try {
     const cmdPath = execSync('where claude.cmd', { encoding: 'utf-8', windowsHide: true }).trim().split('\n')[0].trim()
     const dir = path.dirname(cmdPath)
-    const cliJs = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js')
-    return { cmd: process.execPath, prefix: [cliJs] }
+    const ccDir = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code')
+    // claude-code <= 1.x shipped cli.js (run via node); 2.x ships a native bin/claude.exe
+    const cliJs = path.join(ccDir, 'cli.js')
+    if (fs.existsSync(cliJs)) {
+      return { cmd: process.execPath, prefix: [cliJs] }
+    }
+    const binExe = path.join(ccDir, 'bin', 'claude.exe')
+    if (fs.existsSync(binExe)) {
+      return { cmd: binExe, prefix: [] }
+    }
+    return { cmd: 'claude', prefix: [] }
   } catch {
     return { cmd: 'claude', prefix: [] }
   }
