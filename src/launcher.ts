@@ -1,5 +1,6 @@
 import { spawn, execSync, type ChildProcess } from 'node:child_process'
 import { readdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs'
+import net from 'node:net'
 import path from 'node:path'
 import dotenv from 'dotenv'
 
@@ -41,26 +42,69 @@ function envFileToBotId(envFile: string): string {
 
 const root = process.cwd()
 const PID_FILE = path.join(root, '.launcher.pid')
+// Localhost-only port held for the launcher's lifetime. Binding it is atomic at
+// the OS level, so it doubles as a race-free single-instance guard: two
+// concurrent `npm run dev` invocations can't both acquire it.
+const SINGLETON_PORT = 47615
 
-// Kill previous launcher if PID file exists
+const wait = (ms: number) => { const end = Date.now() + ms; while (Date.now() < end) {} }
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    // EPERM means the process exists but we can't signal it — still alive.
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+// Kill previously-recorded launcher (restart semantics: the newest run wins).
 try {
   const oldPid = parseInt(readFileSync(PID_FILE, 'utf-8').trim(), 10)
-  if (oldPid && oldPid !== process.pid) {
+  if (oldPid && oldPid !== process.pid && pidAlive(oldPid)) {
     if (process.platform === 'win32') {
       // taskkill /T kills the entire process tree (launcher + all child bots)
       try {
         execSync(`taskkill /F /T /PID ${oldPid}`, { stdio: 'ignore', windowsHide: true })
       } catch { /* already dead */ }
     } else {
-      process.kill(oldPid, 'SIGTERM')
+      try { process.kill(oldPid, 'SIGTERM') } catch { /* already dead */ }
     }
     console.log(`Killed previous launcher + children (PID ${oldPid})`)
-    const wait = (ms: number) => { const end = Date.now() + ms; while (Date.now() < end) {} }
     wait(1000)
   }
 } catch {
   // No previous launcher or already dead — fine
 }
+
+// Single-instance guard. Without this, two launchers starting near-simultaneously
+// (e.g. double `npm run dev`, or a stale PID file) each spawn a full set of bots.
+// Duplicate instances share one Telegram token → 409 Conflict → crash → respawn → loop.
+// Binding a localhost port is atomic, so exactly one launcher wins; the rest exit.
+const singletonServer = net.createServer()
+await new Promise<void>((resolve) => {
+  let attempts = 0
+  const tryListen = () => {
+    singletonServer.once('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        attempts += 1
+        if (attempts <= 10) {
+          // A just-killed previous launcher may not have released the port yet.
+          setTimeout(tryListen, 300)
+          return
+        }
+        console.error('Another launcher instance is already running — exiting to avoid duplicate bots.')
+        process.exit(0)
+      }
+      // Unexpected bind error — don't block startup over the guard.
+      console.warn(`[launcher] singleton guard bind failed (${err.code}) — continuing without guard`)
+      resolve()
+    })
+    singletonServer.listen(SINGLETON_PORT, '127.0.0.1', () => resolve())
+  }
+  tryListen()
+})
 
 // Write our PID
 writeFileSync(PID_FILE, String(process.pid), 'utf-8')
@@ -381,8 +425,9 @@ const shutdown = (signal: string) => {
   shuttingDown = true
   console.log(`\n${signal} — stopping all bots...`)
 
-  // Clean up PID file
+  // Clean up PID file + release the single-instance port so a restart can rebind.
   try { unlinkSync(PID_FILE) } catch { /* ignore */ }
+  try { singletonServer.close() } catch { /* ignore */ }
 
   // Stop sleep guard
   if (sleepGuard) {
