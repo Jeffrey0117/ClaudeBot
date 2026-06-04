@@ -99,7 +99,7 @@ export async function uploadToDuk(filePath: string): Promise<string> {
   }
 }
 
-async function uploadToPokkit(filePath: string, config: PipeConfig): Promise<string> {
+export async function uploadToPokkit(filePath: string, config: PipeConfig): Promise<string> {
   const form = new FormData()
   form.append('file', new Blob([readFileSync(filePath)]), basename(filePath))
 
