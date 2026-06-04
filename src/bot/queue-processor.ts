@@ -18,6 +18,7 @@ import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand, getPluginM
 import { getCoreCommandHandler } from './bot.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
 import { getAISessionId, shouldRotateSession, rotateSession, setSessionTokens } from '../ai/session-store.js'
+import { getActiveMachine } from './state.js'
 import { detectChoices } from '../utils/choice-detector.js'
 import { cleanMarkdown } from '../utils/markdown-cleaner.js'
 import { generateSuggestions } from '../utils/suggestion-generator.js'
@@ -681,7 +682,12 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         }, TIDBIT_DELAY_MS)
       }
 
-      // Track active runner for dashboard heartbeat
+      // Track active runner for dashboard heartbeat. For remote sessions, tag
+      // which machine this runner is acting on so the dashboard can group
+      // activity by machine.
+      const runnerMachine = item.project.path.startsWith('remote:')
+        ? getActiveMachine(item.chatId, item.threadId)
+        : undefined
       setActiveRunner(item.project.path, {
         projectPath: item.project.path,
         projectName: item.project.name,
@@ -690,6 +696,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         elapsedMs: 0,
         toolCount: 0,
         lastTool: null,
+        machine: runnerMachine,
       })
 
       // Auto-rotate bloated sessions BEFORE the model's lossy auto-compact fires

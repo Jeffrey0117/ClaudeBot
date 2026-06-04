@@ -6,6 +6,14 @@ export interface ActiveRunnerInfo {
   readonly elapsedMs: number
   readonly toolCount: number
   readonly lastTool: string | null
+  readonly machine?: string
+}
+
+export interface ConnectedMachine {
+  readonly label: string
+  readonly code: string
+  readonly hostname: string | null
+  readonly connectedSince: number
 }
 
 export interface BotHeartbeat {
@@ -16,6 +24,7 @@ export interface BotHeartbeat {
   readonly queueByProject: Record<string, number>
   readonly activeRunners: readonly ActiveRunnerInfo[]
   readonly locksHeld: readonly string[]
+  readonly machines: readonly ConnectedMachine[]
   readonly online: boolean
 }
 
