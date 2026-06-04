@@ -17,7 +17,7 @@ import { createFakeContext } from '../utils/fake-context.js'
 import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand, getPluginModule } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
-import { getAISessionId, shouldRotateSession, rotateSession, setSessionTokens } from '../ai/session-store.js'
+import { getAISessionId, shouldRotateSession, rotateSession, setSessionTokens, needsNewReminder, markNewReminded } from '../ai/session-store.js'
 import { getActiveMachine } from './state.js'
 import { detectChoices } from '../utils/choice-detector.js'
 import { cleanMarkdown } from '../utils/markdown-cleaner.js'
@@ -768,6 +768,18 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         onResult: (result) => {
           if (result.contextTokens) {
             setSessionTokens(resolvedBackend, item.project.path, result.contextTokens)
+          }
+          // One-time heads-up once the conversation grows long, so the user
+          // knows they can start fresh with /new (auto-rotation still happens
+          // later at the token threshold). Real chats only.
+          if (!isDashboard && !isVirtualChat(item.chatId) &&
+              needsNewReminder(resolvedBackend, item.project.path)) {
+            markNewReminded(resolvedBackend, item.project.path)
+            telegram.sendMessage(
+              item.chatId,
+              '💬 這個對話累積有點長了。如果覺得我開始忘東忘西，隨時可以用 /new 開乾淨的新對話（重點會自動摘要接續）。',
+              { disable_notification: true },
+            ).catch(() => {})
           }
           handleRunnerResult(ctx, result)
         },
