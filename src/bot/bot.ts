@@ -37,6 +37,7 @@ import { detectDeployIntent, runDeployFromIntent } from './deploy-intent.js'
 import { detectOpsIntent, runOpsIntent } from './ops-intent.js'
 import { handleOpsCallback } from './ops-callbacks.js'
 import { syncCommand } from './commands/sync.js'
+import { landCommand } from './commands/land.js'
 import { pairCommand, unpairCommand } from './commands/pair.js'
 import { machinesCommand } from './commands/machines.js'
 import { rpairCommand } from './commands/rpair.js'
@@ -121,6 +122,7 @@ export const CORE_COMMANDS = [
   { command: 'restart', description: '重啟 Bot (all=全部)' },
   { command: 'deploy', description: '部署專案 (commit + push)' },
   { command: 'sync', description: '同步所有 worktree' },
+  { command: 'land', description: '把 bot 改動併回 master' },
   { command: 'pair', description: '配對遠端電腦 (code@ip:port)' },
   { command: 'unpair', description: '斷開遠端配對' },
   { command: 'machines', description: '已配對機器列表/切換' },
@@ -229,6 +231,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['reload', reloadCommand],
     ['deploy', deployCommand],
     ['sync', syncCommand],
+    ['land', landCommand],
     ['pair', pairCommand],
     ['unpair', unpairCommand],
     ['machines', machinesCommand],
