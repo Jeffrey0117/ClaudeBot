@@ -105,22 +105,10 @@ async function fetchText(url: string, timeoutMs = 8_000): Promise<string | null>
 async function discoverRelayUrl(): Promise<string | null> {
   const config = loadConfig()
 
-  // 1. rawtxt — read relay URL from known paste ID
-  const pasteId = config.relayPasteId
-  if (pasteId) {
-    const url = config.discoveryUrl || `${RAWTXT_BASE}/${pasteId}/raw`
-    const text = await fetchText(url)
-    if (text && (text.startsWith('wss://') || text.startsWith('ws://'))) return text
-  }
-
-  // 2. Try current tunnel's HTTP /relay-url endpoint
-  if (agentRelayUrl) {
-    const httpUrl = agentRelayUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:')
-    const text = await fetchText(`${httpUrl}/relay-url`)
-    if (text && (text.startsWith('wss://') || text.startsWith('ws://'))) return text
-  }
-
-  // 3. Scan rawtxt pastes — server may have created a new paste with different ID
+  // 1. Scan rawtxt for the NEWEST wss:// paste — this is authoritative and
+  //    handles URL rotation. The server keeps OLD pastes alive (with now-dead
+  //    URLs), so a saved paste ID is unreliable: it would return a stale-but-
+  //    valid-looking URL. The newest paste is the current relay.
   try {
     const listText = await fetchText(`${RAWTXT_BASE}/api/pastes`, 10_000)
     if (listText) {
@@ -132,14 +120,27 @@ async function discoverRelayUrl(): Promise<string | null> {
           const raw = await fetchText(`${RAWTXT_BASE}/${paste.id}/raw`, 5_000)
           if (raw && (raw.startsWith('wss://') || raw.startsWith('ws://'))) {
             log(`Discovered relay URL from rawtxt scan (paste: ${paste.id})`)
-            // Update stored paste ID for faster discovery next time
             saveConfig({ relayPasteId: paste.id })
-            return raw
+            return raw.trim()
           }
         }
       }
     }
-  } catch { /* scan is best-effort */ }
+  } catch { /* scan is best-effort — fall through */ }
+
+  // 2. Fallback: saved paste ID (fast path when the scan endpoint is down)
+  const pasteId = config.relayPasteId
+  if (pasteId) {
+    const text = await fetchText(config.discoveryUrl || `${RAWTXT_BASE}/${pasteId}/raw`)
+    if (text && (text.startsWith('wss://') || text.startsWith('ws://'))) return text.trim()
+  }
+
+  // 3. Fallback: current tunnel's HTTP /relay-url endpoint
+  if (agentRelayUrl) {
+    const httpUrl = agentRelayUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:')
+    const text = await fetchText(`${httpUrl}/relay-url`)
+    if (text && (text.startsWith('wss://') || text.startsWith('ws://'))) return text.trim()
+  }
 
   return null
 }
