@@ -321,6 +321,10 @@ ipcMain.handle('disconnect', () => {
   disconnect()
 })
 
+ipcMain.handle('chat-disconnect', () => {
+  disconnectChat()
+})
+
 // --- Chat mode: persistent client ID ---
 
 function getClientId(): string {
