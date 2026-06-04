@@ -12,6 +12,14 @@ const { join } = require('path')
 const root = join(__dirname, '..')
 const outDir = join(root, 'dist-electron')
 
+// Read the (private) rawtxt host from .env to inject into the bundle, so it is
+// never hardcoded in the public source. Empty if unset → exe skips discovery.
+let RAWTXT_BASE = process.env.RAWTXT_BASE || ''
+try {
+  const m = readFileSync(join(root, '.env'), 'utf-8').match(/^RAWTXT_BASE=(.+)$/m)
+  if (m) RAWTXT_BASE = m[1].trim()
+} catch { /* no .env — leave empty */ }
+
 // 1. Clean + create output directory
 if (existsSync(outDir)) {
   rmSync(outDir, { recursive: true })
@@ -31,6 +39,15 @@ execSync(
   ].join(' '),
   { cwd: root, stdio: 'inherit' },
 )
+
+// Inject the rawtxt host into the bundle (string-replace avoids cross-platform
+// esbuild --define shell-quoting issues). Keeps the host out of public source.
+{
+  const bundlePath = join(outDir, 'main.cjs')
+  const bundle = readFileSync(bundlePath, 'utf-8').split('process.env.RAWTXT_BASE').join(JSON.stringify(RAWTXT_BASE))
+  writeFileSync(bundlePath, bundle)
+  console.log(`[1/4] Injected RAWTXT_BASE (${RAWTXT_BASE ? 'set' : 'empty'})`)
+}
 
 // 3. Copy preload script + renderer assets
 console.log('[2/4] Copying preload + renderer assets...')

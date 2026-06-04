@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { env } from '../config/env.js'
 
 interface TidbitEntry {
   readonly category: string
@@ -51,8 +52,8 @@ export type TidbitResult =
   | AudioTidbit
 
 const TIDBITS_PATH = resolve('data/tidbits.json')
-const REELSCRIPT_API = 'https://reelscript.isnowfriend.com/api/public'
-const REELSCRIPT_BASE = 'https://reelscript.isnowfriend.com'
+const REELSCRIPT_BASE = env.REELSCRIPT_BASE
+const REELSCRIPT_API = REELSCRIPT_BASE ? `${REELSCRIPT_BASE}/api/public` : ''
 
 let pool: TidbitEntry[] = []
 let usedIndices = new Set<number>()

@@ -159,7 +159,7 @@ export async function executeUploadDirectives(
       let target: string
       if (isImage) {
         url = await uploadToDuk(filePath)
-        target = 'duk.tw'
+        target = '圖床'
       } else {
         if (!config) {
           telegram.sendMessage(chatId, '⚠️ @upload 失敗: 非圖片需 CloudPipe，但未設定').catch(() => {})
