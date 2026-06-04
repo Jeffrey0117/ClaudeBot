@@ -1,4 +1,5 @@
 import { spawn, execSync, type ChildProcess } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import fs from 'node:fs'
 import type { ClaudeModel, ClaudeResult } from '../types/index.js'
@@ -44,6 +45,8 @@ interface RunOptions {
   readonly chatId?: number
   readonly threadId?: number
   readonly maxTurns?: number
+  /** Internal: counts auto-retries for transient spawn failures (libuv errors). */
+  readonly _retryCount?: number
   readonly onTextDelta: OnTextDelta
   readonly onToolUse: OnToolUse
   readonly onResult: OnResult
@@ -416,6 +419,14 @@ export function runClaude(options: RunOptions): void {
   console.log('[claude-runner] spawning claude, cwd:', validatedPath)
   console.log('[claude-runner] prompt length:', fullPrompt.length, 'preview:', prompt.slice(0, 50))
 
+  // Guard against ENOENT (-4058) at spawn time: the cwd can momentarily vanish
+  // during git auto-sync / worktree operations. Fail with a clear message
+  // instead of a raw libuv error code.
+  if (!existsSync(validatedPath)) {
+    onError(`專案目錄暫時無法存取：${validatedPath}（可能正在同步，請稍後重試）`)
+    return
+  }
+
   const proc = spawn(claudeCli.cmd, [...claudeCli.prefix, ...args], {
     cwd: validatedPath,
     shell: false,
@@ -530,6 +541,21 @@ export function runClaude(options: RunOptions): void {
       }
     }
     if (!resultReceived && code !== 0 && code !== null) {
+      // Negative codes are libuv spawn errors (e.g. -4058 = ENOENT: cwd or CLI
+      // momentarily missing — usually a transient race during git auto-sync).
+      if (code < 0) {
+        const retry = options._retryCount ?? 0
+        if (retry < 1 && existsSync(validatedPath)) {
+          console.log(`[claude-runner] transient spawn failure (${code}), retrying once in 1.5s`)
+          setTimeout(() => runClaude({ ...options, _retryCount: retry + 1 }), 1500)
+          return
+        }
+        const reason = code === -4058
+          ? '工作目錄或 Claude CLI 暫時找不到 (ENOENT)'
+          : `系統錯誤 ${code}`
+        onError(`Claude 啟動失敗：${reason}。請重試，若持續發生請檢查專案路徑是否存在。`)
+        return
+      }
       onErrorWithRetry(`Claude process exited with code ${code}`)
     }
   })
