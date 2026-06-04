@@ -77,7 +77,10 @@ interface ElectronConfig {
   readonly relayPasteId?: string
 }
 
-const RAWTXT_BASE = 'https://rawtxt.isnowfriend.com'
+// Injected at build time via esbuild --define (from RAWTXT_BASE in .env), so
+// the private host isn't hardcoded in the public source. Empty in dev builds →
+// URL auto-discovery is skipped and the user pastes the Server URL from /pair.
+const RAWTXT_BASE = process.env.RAWTXT_BASE || ''
 
 /** Try fetching text from a URL with timeout. */
 async function fetchText(url: string, timeoutMs = 8_000): Promise<string | null> {

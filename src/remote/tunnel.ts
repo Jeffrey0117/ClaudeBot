@@ -13,6 +13,7 @@
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { env } from '../config/env.js'
 
 let publicUrl = ''
 const sharedUrlFile = join(process.cwd(), 'data', '.relay-url')
@@ -99,7 +100,7 @@ function killActiveBackend(): void {
   activeBackend = null
 }
 
-const RAWTXT_BASE = 'https://rawtxt.isnowfriend.com'
+const RAWTXT_BASE = env.RAWTXT_BASE
 const RELAY_PASTE_ID_FILE = join(process.cwd(), 'data', '.relay-paste-id')
 
 /** Publish relay URL to rawtxt so Electron clients can discover it after tunnel rotation.
@@ -109,6 +110,7 @@ const RELAY_PASTE_ID_FILE = join(process.cwd(), 'data', '.relay-paste-id')
  * The scan-based discovery in Electron will find the newest paste containing wss://.
  */
 async function publishRelayUrl(wsUrl: string): Promise<void> {
+  if (!RAWTXT_BASE) return // no paste host configured — skip discovery publish
   try {
     // Create new paste (30d expiry) — don't delete old one so stale clients can still hit rawtxt
     const res = await fetch(`${RAWTXT_BASE}/api/paste`, {

@@ -110,6 +110,9 @@ const envSchema = z.object({
    *  Configure both in .env; left blank by default so no host is hardcoded. */
   DUK_API_KEY: z.string().default(''),
   DUK_UPLOAD_URL: z.string().default(''),
+  /** Private infra hosts — configured in .env, never hardcoded in source. */
+  RAWTXT_BASE: z.string().default(''),
+  REELSCRIPT_BASE: z.string().default(''),
   /** channel→chatId routing for CloudPipe events.
    *  Format: "alerts:12345,deploys:67890". Unknown/absent channel falls back
    *  to ADMIN_CHAT_ID. */
