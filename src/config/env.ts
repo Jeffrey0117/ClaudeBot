@@ -103,6 +103,24 @@ const envSchema = z.object({
     .string()
     .default('')
     .transform((val) => val.split(',').map((id) => parseInt(id.trim(), 10)).filter((n) => !isNaN(n) && n > 0)),
+  /** Shared secret for the CloudPipe webhook (X-CloudPipe-Token header).
+   *  Empty disables the endpoint entirely (returns 503). */
+  CLOUDPIPE_TOKEN: z.string().default(''),
+  /** channel→chatId routing for CloudPipe events.
+   *  Format: "alerts:12345,deploys:67890". Unknown/absent channel falls back
+   *  to ADMIN_CHAT_ID. */
+  CLOUDPIPE_ROUTES: z
+    .string()
+    .default('')
+    .transform((val) => {
+      const map: Record<string, number> = {}
+      for (const pair of val.split(',')) {
+        const [channel, id] = pair.split(':').map((s) => s.trim())
+        const chatId = parseInt(id ?? '', 10)
+        if (channel && !isNaN(chatId) && chatId > 0) map[channel] = chatId
+      }
+      return map
+    }),
 })
 
 export type Env = z.infer<typeof envSchema>

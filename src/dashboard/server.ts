@@ -12,12 +12,17 @@ import { readChatHistory, appendChatMessage, type ChatMessage } from './chat-sto
 import { readActivities, daysAgo, todayStart } from '../plugins/stats/activity-logger.js'
 import { scanGitActivity } from '../plugins/stats/git-scanner.js'
 import { handlePluginRoute } from './plugin-routes.js'
+import { handleCloudPipeEvent, type PushToChat } from './cloudpipe-webhook.js'
 
 const HEARTBEAT_DIR = join(process.cwd(), 'data', 'heartbeat')
 const COMMANDS_FILE = join(process.cwd(), 'data', 'commands.json')
 const WEB_DIST = join(process.cwd(), 'src', 'dashboard', 'web', 'dist')
 const HEARTBEAT_STALE_MS = 10_000
 const MAX_COMMANDS_KEPT = 200
+
+// Injected by startDashboardServer so the CloudPipe webhook can reach Telegram
+// without this module importing the bot instance.
+let pushToChat: PushToChat | null = null
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -152,6 +157,12 @@ async function handleApi(req: IncomingMessage, res: ServerResponse): Promise<voi
   if (path.startsWith('/api/plugins/')) {
     const handled = await handlePluginRoute(req, res)
     if (handled) return
+  }
+
+  // POST /api/cloudpipe/event — inbound CloudPipe webhook → Telegram push
+  if (path === '/api/cloudpipe/event' && req.method === 'POST') {
+    await handleCloudPipeEvent(req, res, { pushToChat, readBody, sendJson })
+    return
   }
 
   // GET /api/status — aggregate all bot heartbeats
@@ -431,7 +442,9 @@ function trackCommand(commandId: string, project: string): void {
 
 // --- Main entry ---
 
-export function startDashboardServer(port: number): void {
+export function startDashboardServer(port: number, push?: PushToChat): void {
+  pushToChat = push ?? null
+
   const server = createServer(async (req, res) => {
     const url = req.url ?? '/'
 

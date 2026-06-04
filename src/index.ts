@@ -63,7 +63,12 @@ async function main(): Promise<void> {
   const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
   const isMainBot = !envArg || envArg === '.env'
   if (env.DASHBOARD && isMainBot) {
-    startDashboardServer(env.DASHBOARD_PORT)
+    startDashboardServer(env.DASHBOARD_PORT, async (chatId, text, opts) => {
+      await bot.telegram.sendMessage(chatId, text, {
+        parse_mode: 'Markdown',
+        disable_notification: opts?.silent ?? false,
+      })
+    })
   }
 
   // Start relay server for remote vibe-coding pairing
