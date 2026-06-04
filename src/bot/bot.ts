@@ -40,7 +40,11 @@ import { syncCommand } from './commands/sync.js'
 import { landCommand } from './commands/land.js'
 import { fabricCommand } from './commands/fabric.js'
 import { bootstrapCommand } from './commands/bootstrap.js'
-import { ronCommand, rxCommand, rstatCommand, ropenCommand } from './commands/remote-ops.js'
+import {
+  ronCommand, rxCommand, rstatCommand, ropenCommand,
+  rkillCommand, rpowerCommand, rpullCommand, rclipCommand,
+  rnotifyCommand, rlsCommand, rshotCommand,
+} from './commands/remote-ops.js'
 import { pairCommand, unpairCommand } from './commands/pair.js'
 import { machinesCommand } from './commands/machines.js'
 import { rpairCommand } from './commands/rpair.js'
@@ -132,6 +136,13 @@ export const CORE_COMMANDS = [
   { command: 'rx', description: '在遠端機器跑指令拿輸出' },
   { command: 'rstat', description: '看遠端機器系統狀態' },
   { command: 'ropen', description: '在遠端機器開網址' },
+  { command: 'rkill', description: '殺遠端機器的程式 (名稱或PID)' },
+  { command: 'rpower', description: '遠端電源: lock/sleep/reboot/shutdown/cancel' },
+  { command: 'rpull', description: '在遠端機器 git pull 某專案目錄' },
+  { command: 'rclip', description: '讀/寫遠端機器剪貼簿' },
+  { command: 'rnotify', description: '在遠端機器跳桌面通知' },
+  { command: 'rls', description: '列遠端機器某目錄' },
+  { command: 'rshot', description: '遠端機器螢幕截圖傳回來' },
   { command: 'pair', description: '配對遠端電腦 (code@ip:port)' },
   { command: 'unpair', description: '斷開遠端配對' },
   { command: 'machines', description: '已配對機器列表/切換' },
@@ -247,6 +258,13 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['rx', rxCommand],
     ['rstat', rstatCommand],
     ['ropen', ropenCommand],
+    ['rkill', rkillCommand],
+    ['rpower', rpowerCommand],
+    ['rpull', rpullCommand],
+    ['rclip', rclipCommand],
+    ['rnotify', rnotifyCommand],
+    ['rls', rlsCommand],
+    ['rshot', rshotCommand],
     ['pair', pairCommand],
     ['unpair', unpairCommand],
     ['machines', machinesCommand],
