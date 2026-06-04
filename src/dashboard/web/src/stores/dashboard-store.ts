@@ -32,7 +32,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   selectedBotId: null,
   selectedProjectPath: null,
   draftPrompt: '',
-  activeView: 'chat',
+  activeView: 'dashboard',
 
   setBots: (bots) => set({ bots }),
   setProjects: (projects) => set({ projects }),

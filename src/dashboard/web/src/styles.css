@@ -1,40 +1,57 @@
-/* Dark theme — neutral grays, no blue tint */
+/* ============================================================
+   ClaudeBot Dispatch — "soft daylight" control panel
+   Light by default; warm paper, calm teal accent, airy spacing.
+   ============================================================ */
+
+/* Light theme (DEFAULT) */
 :root,
-[data-theme="dark"] {
-  --bg-primary: #121212;
-  --bg-secondary: #1a1a1a;
-  --bg-card: #222222;
-  --bg-hover: #2a2a2a;
-  --border: #333333;
-  --text-primary: #e0e0e0;
-  --text-secondary: #999999;
-  --text-muted: #555555;
-  --accent-green: #4caf50;
-  --accent-blue: #42a5f5;
-  --accent-yellow: #ffb300;
-  --accent-red: #ef5350;
-  --accent-purple: #ab47bc;
-  --radius: 8px;
-  --sidebar-width: 220px;
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+[data-theme="light"] {
+  --bg-primary: #faf8f3;     /* warm paper */
+  --bg-secondary: #fffdfa;
+  --bg-card: #ffffff;
+  --bg-hover: #f1ede4;
+  --border: #ece7db;
+  --text-primary: #1c1b18;   /* warm ink */
+  --text-secondary: #6e6a60;
+  --text-muted: #a9a397;
+  /* calm teal = the brand / "dispatch / go" colour */
+  --accent: #0f7b66;
+  --accent-hover: #0c6553;
+  --accent-soft: #e6f2ee;    /* tint background */
+  --accent-green: #0f7b66;
+  --accent-blue: #2f6f8f;
+  --accent-yellow: #c98a1a;
+  --accent-red: #c1503f;
+  --accent-purple: #7b6cab;
+  --radius: 14px;
+  --radius-sm: 9px;
+  --sidebar-width: 210px;
+  --shadow: 0 1px 2px rgba(28, 27, 24, 0.05), 0 10px 26px -16px rgba(28, 27, 24, 0.22);
+  --shadow-lift: 0 2px 6px rgba(28, 27, 24, 0.07), 0 18px 40px -20px rgba(28, 27, 24, 0.28);
+  --font-display: 'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif;
+  --font-body: ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
 }
 
-/* Light theme */
-[data-theme="light"] {
-  --bg-primary: #f5f5f5;
-  --bg-secondary: #ffffff;
-  --bg-card: #ffffff;
-  --bg-hover: #eeeeee;
-  --border: #e0e0e0;
-  --text-primary: #1a1a1a;
-  --text-secondary: #666666;
-  --text-muted: #999999;
-  --accent-green: #2e7d32;
-  --accent-blue: #1565c0;
-  --accent-yellow: #f57f17;
-  --accent-red: #c62828;
-  --accent-purple: #7b1fa2;
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+/* Dark theme (opt-in) */
+[data-theme="dark"] {
+  --bg-primary: #15140f;
+  --bg-secondary: #1b1a16;
+  --bg-card: #211f1a;
+  --bg-hover: #2a2823;
+  --border: #34322b;
+  --text-primary: #ece8df;
+  --text-secondary: #9a958a;
+  --text-muted: #615d54;
+  --accent: #2fb89c;
+  --accent-hover: #41c9ad;
+  --accent-soft: #18302a;
+  --accent-green: #2fb89c;
+  --accent-blue: #5aa6c8;
+  --accent-yellow: #e0a93a;
+  --accent-red: #e0705e;
+  --accent-purple: #ab9ce0;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 26px -16px rgba(0, 0, 0, 0.6);
+  --shadow-lift: 0 2px 8px rgba(0, 0, 0, 0.5), 0 18px 40px -20px rgba(0, 0, 0, 0.7);
 }
 
 * {
@@ -44,11 +61,18 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-family: var(--font-body);
   background: var(--bg-primary);
   color: var(--text-primary);
   line-height: 1.5;
-  transition: background 0.2s, color 0.2s;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  transition: background 0.25s ease, color 0.25s ease;
+}
+
+h1, h2, h3, .display {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
 }
 
 #root {
@@ -56,16 +80,18 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 9px;
+  height: 9px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--bg-primary);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 4px;
+  border-radius: 6px;
+  border: 2px solid var(--bg-primary);
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -74,21 +100,22 @@ body {
 
 /* Toggle button base style */
 .toggle-btn {
-  padding: 4px 10px;
+  padding: 5px 11px;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 999px;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
   user-select: none;
 }
 
 .toggle-btn:hover {
   background: var(--bg-hover);
   border-color: var(--text-muted);
+  color: var(--text-primary);
 }
 
 /* Blinking cursor for streaming messages */
@@ -99,5 +126,11 @@ body {
 
 .blink-cursor {
   animation: blink 1s step-end infinite;
-  color: var(--accent-blue);
+  color: var(--accent);
+}
+
+/* Staggered card entrance */
+@keyframes riseIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }

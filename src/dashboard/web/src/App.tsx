@@ -1,10 +1,7 @@
 import { useEffect } from 'react'
 import { Layout } from './components/Layout'
-import { OverviewPanel } from './components/OverviewPanel'
 import { MachinesPanel } from './components/MachinesPanel'
 import { ChatPanel } from './components/ChatPanel'
-import { ProjectPanel } from './components/ProjectPanel'
-import { KanbanBoard } from './components/KanbanBoard'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useDashboardStore } from './stores/dashboard-store'
 import { apiFetch } from './hooks/useApi'
@@ -40,16 +37,7 @@ export function App() {
 
   return (
     <Layout>
-      {activeView === 'chat' ? (
-        <ChatPanel />
-      ) : (
-        <>
-          <OverviewPanel />
-          <MachinesPanel />
-          <KanbanBoard />
-          <ProjectPanel />
-        </>
-      )}
+      {activeView === 'chat' ? <ChatPanel /> : <MachinesPanel />}
     </Layout>
   )
 }

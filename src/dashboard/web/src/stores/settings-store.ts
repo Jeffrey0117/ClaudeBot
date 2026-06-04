@@ -15,7 +15,7 @@ function applyTheme(theme: Theme): void {
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
-  theme: 'dark',
+  theme: 'light',
   locale: 'zh',
 
   toggleTheme: () => {
@@ -32,5 +32,5 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 }))
 
 // Initialize on load
-applyTheme('dark')
+applyTheme('light')
 setLocale('zh')
