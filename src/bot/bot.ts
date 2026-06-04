@@ -76,8 +76,13 @@ import { startCommandReader } from '../dashboard/command-reader.js'
 import { setAvailableCommands } from '../utils/system-prompt.js'
 import { scheduleRestartNotifications } from './restart-notifier.js'
 import { onPairingConnect, onPairingDisconnect, getPairings, remoteProjectPath } from '../remote/pairing-store.js'
+import { remoteToolCall } from '../remote/relay-client.js'
 import { setUserProject, getActiveMachine, setActiveMachine } from './state.js'
 import { createTelegramProxy } from '../remote/telegram-proxy.js'
+
+/** Remote pairing codes we've already auto-provisioned agent-browser on
+ *  (per bot process) — so we install at most once per connection. */
+const provisionedBrowser = new Set<string>()
 
 let botInstance: Telegraf<BotContext> | null = null
 
@@ -420,6 +425,30 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     const currentActive = getActiveMachine(session.chatId, session.threadId)
     if (!currentActive) {
       setActiveMachine(session.chatId, label, session.threadId)
+    }
+
+    // Auto-provision browser capability on the remote (once per code) so the
+    // user never has to run the setup script by hand. Best-effort, background.
+    if (env.MCP_AGENT_BROWSER && !provisionedBrowser.has(session.code)) {
+      provisionedBrowser.add(session.code)
+      void (async () => {
+        try {
+          const ver = await remoteToolCall(
+            session.code, 'remote_execute_command', { command: 'agent-browser --version' }, 10_000,
+          ).catch(() => '')
+          if (/\d/.test(String(ver))) return // already installed
+          await remoteToolCall(
+            session.code, 'remote_execute_command', { command: 'npm i -g agent-browser' }, 180_000,
+          )
+          bot.telegram.sendMessage(session.chatId, `🧩 已自動為 ${label} 裝好瀏覽器能力 (agent-browser)`).catch(() => {})
+        } catch {
+          provisionedBrowser.delete(session.code) // allow retry on next connect
+          bot.telegram.sendMessage(
+            session.chatId,
+            `⚠️ ${label} 自動安裝瀏覽器能力失敗（那台可能沒有 Node.js）。需要的話在那台跑一次 scripts\\setup-remote.ps1`,
+          ).catch(() => {})
+        }
+      })()
     }
   })
 

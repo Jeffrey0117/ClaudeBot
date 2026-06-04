@@ -387,6 +387,20 @@ document.addEventListener('keydown', (e) => {
 document.getElementById('btn-minimize').addEventListener('click', () => api.minimizeWindow())
 document.getElementById('btn-close').addEventListener('click', () => api.closeWindow())
 
+// Reconnect / switch server — fully disconnect and return to the connect panel
+// so the user can paste a new Server URL + code (e.g. after the tunnel URL
+// rotated). Chat history stays in memory.
+document.getElementById('btn-reconnect').addEventListener('click', async () => {
+  try { if (api.chatDisconnect) await api.chatDisconnect() } catch {}
+  try { await api.disconnect() } catch {}
+  statusDot.className = 'status-dot disconnected'
+  statusText.textContent = STATUS_LABELS.disconnected
+  connectPanel.classList.remove('hidden')
+  chatPanel.classList.add('hidden')
+  inputPairCode.value = ''
+  inputPairCode.focus()
+})
+
 const btnPin = document.getElementById('btn-pin')
 btnPin.addEventListener('click', async () => {
   const isOnTop = await api.toggleAlwaysOnTop()

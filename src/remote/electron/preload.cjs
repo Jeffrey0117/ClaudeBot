@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   chatConnect: (relayUrl, code) =>
     ipcRenderer.invoke('chat-connect', relayUrl, code),
 
+  chatDisconnect: () =>
+    ipcRenderer.invoke('chat-disconnect'),
+
   pairConnect: (relayUrl, code) =>
     ipcRenderer.invoke('pair-connect', relayUrl, code),
 
