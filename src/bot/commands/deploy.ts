@@ -8,7 +8,10 @@ import { remoteToolCall } from '../../remote/relay-client.js'
 import { isWorktree, mainRepoPath, mergeToMain, syncAllWorktrees } from '../../git/worktree.js'
 import { captureBaseline, compareWithBaseline, type RegressionConfig } from '../vision/visual-regression.js'
 
-export async function deployCommand(ctx: BotContext): Promise<void> {
+export async function deployCommand(
+  ctx: BotContext,
+  opts?: { commitOverride?: string }
+): Promise<void> {
   const chatId = ctx.chat?.id
   if (!chatId) return
 
@@ -27,7 +30,7 @@ export async function deployCommand(ctx: BotContext): Promise<void> {
   }
 
   const raw = (ctx.message && 'text' in ctx.message) ? ctx.message.text ?? '' : ''
-  const commitMessage = raw.replace(/^\/deploy\s*/, '').trim()
+  const commitMessage = (opts?.commitOverride ?? '').trim() || raw.replace(/^\/deploy\s*/, '').trim()
 
   if (!commitMessage) {
     await ctx.reply(

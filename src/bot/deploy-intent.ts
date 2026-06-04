@@ -1,0 +1,115 @@
+import type { BotContext } from '../types/context.js'
+import { getUserState, setUserProject } from './state.js'
+import { findProject } from '../config/projects.js'
+import { deployCommand } from './commands/deploy.js'
+
+/**
+ * Deploy-intent router.
+ *
+ * Why: deploying through natural language makes ClaudeBot spin up a Claude CLI
+ * turn just to re-discover "how do we deploy" every time — burning quota and
+ * tripping the Anthropic ~15-min rate-limit cooldown. The `/deploy` command
+ * already encodes the full deploy flow (commit + push + CloudPipe sync) without
+ * touching Claude. This router detects a terse "部署 …" / "deploy …" command and
+ * runs `/deploy` directly, bypassing Claude entirely.
+ *
+ * Conservative by design: only fires on an imperative that STARTS with a deploy
+ * verb and is NOT phrased as a question, so "怎麼部署?" / "deploy 設定在哪" fall
+ * through to Claude untouched.
+ */
+
+// Imperative deploy verbs at the very start of the message. No \b — Chinese has
+// no word boundaries — so we anchor at ^ and consume an optional separator.
+const DEPLOY_VERB = /^\s*(部署|佈署|布署|部屬|發佈|發布|上線|deploy)\s*[:：]?\s*/i
+
+// If any of these appear, the user is ASKING about deployment, not commanding it.
+const QUESTION_MARKERS = /[?？]|嗎|怎麼|怎樣|如何|為什麼|為何|哪裡|哪個|在哪|何時|可不可以|可以嗎|是不是|教學|說明|文件|設定/
+
+export interface DeployIntent {
+  /** Text after the verb — may hold "<project> <commit…>", "<commit…>", or "". */
+  readonly rest: string
+}
+
+/**
+ * Detect a terse deploy command. Returns null when the message is not a deploy
+ * imperative (so the caller should let it flow to Claude as normal).
+ */
+export function detectDeployIntent(text: string): DeployIntent | null {
+  const t = text.trim()
+  // Terse imperative only — a long paragraph that happens to start with "部署"
+  // is almost certainly prose, not a command.
+  if (!t || t.length > 100) return null
+
+  const match = DEPLOY_VERB.exec(t)
+  if (!match) return null
+
+  // Reject questions about deployment.
+  if (QUESTION_MARKERS.test(t)) return null
+
+  return { rest: t.slice(match[0].length).trim() }
+}
+
+function getThreadId(ctx: BotContext): number | undefined {
+  return ctx.message && 'message_thread_id' in ctx.message
+    ? ctx.message.message_thread_id
+    : undefined
+}
+
+/**
+ * Run a detected deploy intent directly via `/deploy`, bypassing Claude.
+ * Returns true when the intent was consumed (deployed or answered), false when
+ * the caller should fall through to the normal Claude pipeline.
+ */
+export async function runDeployFromIntent(
+  ctx: BotContext,
+  intent: DeployIntent
+): Promise<boolean> {
+  const chatId = ctx.chat?.id
+  if (!chatId) return false
+  const threadId = getThreadId(ctx)
+
+  const rest = intent.rest
+  let commitMsg = rest
+
+  // If the first token resolves to a known project, treat it as the target and
+  // the remainder as the commit message. Otherwise deploy the selected project
+  // and use the whole rest as the commit message.
+  const firstSpace = rest.search(/\s/)
+  const firstToken = firstSpace === -1 ? rest : rest.slice(0, firstSpace)
+
+  let targetProject = null
+  if (firstToken) {
+    targetProject = findProject(firstToken)
+    if (targetProject) {
+      commitMsg = firstSpace === -1 ? '' : rest.slice(firstSpace).trim()
+    }
+  }
+
+  const selected = getUserState(chatId, threadId).selectedProject
+
+  if (targetProject) {
+    setUserProject(chatId, targetProject, threadId)
+  } else if (!selected) {
+    // Nothing named and nothing selected — answer directly (still no Claude).
+    await ctx.reply(
+      '🤔 要部署哪個專案?\n例如:`部署 makee`,或先用 /projects 選擇專案。',
+      { parse_mode: 'Markdown' }
+    )
+    return true
+  }
+
+  const finalProject = targetProject ?? selected
+  const finalCommit = commitMsg || `chore: 透過 Telegram 快速部署`
+
+  try {
+    await ctx.reply(
+      `🚀 偵測到部署指令,直接執行 *${finalProject?.name}*(略過 Claude,省額度)…`,
+      { parse_mode: 'Markdown' }
+    )
+  } catch {
+    // best-effort notice; never block the deploy on a failed status message
+  }
+
+  await deployCommand(ctx, { commitOverride: finalCommit })
+  return true
+}

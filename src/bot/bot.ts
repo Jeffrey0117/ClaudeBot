@@ -33,6 +33,7 @@ import { storeCommand } from './commands/store.js'
 import { installCommand } from './commands/install.js'
 import { uninstallCommand } from './commands/uninstall.js'
 import { deployCommand } from './commands/deploy.js'
+import { detectDeployIntent, runDeployFromIntent } from './deploy-intent.js'
 import { syncCommand } from './commands/sync.js'
 import { pairCommand, unpairCommand } from './commands/pair.js'
 import { machinesCommand } from './commands/machines.js'
@@ -335,6 +336,22 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   bot.on('photo', photoHandler)
   bot.on('document', documentHandler)
   bot.on('voice', voiceHandler)
+
+  // Deploy-intent shortcut — runs `/deploy` directly for terse "部署 …" / "deploy …"
+  // commands, bypassing Claude to save quota and dodge the Anthropic rate-limit
+  // cooldown. Conservative matcher; anything else falls through to Claude.
+  bot.on('text', async (ctx, next) => {
+    const text = (ctx.message && 'text' in ctx.message) ? ctx.message.text ?? '' : ''
+    const intent = detectDeployIntent(text)
+    if (!intent) return next()
+    try {
+      const handled = await runDeployFromIntent(ctx, intent)
+      if (handled) return
+    } catch (error) {
+      console.error('Deploy-intent router failed:', error)
+    }
+    return next()
+  })
 
   // Text messages → Claude
   bot.on('text', messageHandler)
