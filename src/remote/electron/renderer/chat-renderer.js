@@ -547,18 +547,17 @@ messageInput.addEventListener('keydown', (e) => {
   }
 })
 
-// Load saved relay URL, or auto-discover from rawtxt.
-// Only auto-fill ws:// URLs — wss:// is left blank because it frequently
-// fails (self-signed/tunnel cert) and a pre-filled broken URL is worse than
-// an empty field the user can paste into.
-const isFillable = (u) => typeof u === 'string' && u.startsWith('ws://')
-api.getRelayUrl().then(async (url) => {
-  if (isFillable(url)) {
-    inputPairUrl.value = url
-  } else if (api.discoverRelayUrl) {
+// Prefill the relay URL. Prefer the freshly DISCOVERED url (the current tunnel,
+// which the bot publishes to rawtxt) over the saved one — the saved value can
+// be stale after a tunnel rotation, while discover matches what /pair shows.
+// So the field is normally already correct; the ↻ button + paste cover edge cases.
+api.getRelayUrl().then(async (saved) => {
+  let url = typeof saved === 'string' ? saved : ''
+  if (api.discoverRelayUrl) {
     const discovered = await api.discoverRelayUrl()
-    if (isFillable(discovered)) inputPairUrl.value = discovered
+    if (discovered) url = discovered
   }
+  if (url) inputPairUrl.value = url
   inputPairCode.focus()
 })
 
