@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useDashboardStore } from '../stores/dashboard-store'
 import { useChatStore } from '../stores/chat-store'
+import { useDispatchStore } from '../stores/dispatch-store'
 import type { WsMessage, ChatMessage } from '../types'
 
 const RECONNECT_DELAY_MS = 3_000
@@ -34,6 +35,10 @@ export function useWebSocket(): void {
               break
 
             case 'response_chunk': {
+              // 派發中心: live output for dashboard-dispatched tasks
+              if (useDispatchStore.getState().has(data.commandId)) {
+                useDispatchStore.getState().update(data.commandId, data.accumulated)
+              }
               // Use projectName from server (resolves race condition)
               const project = data.projectName
                 ?? useChatStore.getState().getCommandProject(data.commandId)
@@ -46,6 +51,9 @@ export function useWebSocket(): void {
             }
 
             case 'response_complete': {
+              if (useDispatchStore.getState().has(data.commandId)) {
+                useDispatchStore.getState().complete(data.commandId, data.text)
+              }
               const project = data.projectName
                 ?? useChatStore.getState().getCommandProject(data.commandId)
               if (project) {
@@ -64,6 +72,9 @@ export function useWebSocket(): void {
             }
 
             case 'response_error': {
+              if (useDispatchStore.getState().has(data.commandId)) {
+                useDispatchStore.getState().fail(data.commandId, data.error)
+              }
               const project = data.projectName
                 ?? useChatStore.getState().getCommandProject(data.commandId)
               if (project) {

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useDashboardStore } from '../stores/dashboard-store'
+import { useDispatchStore, type DispatchTask } from '../stores/dispatch-store'
 import { apiPost } from '../hooks/useApi'
 import type { ActiveRunnerInfo, DashboardCommand } from '../types'
 
@@ -120,11 +121,48 @@ function MachineCard({ row, selected, index, onToggle }: MachineCardProps) {
   )
 }
 
+function DispatchRow({ task }: { task: DispatchTask }) {
+  const color = task.status === 'error' ? 'var(--danger, #c1503f)'
+    : task.status === 'done' ? 'var(--success, #2e9e6b)'
+    : 'var(--accent)'
+  const label = task.status === 'error' ? '失敗' : task.status === 'done' ? '完成' : '執行中'
+  const preview = task.output.trim().slice(-600)
+  return (
+    <div style={{
+      background: 'var(--bg-card)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius)', padding: '12px 14px', boxShadow: 'var(--shadow)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: preview ? '8px' : 0 }}>
+        <span style={{
+          width: '8px', height: '8px', borderRadius: '50%', background: color,
+          boxShadow: task.status === 'running' ? `0 0 0 4px color-mix(in srgb, ${color} 18%, transparent)` : 'none',
+        }} />
+        <span style={{ fontFamily: 'var(--font-display)', fontSize: '14px', fontWeight: 600 }}>{task.label}</span>
+        <span style={{
+          marginLeft: 'auto', fontSize: '12px', fontWeight: 600, color,
+          background: `color-mix(in srgb, ${color} 12%, transparent)`,
+          padding: '2px 9px', borderRadius: '999px',
+        }}>{label}</span>
+      </div>
+      {preview && (
+        <pre style={{
+          margin: 0, maxHeight: '160px', overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          fontFamily: 'var(--font-mono, ui-monospace, monospace)', fontSize: '12px',
+          color: 'var(--text-secondary)', lineHeight: 1.5,
+        }}>{preview}</pre>
+      )}
+    </div>
+  )
+}
+
 export function MachinesPanel() {
   const bots = useDashboardStore((s) => s.bots)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [task, setTask] = useState('')
   const [sending, setSending] = useState(false)
+  const dispatchTasks = useDispatchStore((s) => s.tasks)
+  const startDispatch = useDispatchStore((s) => s.start)
+  const clearDispatch = useDispatchStore((s) => s.clear)
 
   const rows: MachineRow[] = bots.flatMap((bot) =>
     bot.machines.map((m) => ({
@@ -154,13 +192,14 @@ export function MachinesPanel() {
     setSending(true)
     try {
       await Promise.all(
-        selectedRows.map((row) =>
-          apiPost<{ command: DashboardCommand }>('/api/commands', {
+        selectedRows.map(async (row) => {
+          const res = await apiPost<{ command: DashboardCommand }>('/api/commands', {
             targetBot: row.botId,
             type: 'dispatch_remote',
             payload: { prompt, code: row.code, label: row.label },
-          }),
-        ),
+          })
+          if (res?.command?.id) startDispatch(res.command.id, row.label)
+        }),
       )
       setTask('')
       setSelected(new Set())
@@ -193,6 +232,24 @@ export function MachinesPanel() {
             : `${onlineCount} 台在線${selectedRows.length > 0 ? ` · 已選 ${selectedRows.length} 台` : ''}`}
         </p>
       </div>
+
+      {/* Dispatch status */}
+      {Object.keys(dispatchTasks).length > 0 && (
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <span style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 600 }}>派發狀態</span>
+            <button
+              onClick={clearDispatch}
+              style={{ fontSize: '12px', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+            >清除</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {Object.values(dispatchTasks)
+              .sort((a, b) => b.startedAt - a.startedAt)
+              .map((t) => <DispatchRow key={t.commandId} task={t} />)}
+          </div>
+        </div>
+      )}
 
       {rows.length === 0 ? (
         <div style={{
