@@ -19,6 +19,8 @@ Telegram User
     ↓
 [Handler] text | photo | document | callback_query | command
     ↓
+[Intent routers] deploy-intent → ops-intent  (BEFORE Claude — bypass on match)
+    ↓
 [Queue] enqueue() → FIFO, one-at-a-time per project
     ↓
 [Claude Runner] spawn('claude', [...args], { shell: false })
@@ -27,6 +29,8 @@ Telegram User
     ↓
 [Telegram Response] debounced edit → final split messages
 ```
+
+**Intent routers** (`src/bot/deploy-intent.ts`, `ops-intent.ts`) sit on `bot.on('text')` *before* `messageHandler`. They detect terse deploy/status/log/restart/rollback commands and run them directly against CloudPipe (`src/bot/cloudpipe-client.ts`), bypassing Claude to save quota. Conservative by design — they only consume a message when it resolves to a real project, else `next()` lets it flow to Claude. Callbacks (`cp_restart`/`cp_rollback`/`cp_fix`) are in `ops-callbacks.ts`. See the global `cloudpipe-deploy` skill for the deploy flow itself.
 
 ## Directory Structure
 
