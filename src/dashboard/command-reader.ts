@@ -167,6 +167,9 @@ async function executeCommand(cmd: DashboardCommand): Promise<boolean> {
         ai: state.ai,
         sessionId,
         imagePaths: [],
+        // Broker the dispatched task's response back to the dashboard so the
+        // dispatch center can show progress/output instead of fire-and-forget.
+        dashboardCommandId: cmd.id,
       })
       return true
     }
