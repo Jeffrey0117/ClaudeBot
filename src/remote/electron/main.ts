@@ -41,10 +41,12 @@ elog(`[electron] === STARTUP === pid=${process.pid} argv=${process.argv.join(' '
 
 process.on('uncaughtException', (err) => {
   elog(`[electron] uncaughtException: ${err.message}\n${err.stack}`)
+  reportToHost(`未預期錯誤: ${err.message}`)
 })
 
 process.on('unhandledRejection', (reason) => {
   elog(`[electron] unhandledRejection: ${reason}`)
+  reportToHost(`未處理的 rejection: ${reason instanceof Error ? reason.message : String(reason)}`)
 })
 import type { ToolDispatcher } from '../tool-handlers/index.js'
 import type {
@@ -179,6 +181,17 @@ function sendToRenderer(channel: string, data: unknown): void {
 
 function log(message: string): void {
   sendToRenderer('log', message)
+}
+
+/** Report a client-side error back to the host (bot) over the agent socket,
+ *  so failures aren't invisible on the main machine. Best-effort; if the
+ *  agent socket is down there's nothing to send over (inherent). */
+function reportToHost(message: string): void {
+  if (ws && ws.readyState === ws.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: 'client_error', message }))
+    } catch { /* ignore */ }
+  }
 }
 
 function setStatus(status: 'disconnected' | 'connecting' | 'connected'): void {
@@ -403,6 +416,7 @@ function connectChat(relayUrl: string, code: string): void {
       ? '（wss 安全連線失敗，多半是憑證問題）'
       : ''
     log(`Chat connection error @ ${chatRelayUrl}: ${err.message} ${hint}`)
+    reportToHost(`chat 連線錯誤 @ ${chatRelayUrl}: ${err.message}`)
   })
 }
 

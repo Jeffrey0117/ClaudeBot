@@ -318,6 +318,23 @@ function sendPairingNotification(session: PairingSession, label: string): void {
   })
 }
 
+/** Notify the pairing owner about an error reported by their remote agent /
+ *  desktop client, so client-side failures aren't invisible on the host. */
+export function notifyOwnerError(code: string, message: string): void {
+  const session = findByCode(code)
+  if (!session?.botToken) return
+  const base = env.TELEGRAM_API_BASE || 'https://api.telegram.org'
+  fetch(`${base}/bot${session.botToken}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: session.chatId,
+      text: `⚠️ ${session.label || 'remote'} 回報錯誤：\n${message.slice(0, 500)}`,
+    }),
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => {})
+}
+
 function sendDisconnectNotification(session: PairingSession, reason: string): void {
   const token = session.botToken
   if (!token) return
