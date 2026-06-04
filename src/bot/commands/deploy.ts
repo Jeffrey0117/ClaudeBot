@@ -227,15 +227,16 @@ async function syncToRemote(
       return
     }
 
-    // Step 3: trigger restart via .restart-all signal file
+    // Step 3: trigger a graceful restart — each bot restarts only once it's
+    // idle, so a busy bot mid-task isn't interrupted by the deploy.
     await remoteToolCall(
       pairing.code,
       'remote_write_file',
-      { path: 'data/.restart-all', content: String(Date.now()) },
+      { path: 'data/.restart-graceful', content: String(Date.now()) },
       10_000,
     )
 
-    await ctx.reply(`✅ [${projectName}] 遠端同步完成！Bot 重啟中…`)
+    await ctx.reply(`✅ [${projectName}] 遠端同步完成！各 Bot 跑完手上任務後自動重啟（不中斷）`)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     await ctx.reply(`⚠️ 遠端同步失敗: ${msg.slice(0, 200)}`)

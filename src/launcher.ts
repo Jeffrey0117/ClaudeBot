@@ -424,6 +424,78 @@ function startRestartAllWatcher(): void {
 
 startRestartAllWatcher()
 
+// --- Graceful restart-all: restart each bot only once it's idle ---
+// Triggered by data/.restart-graceful (from /restart all and /deploy). Busy
+// bots keep serving and restart the moment they drain — no interruption.
+
+const RESTART_GRACEFUL_SIGNAL = path.join(root, 'data', '.restart-graceful')
+const gracefulPending = new Set<string>()        // envFiles awaiting idle
+const gracefulDeadline = new Map<string, number>() // envFile → force-restart-by ts
+const GRACEFUL_MAX_WAIT_MS = 10 * 60_000           // don't wait forever for a stuck bot
+
+function isBotIdle(botId: string): boolean {
+  try {
+    const hb = JSON.parse(
+      readFileSync(path.join(heartbeatDir, `${botId}.json`), 'utf-8'),
+    ) as { updatedAt: number; queueLength: number; activeRunners: unknown[] }
+    // Stale heartbeat → can't confirm idle, keep waiting (deadline covers stuck bots)
+    if (Date.now() - hb.updatedAt > 15_000) return false
+    return hb.queueLength === 0 && (hb.activeRunners?.length ?? 0) === 0
+  } catch {
+    return false
+  }
+}
+
+function startGracefulRestartWatcher(): void {
+  setInterval(() => {
+    if (shuttingDown) return
+
+    // 1. Pick up a new graceful-restart signal
+    try {
+      const content = readFileSync(RESTART_GRACEFUL_SIGNAL, 'utf-8').trim()
+      if (content) {
+        unlinkSync(RESTART_GRACEFUL_SIGNAL)
+        console.log('[launcher] 優雅重啟信號 — 編譯後等各 bot 閒置再重啟...')
+        try {
+          execSync('npx tsc', { cwd: root, timeout: 30_000, stdio: 'pipe' })
+          console.log('[launcher] 編譯完成')
+        } catch (err) {
+          console.error(`[launcher] 編譯失敗（仍繼續）: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        notifyAdmin('🔄 <b>優雅重啟</b> — 各 bot 跑完手上任務後自動重啟（不中斷）')
+        const now = Date.now()
+        for (const envFile of children.keys()) {
+          gracefulPending.add(envFile)
+          gracefulDeadline.set(envFile, now + GRACEFUL_MAX_WAIT_MS)
+        }
+      }
+    } catch {
+      // no signal pending
+    }
+
+    // 2. Restart any pending bot that has gone idle (or hit the fallback deadline)
+    for (const envFile of [...gracefulPending]) {
+      const child = children.get(envFile)
+      if (!child) {
+        gracefulPending.delete(envFile)
+        gracefulDeadline.delete(envFile)
+        continue
+      }
+      const botId = envFileToBotId(envFile)
+      const timedOut = Date.now() > (gracefulDeadline.get(envFile) ?? 0)
+      if (isBotIdle(botId) || timedOut) {
+        console.log(`[launcher] 優雅重啟 ${botId}${timedOut ? '（逾時強制）' : '（已閒置）'}`)
+        notifyAdmin(`🔄 <b>[${botId}]</b> ${timedOut ? '逾時強制重啟' : '已閒置，重啟中'}`)
+        gracefulPending.delete(envFile)
+        gracefulDeadline.delete(envFile)
+        child.kill('SIGTERM') // close handler respawns with new code (歸類為「被終止」非崩潰)
+      }
+    }
+  }, 3000)
+}
+
+startGracefulRestartWatcher()
+
 // Graceful shutdown: forward signal to all children, clean up PID file
 const shutdown = (signal: string) => {
   if (shuttingDown) return
