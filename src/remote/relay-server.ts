@@ -16,6 +16,7 @@ import {
   markDisconnected,
   resetAllConnectedFlags,
   remoteProjectPath,
+  notifyOwnerError,
 } from './pairing-store.js'
 import { env } from '../config/env.js'
 import { startTunnel, setPublicRelayUrl, getPublicRelayUrl, getRelayPasteId } from './tunnel.js'
@@ -183,6 +184,17 @@ function handleAgentMessage(_ws: WebSocket, code: string, msg: RelayInbound, raw
     const reason = (msg as AgentShutdown).reason || '手動關閉'
     gracefulShutdowns.set(code, reason)
     console.log(`[relay] Agent graceful shutdown: code=${code} reason=${reason}`)
+    return
+  }
+
+  // Client-side error report — forward to the pairing owner so failures on
+  // the remote/desktop client aren't invisible on the host.
+  if (msg.type === 'client_error') {
+    const m = (msg as { message?: unknown }).message
+    if (typeof m === 'string' && m.trim()) {
+      console.log(`[relay] client_error from code=${code}: ${m.slice(0, 120)}`)
+      notifyOwnerError(code, m)
+    }
     return
   }
 

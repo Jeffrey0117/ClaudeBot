@@ -42,6 +42,13 @@ export interface AgentShutdown {
   readonly reason: string
 }
 
+// --- Client-side error report (agent/desktop → relay → notify owner) ---
+
+export interface AgentClientError {
+  readonly type: 'client_error'
+  readonly message: string
+}
+
 // --- Tool call forwarding (unchanged, used after handshake) ---
 
 export interface ToolCallRequest {
@@ -85,7 +92,7 @@ export type {
 
 /** Messages the relay receives (includes Electron chat handshake + messages) */
 export type RelayInbound =
-  | AgentRegister | ProxyConnect | AgentShutdown
+  | AgentRegister | ProxyConnect | AgentShutdown | AgentClientError
   | ToolCallRequest | ToolCallResult | ToolCallError
   | import('./chat-protocol.js').ElectronChatRegister
   | import('./chat-protocol.js').LicenseRegister
