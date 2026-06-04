@@ -20,6 +20,7 @@ import { existsSync } from 'node:fs'
 import type { Telegraf } from 'telegraf'
 import type { BotContext } from '../types/context.js'
 import { loadPipeConfig, type PipeConfig } from './pipe-executor.js'
+import { env } from '../config/env.js'
 
 // --- Types ---
 
@@ -61,25 +62,32 @@ export function stripUploadDirectives(text: string): string {
 
 // --- Uploaders ---
 
-export async function uploadToUpimg(filePath: string, config: PipeConfig): Promise<string> {
+/** Upload an image to the duk.tw image host. Self-contained — uses DUK_API_KEY,
+ *  independent of CloudPipe config. Contract: POST <DUK_UPLOAD_URL>, multipart
+ *  field `image`, header `x-api-key`; response { result, extension, shortUrl }. */
+export async function uploadToDuk(filePath: string): Promise<string> {
+  if (!env.DUK_API_KEY) throw new Error('DUK_API_KEY 未設定')
+
   const form = new FormData()
-  form.append('file', new Blob([readFileSync(filePath)]), basename(filePath))
+  form.append('image', new Blob([readFileSync(filePath)]), basename(filePath))
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 30_000)
 
   try {
-    const res = await fetch(`${config.baseUrl}/api/upimg/upload`, {
+    const res = await fetch(env.DUK_UPLOAD_URL, {
       method: 'POST',
       body: form,
-      headers: { authorization: `Bearer ${config.serviceToken}` },
+      headers: { 'x-api-key': env.DUK_API_KEY, Referer: 'https://duk.tw/' },
       signal: controller.signal,
     })
     clearTimeout(timeout)
 
-    const data = await res.json() as { url?: string; error?: string }
-    if (!res.ok || !data.url) throw new Error(data.error ?? `HTTP ${res.status}`)
-    return data.url
+    const data = await res.json() as { result?: string; extension?: string; shortUrl?: string; message?: string }
+    if (!res.ok) throw new Error(data.message ?? `HTTP ${res.status}`)
+    const url = data.shortUrl || (data.result ? `https://duk.tw/${data.result}${data.extension ?? '.png'}` : '')
+    if (!url) throw new Error(data.message ?? '回應缺少 result')
+    return url
   } catch (err) {
     clearTimeout(timeout)
     throw err
@@ -125,11 +133,6 @@ export async function executeUploadDirectives(
 
   for (const d of directives) {
     try {
-      if (!config) {
-        telegram.sendMessage(chatId, '⚠️ @upload 失敗: CloudPipe 未設定').catch(() => {})
-        continue
-      }
-
       const filePath = resolve(projectPath, d.path)
 
       // Path traversal guard — must stay within project directory
@@ -145,10 +148,21 @@ export async function executeUploadDirectives(
 
       const ext = extname(filePath).toLowerCase()
       const isImage = IMAGE_EXTS.has(ext)
-      const url = isImage
-        ? await uploadToUpimg(filePath, config)
-        : await uploadToPokkit(filePath, config)
-      const target = isImage ? 'upimg' : 'pokkit'
+
+      // Images → duk.tw (self-contained). Other files → pokkit (needs CloudPipe).
+      let url: string
+      let target: string
+      if (isImage) {
+        url = await uploadToDuk(filePath)
+        target = 'duk.tw'
+      } else {
+        if (!config) {
+          telegram.sendMessage(chatId, '⚠️ @upload 失敗: 非圖片需 CloudPipe，但未設定').catch(() => {})
+          continue
+        }
+        url = await uploadToPokkit(filePath, config)
+        target = 'pokkit'
+      }
 
       await telegram.sendMessage(chatId, `📤 已上傳 (${target}): ${url}`)
     } catch (err) {
