@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendMessage: (text) =>
     ipcRenderer.invoke('send-message', text),
 
+  sendVoice: (audioBase64, mime) =>
+    ipcRenderer.invoke('send-voice', audioBase64, mime),
+
   sendCallback: (data, msgId) =>
     ipcRenderer.invoke('send-callback', data, msgId),
 

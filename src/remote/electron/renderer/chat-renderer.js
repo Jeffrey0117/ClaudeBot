@@ -59,7 +59,15 @@ const STATUS_LABELS = {
 
 // --- UI Helpers ---
 
-function scrollToBottom() {
+function isNearBottom() {
+  return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 80
+}
+
+// Only auto-scroll when the user is already near the bottom — so scrolling up
+// to read isn't yanked back down by streaming updates. `force` overrides
+// (used for the user's own just-sent message).
+function scrollToBottom(force) {
+  if (!force && !isNearBottom()) return
   requestAnimationFrame(() => {
     messagesEl.scrollTop = messagesEl.scrollHeight
   })
@@ -141,7 +149,7 @@ function appendBubble(id, text, sender, buttons, media) {
 
   bubbles.set(id, row)
   messagesEl.appendChild(row)
-  scrollToBottom()
+  scrollToBottom(sender === 'user')
 }
 
 function updateBubble(id, text) {
@@ -276,7 +284,10 @@ api.onLicenseError((data) => {
 })
 
 api.onLog((message) => {
-  // Show connection errors as system messages in chat
+  // Infra noise (agent-browser probe/install, tool plumbing) is NOT shown in
+  // chat — it's already reported to the host. Keep the conversation clean.
+  if (/agent-browser|ab_|mcp|tool_error/i.test(message)) return
+  // Only surface genuine connection errors as a system message.
   if (message.includes('error') || message.includes('Error')) {
     appendBubble(localMsgId++, message, 'bot')
   }
@@ -299,6 +310,53 @@ btnActivate.addEventListener('click', () => {
 })
 
 btnSend.addEventListener('click', sendMessage)
+
+// --- Voice input (mic → MediaRecorder → bot Sherpa ASR) ---
+const btnMic = document.getElementById('btn-mic')
+let mediaRecorder = null
+let audioChunks = []
+let recording = false
+
+function bufToBase64(buf) {
+  const bytes = new Uint8Array(buf)
+  let bin = ''
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(bin)
+}
+
+function stopRecording() {
+  if (mediaRecorder && recording) mediaRecorder.stop()
+}
+
+btnMic.addEventListener('click', async () => {
+  if (recording) { stopRecording(); return }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    audioChunks = []
+    mediaRecorder = new MediaRecorder(stream)
+    mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) audioChunks.push(e.data) }
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop())
+      recording = false
+      btnMic.classList.remove('recording')
+      btnMic.textContent = '\u{1F3A4}'
+      if (!audioChunks.length) return
+      const type = (mediaRecorder && mediaRecorder.mimeType) || 'audio/webm'
+      const blob = new Blob(audioChunks, { type })
+      const base64 = bufToBase64(await blob.arrayBuffer())
+      if (api.sendVoice) api.sendVoice(base64, blob.type)
+    }
+    mediaRecorder.start()
+    recording = true
+    btnMic.classList.add('recording')
+    btnMic.textContent = '\u{23F9}'
+  } catch (err) {
+    appendBubble(localMsgId++, '🎤 無法存取麥克風: ' + (err && err.message ? err.message : String(err)), 'bot')
+  }
+})
 
 // keydown handled by command palette section below
 
@@ -536,18 +594,17 @@ messageInput.addEventListener('keydown', (e) => {
   }
 })
 
-// Load saved relay URL, or auto-discover from rawtxt.
-// Only auto-fill ws:// URLs — wss:// is left blank because it frequently
-// fails (self-signed/tunnel cert) and a pre-filled broken URL is worse than
-// an empty field the user can paste into.
-const isFillable = (u) => typeof u === 'string' && u.startsWith('ws://')
-api.getRelayUrl().then(async (url) => {
-  if (isFillable(url)) {
-    inputPairUrl.value = url
-  } else if (api.discoverRelayUrl) {
+// Prefill the relay URL. Prefer the freshly DISCOVERED url (the current tunnel,
+// which the bot publishes to rawtxt) over the saved one — the saved value can
+// be stale after a tunnel rotation, while discover matches what /pair shows.
+// So the field is normally already correct; the ↻ button + paste cover edge cases.
+api.getRelayUrl().then(async (saved) => {
+  let url = typeof saved === 'string' ? saved : ''
+  if (api.discoverRelayUrl) {
     const discovered = await api.discoverRelayUrl()
-    if (isFillable(discovered)) inputPairUrl.value = discovered
+    if (discovered) url = discovered
   }
+  if (url) inputPairUrl.value = url
   inputPairCode.focus()
 })
 

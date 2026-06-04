@@ -79,15 +79,27 @@ export function autoCommitAndPush(
   let pushError: string | undefined
 
   if (hasRemote(projectPath)) {
+    // Only push on the default branch. Worktree/bot branches (bot1, bot2…)
+    // must NOT be pushed — pushing them spams GitHub with "Compare & pull
+    // request" banners. /deploy still merges those to master + pushes.
+    let branch = ''
     try {
-      execFileSync('git', ['push'], {
-        cwd: projectPath,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 30_000,
-      })
-      pushed = true
-    } catch (err) {
-      pushError = err instanceof Error ? err.message : String(err)
+      branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+        cwd: projectPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim()
+    } catch { /* ignore */ }
+
+    if (branch === 'master' || branch === 'main') {
+      try {
+        execFileSync('git', ['push'], {
+          cwd: projectPath,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          timeout: 30_000,
+        })
+        pushed = true
+      } catch (err) {
+        pushError = err instanceof Error ? err.message : String(err)
+      }
     }
   }
 

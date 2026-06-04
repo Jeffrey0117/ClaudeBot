@@ -471,6 +471,17 @@ ipcMain.handle('send-message', (_event, text: string) => {
   }))
 })
 
+ipcMain.handle('send-voice', (_event, audioBase64: string, mime: string) => {
+  if (!chatWs || chatWs.readyState !== chatWs.OPEN) return false
+  chatWs.send(JSON.stringify({
+    type: 'chat_voice',
+    audioBase64,
+    mime,
+    messageId: chatClientMsgId++,
+  }))
+  return true
+})
+
 ipcMain.handle('send-callback', (_event, data: string, msgId: number) => {
   if (!chatWs || chatWs.readyState !== chatWs.OPEN) return
   chatWs.send(JSON.stringify({
@@ -702,6 +713,11 @@ function createWindow(): void {
       nodeIntegration: false,
       sandbox: false,
     },
+  })
+
+  // Grant microphone access for voice input (Electron blocks getUserMedia by default).
+  mainWindow.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(permission === 'media')
   })
 
   mainWindow.loadFile(htmlPath).catch((err) => {

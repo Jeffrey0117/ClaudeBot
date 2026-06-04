@@ -19,6 +19,13 @@ export interface ChatCallback {
   readonly messageId: number
 }
 
+export interface ChatVoice {
+  readonly type: 'chat_voice'
+  readonly audioBase64: string
+  readonly mime: string
+  readonly messageId: number
+}
+
 // --- Bot → Relay → Electron ---
 
 export interface ChatResponse {

@@ -210,6 +210,38 @@ export async function transcribeVoiceFile(
   }
 }
 
+/**
+ * Transcribe a LOCAL audio file (e.g. recorded in the Electron client and sent
+ * over the chat channel). Same pipeline as transcribeVoiceFile minus the
+ * Telegram download: ffmpeg → 16kHz WAV → Sherpa → punctuation.
+ */
+export async function transcribeLocalAudio(inputPath: string): Promise<VoiceResult> {
+  if (!isSherpaAvailable()) return { text: null, error: 'Sherpa ASR 未啟動' }
+  const wavPath = join(TEMP_DIR, `${randomUUID()}.wav`)
+  try {
+    await ensureTempDir()
+    try {
+      await execFileAsync(ffmpegPath ?? 'ffmpeg', [
+        '-i', inputPath,
+        '-ar', '16000', '-ac', '1', '-f', 'wav', '-y', wavPath,
+      ], { timeout: 30_000 })
+    } catch (ffErr) {
+      console.error('[voice] ffmpeg error (local):', ffErr)
+      return { text: null, error: 'ffmpeg 轉檔失敗' }
+    }
+    const result = await transcribeAudio(wavPath)
+    if (!result.success || !result.text) {
+      return { text: null, error: `辨識失敗${result.error ? `: ${result.error}` : ''}` }
+    }
+    const rawText = result.text.trim()
+    return { text: await addPunctuation(rawText), rawText }
+  } catch (err) {
+    return { text: null, error: err instanceof Error ? err.message : String(err) }
+  } finally {
+    await cleanupFiles(wavPath)
+  }
+}
+
 export async function voiceHandler(ctx: BotContext): Promise<void> {
   if (!isSherpaAvailable()) {
     await ctx.reply('🎙️ 語音辨識未啟用。\n需要安裝 Sherpa ASR：github.com/Jeffrey0117/Sherpa_ASR')

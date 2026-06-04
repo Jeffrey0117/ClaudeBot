@@ -75,6 +75,7 @@ export interface ToolCallError {
 export type {
   ChatMessage,
   ChatCallback,
+  ChatVoice,
   ChatResponse,
   ChatEdit,
   ChatDelete,
@@ -98,6 +99,7 @@ export type RelayInbound =
   | import('./chat-protocol.js').LicenseRegister
   | import('./chat-protocol.js').ChatMessage
   | import('./chat-protocol.js').ChatCallback
+  | import('./chat-protocol.js').ChatVoice
 
 /** Messages the relay sends back */
 export type RelayOutbound =

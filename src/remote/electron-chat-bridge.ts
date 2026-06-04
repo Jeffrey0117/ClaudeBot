@@ -10,7 +10,7 @@
  */
 
 import type { WebSocket } from 'ws'
-import type { ChatMessage, ChatCallback } from './chat-protocol.js'
+import type { ChatMessage, ChatCallback, ChatVoice } from './chat-protocol.js'
 
 /**
  * Allowlist of commands Electron chat users can use.
@@ -207,5 +207,57 @@ export async function handleElectronChatCallback(
     await callbackHandler(ctx)
   } catch (err) {
     sendText(ws, `❌ 回調處理失敗: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+/**
+ * Handle a voice clip from an Electron chat client: decode → temp file →
+ * Sherpa transcription (reusing the bot's ASR) → feed the text into the same
+ * pipeline as a typed message.
+ */
+export async function handleElectronChatVoice(
+  ws: WebSocket,
+  virtualChatId: number,
+  msg: ChatVoice,
+): Promise<void> {
+  const { autoAuth } = await import('../auth/auth-service.js')
+  autoAuth(virtualChatId)
+
+  const { writeFile, unlink, mkdir } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { randomUUID } = await import('node:crypto')
+  const { transcribeLocalAudio } = await import('../bot/handlers/voice-handler.js')
+
+  const ext = /webm/i.test(msg.mime) ? 'webm'
+    : /ogg|opus/i.test(msg.mime) ? 'ogg'
+    : /mp4|m4a|aac/i.test(msg.mime) ? 'm4a'
+    : 'bin'
+  const dir = join(tmpdir(), 'claudebot-voice')
+  const tmpPath = join(dir, `${randomUUID()}.${ext}`)
+
+  try {
+    await mkdir(dir, { recursive: true })
+    await writeFile(tmpPath, Buffer.from(msg.audioBase64, 'base64'))
+
+    const result = await transcribeLocalAudio(tmpPath)
+    if (!result.text) {
+      sendText(ws, `🎙️ 辨識失敗${result.error ? `: ${result.error}` : ''}`)
+      return
+    }
+    // Echo what was heard, then feed it into the pipeline like a typed message.
+    sendText(ws, `🎙️ ${result.text}`)
+
+    const { getUserState } = await import('../bot/state.js')
+    if (!getUserState(virtualChatId).selectedProject) {
+      sendText(ws, '⚠️ 請先用 /projects 選擇專案')
+      return
+    }
+    const { addText } = await import('../bot/ordered-message-buffer.js')
+    addText(virtualChatId, msg.messageId, undefined, result.text, '')
+  } catch (err) {
+    sendText(ws, `🎙️ 語音處理失敗: ${err instanceof Error ? err.message : String(err)}`)
+  } finally {
+    unlink(tmpPath).catch(() => {})
   }
 }

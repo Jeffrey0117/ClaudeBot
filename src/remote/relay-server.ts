@@ -36,11 +36,12 @@ import type {
   LicenseError,
   ChatMessage,
   ChatCallback,
+  ChatVoice,
 } from './protocol.js'
 import { validateLicense } from './license-store.js'
 import { getOrCreateVirtualChat, isCodeUsedByVirtualChat, getOrCreateVirtualChatWithLicense } from './virtual-chat-store.js'
 import { registerVirtualChat, unregisterVirtualChat } from './telegram-proxy.js'
-import { handleElectronChatMessage, handleElectronChatCallback } from './electron-chat-bridge.js'
+import { handleElectronChatMessage, handleElectronChatCallback, handleElectronChatVoice } from './electron-chat-bridge.js'
 import { setUserProject } from '../bot/state.js'
 
 interface PairedAgent {
@@ -413,6 +414,10 @@ export function startRelayServer(port: number): void {
         } else if (msg.type === 'chat_callback') {
           handleElectronChatCallback(ws, assignedVirtualChatId, msg as ChatCallback).catch((err) => {
             console.error(`[relay] Chat callback error:`, err instanceof Error ? err.message : err)
+          })
+        } else if (msg.type === 'chat_voice') {
+          handleElectronChatVoice(ws, assignedVirtualChatId, msg as ChatVoice).catch((err) => {
+            console.error(`[relay] Chat voice error:`, err instanceof Error ? err.message : err)
           })
         }
       }
