@@ -245,9 +245,9 @@ function spawnBot(envFile: string): void {
   })
 
   child.on('error', (err) => {
-    console.error(`[${label}] spawn error:`, err.message)
+    console.error(`[${label}] 啟動錯誤:`, err.message)
     children.delete(envFile)
-    notifyAdmin(`🚨 <b>[${label}]</b> spawn failed: ${err.message}`)
+    notifyAdmin(`🚨 <b>[${label}]</b> 啟動失敗: ${err.message}`)
   })
 
   child.stdout?.on('data', (chunk: Buffer) => {
@@ -264,38 +264,43 @@ function spawnBot(envFile: string): void {
 
   child.on('close', (code) => {
     const intentionalRestart = code === RESTART_EXIT_CODE
-    console.log(`[${label}] exited (code ${code})${intentionalRestart ? ' [restart]' : ''}`)
+    // exit code null = 被 SIGTERM/SIGKILL 終止（看門狗、/restart-all、外部關閉）。
+    // 這是「重啟」不是「崩潰」，不該嚇人、也不該計入崩潰迴圈。
+    const wasKilled = code === null
+    const tag = intentionalRestart ? ' [重啟]' : wasKilled ? ' [被終止]' : ''
+    console.log(`[${label}] 結束 (code ${code})${tag}`)
     children.delete(envFile)
 
     if (shuttingDown) {
-      // Launcher is shutting down — don't respawn
+      // 啟動器正在關閉 — 不重啟
       if (children.size === 0) {
-        console.log('All bots stopped.')
+        console.log('所有 bot 已停止。')
         process.exit(0)
       }
       return
     }
 
-    // Intentional restart (/restart command) — skip crash loop counting
-    if (intentionalRestart) {
-      console.log(`[${label}] intentional restart — respawning in ${RESPAWN_DELAY_MS}ms...`)
-      notifyAdmin(`🔄 <b>[${label}]</b> restarting...`)
+    // 正常重啟（/restart 指令，或被外部/看門狗終止）— 不計入崩潰次數
+    if (intentionalRestart || wasKilled) {
+      const why = intentionalRestart ? '正常重啟' : '被終止'
+      console.log(`[${label}] ${why} — ${RESPAWN_DELAY_MS}ms 後重新啟動...`)
+      notifyAdmin(`🔄 <b>[${label}]</b> ${why}，重新啟動中...`)
       setTimeout(() => {
         if (!shuttingDown) spawnBot(envFile)
       }, RESPAWN_DELAY_MS)
       return
     }
 
-    // Auto-respawn this bot only (with crash loop protection)
+    // 真正的異常結束（有數字 exit code）— 套用崩潰迴圈保護
     if (isCrashLooping(envFile)) {
-      console.error(`[${label}] crash loop detected (${MAX_CRASHES}x in ${CRASH_WINDOW_MS / 1000}s) — not respawning`)
-      notifyAdmin(`🚨 <b>[${label}]</b> crash loop detected (${MAX_CRASHES}x in ${CRASH_WINDOW_MS / 1000}s) — <b>not respawning</b>. Manual intervention required.`)
+      console.error(`[${label}] 偵測到崩潰迴圈（${CRASH_WINDOW_MS / 1000} 秒內 ${MAX_CRASHES} 次）— 停止重啟`)
+      notifyAdmin(`🚨 <b>[${label}]</b> 崩潰迴圈（${CRASH_WINDOW_MS / 1000} 秒內 ${MAX_CRASHES} 次）— <b>已停止重啟</b>，需人工處理。`)
       return
     }
 
-    notifyAdmin(`⚠️ <b>[${label}]</b> crashed (code ${code}) — respawning in ${RESPAWN_DELAY_MS / 1000}s...`)
+    notifyAdmin(`⚠️ <b>[${label}]</b> 異常結束 (code ${code}) — ${RESPAWN_DELAY_MS / 1000} 秒後重啟...`)
 
-    console.log(`[${label}] respawning in ${RESPAWN_DELAY_MS}ms...`)
+    console.log(`[${label}] ${RESPAWN_DELAY_MS}ms 後重啟...`)
     setTimeout(() => {
       if (!shuttingDown) {
         spawnBot(envFile)
@@ -310,8 +315,8 @@ function spawnBot(envFile: string): void {
     // Verify child is still alive after 5s
     if (children.get(envFile) === child && !child.killed) {
       const icon = isRespawn ? '✅' : '🟢'
-      const verb = isRespawn ? 'respawned' : 'started'
-      notifyAdmin(`${icon} <b>[${label}]</b> ${verb} successfully (PID ${child.pid})`)
+      const verb = isRespawn ? '重新啟動成功' : '啟動成功'
+      notifyAdmin(`${icon} <b>[${label}]</b> ${verb} (PID ${child.pid})`)
     }
   }, 5000)
 
@@ -353,8 +358,8 @@ function startHealthCheck(): void {
         const staleMs = Date.now() - hb.updatedAt
 
         if (staleMs > HEARTBEAT_STALE_MS) {
-          console.warn(`[watchdog] ${botId} heartbeat stale (${Math.round(staleMs / 1000)}s) — killing`)
-          notifyAdmin(`🔍 <b>[${botId}]</b> heartbeat stale (${Math.round(staleMs / 1000)}s) — killing for respawn`)
+          console.warn(`[看門狗] ${botId} heartbeat 卡住 ${Math.round(staleMs / 1000)} 秒 — 終止重啟`)
+          notifyAdmin(`🔍 <b>[${botId}]</b> heartbeat 卡住 ${Math.round(staleMs / 1000)} 秒（可能忙到沒回報）— 終止後重新啟動`)
           child.kill('SIGTERM')
         }
       } catch {
