@@ -40,6 +40,7 @@ import { syncCommand } from './commands/sync.js'
 import { landCommand } from './commands/land.js'
 import { fabricCommand } from './commands/fabric.js'
 import { bootstrapCommand } from './commands/bootstrap.js'
+import { ronCommand, rxCommand, rstatCommand, ropenCommand } from './commands/remote-ops.js'
 import { pairCommand, unpairCommand } from './commands/pair.js'
 import { machinesCommand } from './commands/machines.js'
 import { rpairCommand } from './commands/rpair.js'
@@ -127,6 +128,10 @@ export const CORE_COMMANDS = [
   { command: 'land', description: '把 bot 改動併回 master' },
   { command: 'fabric', description: '打包專案投遞到遠端機器跑' },
   { command: 'bootstrap', description: '在遠端機器裝設定環境 (clone 設定repo + install)' },
+  { command: 'ron', description: '在遠端機器開 app/GUI (秒開可見)' },
+  { command: 'rx', description: '在遠端機器跑指令拿輸出' },
+  { command: 'rstat', description: '看遠端機器系統狀態' },
+  { command: 'ropen', description: '在遠端機器開網址' },
   { command: 'pair', description: '配對遠端電腦 (code@ip:port)' },
   { command: 'unpair', description: '斷開遠端配對' },
   { command: 'machines', description: '已配對機器列表/切換' },
@@ -238,6 +243,10 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['land', landCommand],
     ['fabric', fabricCommand],
     ['bootstrap', bootstrapCommand],
+    ['ron', ronCommand],
+    ['rx', rxCommand],
+    ['rstat', rstatCommand],
+    ['ropen', ropenCommand],
     ['pair', pairCommand],
     ['unpair', unpairCommand],
     ['machines', machinesCommand],
