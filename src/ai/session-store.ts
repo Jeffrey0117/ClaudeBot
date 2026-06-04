@@ -22,6 +22,15 @@ const promptCounts = new Map<string, number>()
  *  Updated from each turn's result usage; primary rotation signal. */
 const sessionTokens = new Map<string, number>()
 
+/** Session keys we've already nudged to use /new (one reminder per session). */
+const remindedNew = new Set<string>()
+
+/** Fraction of ROTATE_AT_TOKENS at which we proactively suggest /new
+ *  (fires before the auto-rotation so the user has a heads-up). */
+const REMIND_TOKEN_FRACTION = 0.6
+/** Fallback trigger when token usage is unavailable. */
+const REMIND_PROMPT_COUNT = 25
+
 /** Auto-rotate session after this many prompts to prevent context bloat.
  *  Kept as a coarse backstop; the token-occupancy check (ROTATE_AT_TOKENS)
  *  is the primary, accurate signal and usually fires first.
@@ -149,6 +158,7 @@ export function getAISessionId(backend: AIBackend, projectPath: string): string 
     mySessions.delete(key)
     lastActivity.delete(key)
     sessionTokens.delete(key)
+    remindedNew.delete(key)
     saveSessions()
     return null
   }
@@ -186,6 +196,7 @@ export function clearAISession(backend: AIBackend, projectPath: string): boolean
   // Reset occupancy so the fresh session doesn't inherit a stale token count
   // and rotate immediately on its first turn.
   sessionTokens.delete(key)
+  remindedNew.delete(key)
   if (deleted) saveSessions()
   return deleted
 }
@@ -212,6 +223,20 @@ export function getSessionTokens(backend: AIBackend, projectPath: string): numbe
   return sessionTokens.get(makeKey(backend, projectPath)) ?? 0
 }
 
+/** True once a session has grown long enough that we should remind the user
+ *  they can start fresh with /new — at most once per session. */
+export function needsNewReminder(backend: AIBackend, projectPath: string): boolean {
+  const key = makeKey(backend, projectPath)
+  if (remindedNew.has(key)) return false
+  if (getSessionTokens(backend, projectPath) >= env.ROTATE_AT_TOKENS * REMIND_TOKEN_FRACTION) return true
+  return getSessionPromptCount(backend, projectPath) >= REMIND_PROMPT_COUNT
+}
+
+/** Mark that we've shown the /new reminder for this session. */
+export function markNewReminded(backend: AIBackend, projectPath: string): void {
+  remindedNew.add(makeKey(backend, projectPath))
+}
+
 /** Check if session should be rotated. Primary signal: context-window occupancy
  *  crossed ROTATE_AT_TOKENS (rotate before the model's lossy auto-compact fires).
  *  Backstop: prompt count, in case usage data is unavailable. */
@@ -228,6 +253,7 @@ export function rotateSession(backend: AIBackend, projectPath: string): number {
   mySessions.delete(key)
   promptCounts.delete(key)
   sessionTokens.delete(key)
+  remindedNew.delete(key)
   lastActivity.delete(key)
   saveSessions()
   return count
@@ -240,6 +266,7 @@ function cleanupOrphanedEntries(): void {
       lastActivity.delete(key)
       promptCounts.delete(key)
       sessionTokens.delete(key)
+      remindedNew.delete(key)
     }
   }
 }
