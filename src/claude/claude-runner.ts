@@ -399,6 +399,20 @@ export function runClaude(options: RunOptions): void {
     args.push('--mcp-config', ...mcpConfigs)
   }
 
+  // Hard isolation: a non-admin remote session gets NO local-host tools —
+  // only the remote_* MCP tools (which reach the user's own machine). Admins
+  // (ADMIN_CHAT_ID or admin license key) keep dual-machine local+remote.
+  // Enforces "no admin key ⇒ remote can't touch the bot host" at the CLI
+  // level, not just via the system prompt.
+  if (isRemoteSession) {
+    const isAdminSession = env.ADMIN_CHAT_ID === options.chatId ||
+      (!!options.chatId && isVirtualChat(options.chatId) &&
+        isAdminLicense(getVirtualChatLicenseKey(options.chatId) ?? ''))
+    if (!isAdminSession) {
+      args.push('--disallowedTools', 'Bash,Write,Edit,Read,Glob,Grep,NotebookEdit')
+    }
+  }
+
   console.log('[claude-runner] spawning claude, cwd:', validatedPath)
   console.log('[claude-runner] prompt length:', fullPrompt.length, 'preview:', prompt.slice(0, 50))
 
