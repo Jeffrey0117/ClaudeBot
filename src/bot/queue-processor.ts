@@ -655,8 +655,9 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       }, LONG_RUN_MS)
 
       // Idle entertainment: send fun tidbits during long waits (silent — no notification)
-      // Skip for dashboard and Electron virtual chats (annoying in desktop app)
-      if (!isDashboard && !isVirtualChat(item.chatId)) {
+      // Skip for dashboard and Electron virtual chats (annoying in desktop app).
+      // Disabled entirely when TIDBITS_ENABLED=false.
+      if (env.TIDBITS_ENABLED && !isDashboard && !isVirtualChat(item.chatId)) {
         const TIDBIT_DELAY_MS = 15_000
         const TIDBIT_INTERVAL_MS = 30_000 + Math.random() * 15_000
 

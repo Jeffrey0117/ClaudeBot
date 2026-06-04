@@ -34,6 +34,12 @@ const envSchema = z.object({
    *  (~95% of window) so OUR digest-seeded rotation fires first and Claude's
    *  lossy auto-compact rarely runs. Default 120k ≈ 60% of a 200k window. */
   ROTATE_AT_TOKENS: z.coerce.number().int().positive().default(120000),
+  /** Idle "tidbit" fillers (單字/冷知識, sometimes audio) the bot pushes
+   *  silently during long Claude waits. Set false to stop them entirely. */
+  TIDBITS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((val) => val === 'true'),
   PLUGINS: z
     .string()
     .default('')

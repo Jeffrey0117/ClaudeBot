@@ -522,13 +522,17 @@ messageInput.addEventListener('keydown', (e) => {
   }
 })
 
-// Load saved relay URL, or auto-discover from rawtxt
+// Load saved relay URL, or auto-discover from rawtxt.
+// Only auto-fill ws:// URLs — wss:// is left blank because it frequently
+// fails (self-signed/tunnel cert) and a pre-filled broken URL is worse than
+// an empty field the user can paste into.
+const isFillable = (u) => typeof u === 'string' && u.startsWith('ws://')
 api.getRelayUrl().then(async (url) => {
-  if (url) {
+  if (isFillable(url)) {
     inputPairUrl.value = url
   } else if (api.discoverRelayUrl) {
     const discovered = await api.discoverRelayUrl()
-    if (discovered) inputPairUrl.value = discovered
+    if (isFillable(discovered)) inputPairUrl.value = discovered
   }
   inputPairCode.focus()
 })
