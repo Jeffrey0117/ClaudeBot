@@ -579,6 +579,25 @@ body {
 
 #btn-send:hover { opacity: 0.8; }
 
+#btn-mic {
+  padding: 10px 12px;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  cursor: pointer;
+  background: #f0f0f0;
+  transition: background 0.2s, transform 0.1s;
+}
+#btn-mic:hover { background: #e0e0e0; }
+#btn-mic.recording {
+  background: #c1503f;
+  animation: micPulse 1s ease-in-out infinite;
+}
+@keyframes micPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+
 /* --- Utility --- */
 
 .hidden {

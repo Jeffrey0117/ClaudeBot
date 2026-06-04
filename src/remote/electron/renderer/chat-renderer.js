@@ -311,6 +311,53 @@ btnActivate.addEventListener('click', () => {
 
 btnSend.addEventListener('click', sendMessage)
 
+// --- Voice input (mic → MediaRecorder → bot Sherpa ASR) ---
+const btnMic = document.getElementById('btn-mic')
+let mediaRecorder = null
+let audioChunks = []
+let recording = false
+
+function bufToBase64(buf) {
+  const bytes = new Uint8Array(buf)
+  let bin = ''
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(bin)
+}
+
+function stopRecording() {
+  if (mediaRecorder && recording) mediaRecorder.stop()
+}
+
+btnMic.addEventListener('click', async () => {
+  if (recording) { stopRecording(); return }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    audioChunks = []
+    mediaRecorder = new MediaRecorder(stream)
+    mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) audioChunks.push(e.data) }
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop())
+      recording = false
+      btnMic.classList.remove('recording')
+      btnMic.textContent = '\u{1F3A4}'
+      if (!audioChunks.length) return
+      const type = (mediaRecorder && mediaRecorder.mimeType) || 'audio/webm'
+      const blob = new Blob(audioChunks, { type })
+      const base64 = bufToBase64(await blob.arrayBuffer())
+      if (api.sendVoice) api.sendVoice(base64, blob.type)
+    }
+    mediaRecorder.start()
+    recording = true
+    btnMic.classList.add('recording')
+    btnMic.textContent = '\u{23F9}'
+  } catch (err) {
+    appendBubble(localMsgId++, '🎤 無法存取麥克風: ' + (err && err.message ? err.message : String(err)), 'bot')
+  }
+})
+
 // keydown handled by command palette section below
 
 // Enter on license key → activate
