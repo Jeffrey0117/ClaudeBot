@@ -34,6 +34,8 @@ import { installCommand } from './commands/install.js'
 import { uninstallCommand } from './commands/uninstall.js'
 import { deployCommand } from './commands/deploy.js'
 import { detectDeployIntent, runDeployFromIntent } from './deploy-intent.js'
+import { detectOpsIntent, runOpsIntent } from './ops-intent.js'
+import { handleOpsCallback } from './ops-callbacks.js'
 import { syncCommand } from './commands/sync.js'
 import { pairCommand, unpairCommand } from './commands/pair.js'
 import { machinesCommand } from './commands/machines.js'
@@ -326,6 +328,10 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     const restartHandled = await handleRestartCallback(ctx, data)
     if (restartHandled) return
 
+    // CloudPipe ops callbacks (cp_restart / cp_rollback / cp_fix / cp_cancel)
+    const opsHandled = await handleOpsCallback(ctx, data)
+    if (opsHandled) return
+
     const pluginHandled = await dispatchPluginCallback(ctx, data)
     if (pluginHandled) return
 
@@ -349,6 +355,22 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
       if (handled) return
     } catch (error) {
       console.error('Deploy-intent router failed:', error)
+    }
+    return next()
+  })
+
+  // Ops-intent shortcut — status / logs / restart / rollback answered directly
+  // from CloudPipe, bypassing Claude. Only fires when a token resolves to a real
+  // project (or an explicit "all" dashboard); everything else falls through.
+  bot.on('text', async (ctx, next) => {
+    const text = (ctx.message && 'text' in ctx.message) ? ctx.message.text ?? '' : ''
+    const intent = detectOpsIntent(text)
+    if (!intent) return next()
+    try {
+      const handled = await runOpsIntent(ctx, intent)
+      if (handled) return
+    } catch (error) {
+      console.error('Ops-intent router failed:', error)
     }
     return next()
   })

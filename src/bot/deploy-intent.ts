@@ -2,6 +2,7 @@ import type { BotContext } from '../types/context.js'
 import { getUserState, setUserProject } from './state.js'
 import { findProject } from '../config/projects.js'
 import { deployCommand } from './commands/deploy.js'
+import { getProject, type CloudPipeDeployment } from './cloudpipe-client.js'
 
 /**
  * Deploy-intent router.
@@ -111,5 +112,124 @@ export async function runDeployFromIntent(
   }
 
   await deployCommand(ctx, { commitOverride: finalCommit })
+
+  // Fire-and-forget: follow the CloudPipe build and report the outcome here,
+  // so the user doesn't have to ask "好了嗎?" — still no Claude involved.
+  const projectId = finalProject?.name
+  if (projectId) void trackDeploy(ctx, projectId)
   return true
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+const TERMINAL = /^(deployed|success|failed|error|rolled_back|skipped|aborted)$/i
+const FAILED = /^(failed|error)$/i
+
+function latestDeployId(
+  result: Awaited<ReturnType<typeof getProject>>
+): string | null {
+  if (!result.ok || !result.data) return null
+  const d = result.data.deployments?.[0]
+  return d?.id !== undefined && d?.id !== null ? String(d.id) : null
+}
+
+/**
+ * Poll CloudPipe until a NEW deployment for this project reaches a terminal
+ * state, then update a single status message. Best-effort: silently gives up if
+ * CloudPipe is unreachable, and shows a gentle timeout note if nothing resolves.
+ */
+async function trackDeploy(ctx: BotContext, projectId: string): Promise<void> {
+  try {
+    const baseline = await getProject(projectId)
+    if (baseline.notReady) return // CloudPipe unreachable — skip tracking entirely
+    const baselineId = latestDeployId(baseline)
+
+    const sent = await ctx.reply(`⏳ 追蹤 *${projectId}* 部署中…`, { parse_mode: 'Markdown' })
+    const chatId = ctx.chat?.id
+    const messageId = (sent as { message_id?: number })?.message_id
+
+    for (let i = 0; i < 30; i++) {
+      await sleep(6000)
+      const cur = await getProject(projectId)
+      if (!cur.ok || !cur.data) continue
+      const latest = cur.data.deployments?.[0]
+      if (!latest || latest.id === undefined || latest.id === null) continue
+
+      const isNew = String(latest.id) !== String(baselineId)
+      if (isNew && TERMINAL.test(String(latest.status))) {
+        await finalize(ctx, chatId, messageId, projectId, latest)
+        return
+      }
+    }
+    await editStatus(
+      ctx,
+      chatId,
+      messageId,
+      `ℹ️ ${projectId} 部署追蹤逾時。輸入「${projectId} 狀態」查最新結果。`
+    )
+  } catch {
+    // tracking is best-effort; never throw into the bot loop
+  }
+}
+
+async function finalize(
+  ctx: BotContext,
+  chatId: number | undefined,
+  messageId: number | undefined,
+  projectId: string,
+  deployment: CloudPipeDeployment
+): Promise<void> {
+  const commit = deployment.commit ? String(deployment.commit).slice(0, 7) : '—'
+  const status = String(deployment.status || '').toLowerCase()
+
+  if (FAILED.test(status)) {
+    const reason = deployment.error ? `\n原因:${String(deployment.error).slice(0, 200)}` : ''
+    await editStatus(
+      ctx,
+      chatId,
+      messageId,
+      `❌ *${projectId}* 部署失敗(commit \`${commit}\`)${reason}`,
+      {
+        inline_keyboard: [
+          [
+            { text: '🔧 用 Claude 修', callback_data: `cp_fix:${projectId}` },
+            { text: '📋 看 log', callback_data: 'cp_cancel' },
+          ],
+        ],
+      }
+    )
+    return
+  }
+
+  if (/^(skipped|aborted)$/i.test(status)) {
+    await editStatus(ctx, chatId, messageId, `⚠️ *${projectId}* 部署略過(${status})`)
+    return
+  }
+
+  await editStatus(ctx, chatId, messageId, `✅ *${projectId}* 上線了!commit \`${commit}\``)
+}
+
+interface InlineKeyboard {
+  inline_keyboard: Array<Array<{ text: string; callback_data: string }>>
+}
+
+async function editStatus(
+  ctx: BotContext,
+  chatId: number | undefined,
+  messageId: number | undefined,
+  text: string,
+  markup?: InlineKeyboard
+): Promise<void> {
+  try {
+    if (chatId && messageId) {
+      await ctx.telegram.editMessageText(chatId, messageId, undefined, text, {
+        parse_mode: 'Markdown',
+        ...(markup ? { reply_markup: markup } : {}),
+      })
+    } else {
+      await ctx.reply(text, { parse_mode: 'Markdown', ...(markup ? { reply_markup: markup } : {}) })
+    }
+  } catch {
+    // best-effort
+  }
 }

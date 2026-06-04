@@ -42,20 +42,18 @@ const NOISE = new Set([
   '現在', '目前', '可以', '嗎?', '?', '？',
 ])
 
-function extractQuery(text: string, verbRe?: RegExp): string {
-  let t = text.trim()
-  if (verbRe) {
-    const m = verbRe.exec(t)
-    if (m) t = (m[2] ?? '').trim()
-  }
-  // Strip the status/log marker phrases, then keep meaningful tokens.
-  const tokens = t
-    .replace(STATUS_RE, ' ')
-    .replace(LOG_RE, ' ')
+function extractQuery(text: string): string {
+  // Purely token-based — never strip multi-token spans (a greedy "看.*log"
+  // would swallow the project name). Drop noise words and any token that is
+  // itself a status marker (e.g. "好了沒", "狀態").
+  const tokens = text
+    .trim()
     .replace(/[?？!！。,，]/g, ' ')
     .split(/\s+/)
     .map((w) => w.trim())
-    .filter((w) => w.length > 0 && !NOISE.has(w.toLowerCase()))
+    .filter((w) => w.length > 0)
+    .filter((w) => !NOISE.has(w.toLowerCase()))
+    .filter((w) => !STATUS_RE.test(w))
   return tokens.join(' ').trim()
 }
 
@@ -100,12 +98,24 @@ function resolveProject(
 ): CloudPipeProject | null {
   const q = query.toLowerCase().trim()
   if (!q) return null
-  return (
+
+  // Whole-query match (clean single-token queries).
+  const whole =
     projects.find((p) => p.id.toLowerCase() === q) ||
     projects.find((p) => p.id.toLowerCase().startsWith(q)) ||
-    projects.find((p) => p.id.toLowerCase().includes(q)) ||
-    null
-  )
+    projects.find((p) => q.length >= 3 && p.id.toLowerCase().includes(q))
+  if (whole) return whole
+
+  // Per-token exact/prefix match — handles Chinese noise glued to the name
+  // (e.g. "survey 的日誌" → token "survey"). Exact only, to avoid over-matching.
+  for (const tok of q.split(/\s+/)) {
+    if (tok.length < 2) continue
+    const m =
+      projects.find((p) => p.id.toLowerCase() === tok) ||
+      projects.find((p) => tok.length >= 3 && p.id.toLowerCase().startsWith(tok))
+    if (m) return m
+  }
+  return null
 }
 
 function ago(value: string | number | null | undefined): string {

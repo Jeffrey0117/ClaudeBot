@@ -62,6 +62,9 @@ async function adminCall<T>(
       config.serviceToken || undefined
     )
     if (res.status === 0) return notReady<T>()
+    // 401/403 = serviceToken auth not live yet (CloudPipe not restarted) →
+    // treat as "not ready" so callers fall back to Claude instead of erroring.
+    if (res.status === 401 || res.status === 403) return notReady<T>()
     if (!res.ok) {
       const errMsg =
         res.data && typeof res.data === 'object' && 'error' in res.data
