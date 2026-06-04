@@ -59,7 +59,15 @@ const STATUS_LABELS = {
 
 // --- UI Helpers ---
 
-function scrollToBottom() {
+function isNearBottom() {
+  return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 80
+}
+
+// Only auto-scroll when the user is already near the bottom — so scrolling up
+// to read isn't yanked back down by streaming updates. `force` overrides
+// (used for the user's own just-sent message).
+function scrollToBottom(force) {
+  if (!force && !isNearBottom()) return
   requestAnimationFrame(() => {
     messagesEl.scrollTop = messagesEl.scrollHeight
   })
@@ -141,7 +149,7 @@ function appendBubble(id, text, sender, buttons, media) {
 
   bubbles.set(id, row)
   messagesEl.appendChild(row)
-  scrollToBottom()
+  scrollToBottom(sender === 'user')
 }
 
 function updateBubble(id, text) {
@@ -276,7 +284,10 @@ api.onLicenseError((data) => {
 })
 
 api.onLog((message) => {
-  // Show connection errors as system messages in chat
+  // Infra noise (agent-browser probe/install, tool plumbing) is NOT shown in
+  // chat — it's already reported to the host. Keep the conversation clean.
+  if (/agent-browser|ab_|mcp|tool_error/i.test(message)) return
+  // Only surface genuine connection errors as a system message.
   if (message.includes('error') || message.includes('Error')) {
     appendBubble(localMsgId++, message, 'bot')
   }
