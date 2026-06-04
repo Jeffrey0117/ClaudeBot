@@ -4,7 +4,7 @@ import { enqueue, clearQueue } from '../claude/queue.js'
 import { cancelAnyRunning } from '../ai/registry.js'
 import { clearAISession } from '../ai/session-store.js'
 import { findProject, scanProjects } from '../config/projects.js'
-import { setUserAI, setUserProject, getUserState } from '../bot/state.js'
+import { setUserAI, setUserProject, getUserState, setActiveMachine } from '../bot/state.js'
 import { acquireCommandLock, releaseCommandLock } from './command-lock.js'
 import type { DashboardCommand } from './types.js'
 import type { AIModelSelection } from '../ai/types.js'
@@ -130,6 +130,44 @@ async function executeCommand(cmd: DashboardCommand): Promise<boolean> {
         model,
       }
       setUserAI(chatId, ai)
+      return true
+    }
+
+    case 'dispatch_remote': {
+      // Fan-out a task to a specific remote machine from the dashboard.
+      // Reuses the proven virtual-chat path: bind a stable virtual chat to the
+      // machine's pairing code so the runner attaches that machine's MCP tools,
+      // then enqueue the task as a normal remote Claude session.
+      const prompt = typeof payload.prompt === 'string' ? payload.prompt : ''
+      const code = typeof payload.code === 'string' ? payload.code : ''
+      const label = typeof payload.label === 'string' ? payload.label : ''
+      if (!prompt || !code || !label) return false
+
+      const { getOrCreateVirtualChat } = await import('../remote/virtual-chat-store.js')
+      const { autoAuth } = await import('../auth/auth-service.js')
+      const { remoteProjectPath } = await import('../remote/pairing-store.js')
+      const { getAISessionId } = await import('../ai/session-store.js')
+
+      const vchatId = getOrCreateVirtualChat(`dashboard-machine:${code}`, code)
+      autoAuth(vchatId)
+      setActiveMachine(vchatId, label)
+
+      const project = { name: 'remote', path: remoteProjectPath(label) }
+      setUserProject(vchatId, project)
+
+      const state = getUserState(vchatId)
+      const sessionId = getAISessionId(
+        state.ai.backend === 'auto' ? 'claude' : state.ai.backend,
+        project.path,
+      )
+      enqueue({
+        chatId: vchatId,
+        prompt,
+        project,
+        ai: state.ai,
+        sessionId,
+        imagePaths: [],
+      })
       return true
     }
 

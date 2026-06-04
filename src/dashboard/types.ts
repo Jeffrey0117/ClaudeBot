@@ -32,7 +32,7 @@ export interface BotHeartbeat {
 export interface DashboardCommand {
   readonly id: string
   readonly targetBot: string | null
-  readonly type: 'prompt' | 'cancel' | 'select_project' | 'switch_model' | 'new_session'
+  readonly type: 'prompt' | 'cancel' | 'select_project' | 'switch_model' | 'new_session' | 'dispatch_remote'
   readonly payload: Record<string, unknown>
   readonly createdAt: number
   readonly status: 'pending' | 'claimed' | 'completed' | 'failed'
