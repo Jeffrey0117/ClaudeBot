@@ -17,7 +17,7 @@ import { createFakeContext } from '../utils/fake-context.js'
 import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand, getPluginModule } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
-import { getAISessionId, shouldRotateSession, rotateSession } from '../ai/session-store.js'
+import { getAISessionId, shouldRotateSession, rotateSession, setSessionTokens } from '../ai/session-store.js'
 import { detectChoices } from '../utils/choice-detector.js'
 import { cleanMarkdown } from '../utils/markdown-cleaner.js'
 import { generateSuggestions } from '../utils/suggestion-generator.js'
@@ -31,7 +31,7 @@ import { recordCost } from '../plugins/cost/index.js'
 import { recordActivity } from '../plugins/stats/activity-logger.js'
 import { emitResponseChunk, emitResponseComplete, emitResponseError } from '../dashboard/response-broker.js'
 import { setLastResponse } from './last-response-store.js'
-import { extractDigest, setContext } from './context-digest-store.js'
+import { extractDigest, setContext, buildContextInjection } from './context-digest-store.js'
 import { recordResponse } from './memory-consolidator.js'
 import { autoCommitAndPush } from '../utils/auto-commit.js'
 import { env } from '../config/env.js'
@@ -692,14 +692,23 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         lastTool: null,
       })
 
-      // Auto-rotate bloated sessions — CTX digest preserves context continuity
+      // Auto-rotate bloated sessions BEFORE the model's lossy auto-compact fires
+      // (primary trigger: context-window occupancy crossed ROTATE_AT_TOKENS).
+      // On rotation we seed the fresh session with the stored [CTX] digest so the
+      // conversation keeps continuity regardless of this message's length —
+      // claude-runner only auto-injects the digest for short/affirmative replies.
       const resolvedBackend = resolveBackend(resolvedAI.backend)
+      let runPrompt = item.prompt
       if (shouldRotateSession(resolvedBackend, item.project.path)) {
         const count = rotateSession(resolvedBackend, item.project.path)
+        const injection = buildContextInjection(item.project.path, false)
+        if (injection) {
+          runPrompt = `${injection}\n\n${item.prompt}`
+        }
         if (!isDashboard) {
           telegram.sendMessage(
             item.chatId,
-            `\u{1F504} *[${tag}]* Session \u{5DF2}\u{81EA}\u{52D5}\u{5237}\u{65B0} (${count} \u{6B21}\u{5C0D}\u{8A71}\u{5F8C})\u{FF0C}\u{4FDD}\u{6301}\u{56DE}\u{61C9}\u{901F}\u{5EA6}`,
+            `\u{1F504} *[${tag}]* Session \u{5DF2}\u{81EA}\u{52D5}\u{5237}\u{65B0}\u{FF08}context \u{63A5}\u{8FD1}\u{4E0A}\u{9650}\u{FF0C}\u{5DF2}\u{7528}\u{6458}\u{8981}\u{63A5}\u{7E8C}\u{FF0C}${count} \u{6B21}\u{5C0D}\u{8A71}\u{FF09}\u{FF0C}\u{4FDD}\u{6301}\u{56DE}\u{61C9}\u{901F}\u{5EA6}`,
             { parse_mode: 'Markdown', disable_notification: true },
           ).catch(() => {})
         }
@@ -711,7 +720,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
 
       const runner = getRunner(backend)
       runner.run({
-        prompt: item.prompt,
+        prompt: runPrompt,
         projectPath: item.project.path,
         projectName: item.project.name,
         model: resolvedAI.model,
@@ -748,7 +757,12 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
           updateRunnerTool(item.project.path, toolName)
           updateStatus()
         },
-        onResult: (result) => { handleRunnerResult(ctx, result) },
+        onResult: (result) => {
+          if (result.contextTokens) {
+            setSessionTokens(resolvedBackend, item.project.path, result.contextTokens)
+          }
+          handleRunnerResult(ctx, result)
+        },
         onError: (error) => { handleRunnerError(ctx, error) },
         onStaleRetry: () => {
           // Claude CLI 那邊的 session 檔過期了 — 已自動清 session 重跑，

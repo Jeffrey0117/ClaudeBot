@@ -29,6 +29,11 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
   MAX_TURNS: z.coerce.number().int().positive().optional(),
+  /** Rotate a session once its context-window occupancy (input + cache tokens)
+   *  crosses this many tokens. Set below the model's auto-compact trigger
+   *  (~95% of window) so OUR digest-seeded rotation fires first and Claude's
+   *  lossy auto-compact rarely runs. Default 120k ≈ 60% of a 200k window. */
+  ROTATE_AT_TOKENS: z.coerce.number().int().positive().default(120000),
   PLUGINS: z
     .string()
     .default('')

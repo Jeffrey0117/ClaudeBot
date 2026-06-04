@@ -36,4 +36,7 @@ export interface ClaudeResult {
   readonly durationMs: number
   readonly cancelled: boolean
   readonly resultText: string
+  /** Approx. context-window occupancy (input + cache tokens) for this turn.
+   *  Drives token-based session rotation. Undefined if the CLI omitted usage. */
+  readonly contextTokens?: number
 }
