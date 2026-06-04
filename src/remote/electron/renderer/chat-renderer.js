@@ -59,15 +59,18 @@ const STATUS_LABELS = {
 
 // --- UI Helpers ---
 
-function isNearBottom() {
-  return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 80
-}
+// "Stick to bottom": follow streaming output while the user is at the bottom.
+// A real scroll listener (not a per-update check) tracks intent: scrolling up
+// to read detaches; scrolling back to the bottom re-attaches. This keeps the
+// view following live output, yet never yanks the user when they've scrolled up.
+let stickToBottom = true
+messagesEl.addEventListener('scroll', () => {
+  stickToBottom = (messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight) < 60
+})
 
-// Only auto-scroll when the user is already near the bottom — so scrolling up
-// to read isn't yanked back down by streaming updates. `force` overrides
-// (used for the user's own just-sent message).
 function scrollToBottom(force) {
-  if (!force && !isNearBottom()) return
+  if (force) stickToBottom = true
+  if (!stickToBottom) return
   requestAnimationFrame(() => {
     messagesEl.scrollTop = messagesEl.scrollHeight
   })

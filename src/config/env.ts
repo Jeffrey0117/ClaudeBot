@@ -113,6 +113,9 @@ const envSchema = z.object({
   /** Private infra hosts — configured in .env, never hardcoded in source. */
   RAWTXT_BASE: z.string().default(''),
   REELSCRIPT_BASE: z.string().default(''),
+  /** Git URL of your Claude-config repo for /bootstrap (clone + run install.ps1
+   *  on a paired machine). Configured in .env; empty disables /bootstrap. */
+  BOOTSTRAP_REPO: z.string().default(''),
   /** channel→chatId routing for CloudPipe events.
    *  Format: "alerts:12345,deploys:67890". Unknown/absent channel falls back
    *  to ADMIN_CHAT_ID. */

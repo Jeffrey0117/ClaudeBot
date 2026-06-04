@@ -39,6 +39,7 @@ import { handleOpsCallback } from './ops-callbacks.js'
 import { syncCommand } from './commands/sync.js'
 import { landCommand } from './commands/land.js'
 import { fabricCommand } from './commands/fabric.js'
+import { bootstrapCommand } from './commands/bootstrap.js'
 import { pairCommand, unpairCommand } from './commands/pair.js'
 import { machinesCommand } from './commands/machines.js'
 import { rpairCommand } from './commands/rpair.js'
@@ -125,6 +126,7 @@ export const CORE_COMMANDS = [
   { command: 'sync', description: '同步所有 worktree' },
   { command: 'land', description: '把 bot 改動併回 master' },
   { command: 'fabric', description: '打包專案投遞到遠端機器跑' },
+  { command: 'bootstrap', description: '在遠端機器裝設定環境 (clone 設定repo + install)' },
   { command: 'pair', description: '配對遠端電腦 (code@ip:port)' },
   { command: 'unpair', description: '斷開遠端配對' },
   { command: 'machines', description: '已配對機器列表/切換' },
@@ -235,6 +237,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['sync', syncCommand],
     ['land', landCommand],
     ['fabric', fabricCommand],
+    ['bootstrap', bootstrapCommand],
     ['pair', pairCommand],
     ['unpair', unpairCommand],
     ['machines', machinesCommand],
