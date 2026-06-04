@@ -273,7 +273,12 @@ function connectToRelay(relayUrl: string, code: string): void {
   })
 
   socket.on('error', (err) => {
-    log(`Connection error: ${err.message}`)
+    // Surface the URL + real reason so it isn't a mystery "err" in the UI.
+    // wss:// failures are usually a TLS/cert issue (self-signed relay).
+    const hint = agentRelayUrl.startsWith('wss://')
+      ? '（wss 安全連線失敗，多半是憑證問題）'
+      : ''
+    log(`Connection error @ ${agentRelayUrl}: ${err.message} ${hint}`)
   })
 }
 
@@ -394,7 +399,10 @@ function connectChat(relayUrl: string, code: string): void {
   })
 
   socket.on('error', (err) => {
-    log(`Chat connection error: ${err.message}`)
+    const hint = chatRelayUrl.startsWith('wss://')
+      ? '（wss 安全連線失敗，多半是憑證問題）'
+      : ''
+    log(`Chat connection error @ ${chatRelayUrl}: ${err.message} ${hint}`)
   })
 }
 

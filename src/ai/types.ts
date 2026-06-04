@@ -34,6 +34,9 @@ export interface AIResult {
   readonly durationMs: number
   readonly cancelled: boolean
   readonly resultText: string
+  /** Approx. context-window occupancy (input + cache tokens) for this turn.
+   *  Drives token-based session rotation. Undefined if unavailable. */
+  readonly contextTokens?: number
 }
 
 export interface AIRunner {

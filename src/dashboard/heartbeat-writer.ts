@@ -5,7 +5,8 @@ import { getLockHolder } from '../claude/file-lock.js'
 import { scanProjects } from '../config/projects.js'
 import { getAnyElapsedMs } from '../ai/registry.js'
 import { getActiveRunnerInfos } from './runner-tracker.js'
-import type { BotHeartbeat } from './types.js'
+import { getBotConnectedPairings } from '../remote/pairing-store.js'
+import type { BotHeartbeat, ConnectedMachine } from './types.js'
 
 const HEARTBEAT_INTERVAL_MS = 2_000
 const HEARTBEAT_DIR = join(process.cwd(), 'data', 'heartbeat')
@@ -48,6 +49,14 @@ async function writeHeartbeat(botId: string): Promise<void> {
     elapsedMs: getAnyElapsedMs(r.projectPath) || r.elapsedMs,
   }))
 
+  // Snapshot remote machines currently paired+connected to this bot instance
+  const machines: ConnectedMachine[] = getBotConnectedPairings().map((p) => ({
+    label: p.label,
+    code: p.code,
+    hostname: p.hostname ?? null,
+    connectedSince: p.createdAt,
+  }))
+
   const heartbeat: BotHeartbeat = {
     botId,
     pid: process.pid,
@@ -56,6 +65,7 @@ async function writeHeartbeat(botId: string): Promise<void> {
     queueByProject,
     activeRunners: runners,
     locksHeld,
+    machines,
   }
 
   await mkdir(HEARTBEAT_DIR, { recursive: true })

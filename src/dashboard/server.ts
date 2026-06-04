@@ -33,7 +33,7 @@ const MIME_TYPES: Record<string, string> = {
 
 const CreateCommandSchema = z.object({
   targetBot: z.string().nullable().optional().default(null),
-  type: z.enum(['prompt', 'cancel', 'select_project', 'switch_model', 'new_session']),
+  type: z.enum(['prompt', 'cancel', 'select_project', 'switch_model', 'new_session', 'dispatch_remote']),
   payload: z.record(z.unknown()).default({}),
 })
 

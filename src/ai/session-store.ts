@@ -18,9 +18,14 @@ const lastActivity = new Map<string, number>()
 /** Track prompt count per session key (in-memory only) */
 const promptCounts = new Map<string, number>()
 
+/** Track last-known context-window occupancy (tokens) per session key.
+ *  Updated from each turn's result usage; primary rotation signal. */
+const sessionTokens = new Map<string, number>()
+
 /** Auto-rotate session after this many prompts to prevent context bloat.
- *  Raised from 20 → 50 so conversations can breathe longer before rotation.
- *  CTX digest still provides continuity on rotation, but 20 was too eager. */
+ *  Kept as a coarse backstop; the token-occupancy check (ROTATE_AT_TOKENS)
+ *  is the primary, accurate signal and usually fires first.
+ *  CTX digest provides continuity on rotation. */
 const MAX_PROMPTS_PER_SESSION = 50
 
 /** In-memory cache of THIS bot's sessions only */
@@ -143,6 +148,7 @@ export function getAISessionId(backend: AIBackend, projectPath: string): string 
     console.log(`[ai-session] auto-expired session for ${projectPath} (idle > ${hours}h)`)
     mySessions.delete(key)
     lastActivity.delete(key)
+    sessionTokens.delete(key)
     saveSessions()
     return null
   }
@@ -177,6 +183,9 @@ export function setAISessionId(backend: AIBackend, projectPath: string, sessionI
 export function clearAISession(backend: AIBackend, projectPath: string): boolean {
   const key = makeKey(backend, projectPath)
   const deleted = mySessions.delete(key)
+  // Reset occupancy so the fresh session doesn't inherit a stale token count
+  // and rotate immediately on its first turn.
+  sessionTokens.delete(key)
   if (deleted) saveSessions()
   return deleted
 }
@@ -192,8 +201,22 @@ export function getSessionPromptCount(backend: AIBackend, projectPath: string): 
   return promptCounts.get(makeKey(backend, projectPath)) ?? 0
 }
 
-/** Check if session should be rotated (too many prompts). */
+/** Record the context-window occupancy (tokens) reported by the latest turn. */
+export function setSessionTokens(backend: AIBackend, projectPath: string, tokens: number): void {
+  if (!Number.isFinite(tokens) || tokens <= 0) return
+  sessionTokens.set(makeKey(backend, projectPath), tokens)
+}
+
+/** Get the last-known context-window occupancy (tokens) for the session. */
+export function getSessionTokens(backend: AIBackend, projectPath: string): number {
+  return sessionTokens.get(makeKey(backend, projectPath)) ?? 0
+}
+
+/** Check if session should be rotated. Primary signal: context-window occupancy
+ *  crossed ROTATE_AT_TOKENS (rotate before the model's lossy auto-compact fires).
+ *  Backstop: prompt count, in case usage data is unavailable. */
 export function shouldRotateSession(backend: AIBackend, projectPath: string): boolean {
+  if (getSessionTokens(backend, projectPath) >= env.ROTATE_AT_TOKENS) return true
   return getSessionPromptCount(backend, projectPath) >= MAX_PROMPTS_PER_SESSION
 }
 
@@ -204,6 +227,7 @@ export function rotateSession(backend: AIBackend, projectPath: string): number {
   const count = promptCounts.get(key) ?? 0
   mySessions.delete(key)
   promptCounts.delete(key)
+  sessionTokens.delete(key)
   lastActivity.delete(key)
   saveSessions()
   return count
@@ -215,6 +239,7 @@ function cleanupOrphanedEntries(): void {
     if (!mySessions.has(key)) {
       lastActivity.delete(key)
       promptCounts.delete(key)
+      sessionTokens.delete(key)
     }
   }
 }

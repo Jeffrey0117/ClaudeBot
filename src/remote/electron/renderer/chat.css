@@ -319,6 +319,7 @@ body {
 .messages {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px 20px;
   display: flex;
   flex-direction: column;
@@ -330,22 +331,29 @@ body {
 
 .bubble-row {
   display: flex;
+  flex-direction: column;
   max-width: 85%;
+  min-width: 0;
 }
 
 .bubble-row.user {
   align-self: flex-end;
+  align-items: flex-end;
 }
 
 .bubble-row.bot {
   align-self: flex-start;
+  align-items: flex-start;
 }
 
 .bubble {
   padding: 10px 14px;
   font-size: 13px;
   line-height: 1.6;
-  word-wrap: break-word;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
 }
 
@@ -392,6 +400,7 @@ body {
   padding: 10px 12px;
   border-radius: 6px;
   overflow-x: auto;
+  max-width: 100%;
   margin: 6px 0;
   font-size: 12px;
   line-height: 1.5;
@@ -424,6 +433,9 @@ body {
 }
 
 .bubble table {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
   border-collapse: collapse;
   margin: 6px 0;
   font-size: 12px;
@@ -460,16 +472,14 @@ body {
 }
 
 .bubble-btn {
-  padding: 6px 14px;
+  padding: 7px 14px;
   border: 2px solid #000;
   border-radius: 8px;
   background: #fff;
   color: #000;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }

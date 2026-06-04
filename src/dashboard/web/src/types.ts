@@ -6,6 +6,14 @@ export interface ActiveRunnerInfo {
   readonly elapsedMs: number
   readonly toolCount: number
   readonly lastTool: string | null
+  readonly machine?: string
+}
+
+export interface ConnectedMachine {
+  readonly label: string
+  readonly code: string
+  readonly hostname: string | null
+  readonly connectedSince: number
 }
 
 export interface BotHeartbeat {
@@ -16,13 +24,14 @@ export interface BotHeartbeat {
   readonly queueByProject: Record<string, number>
   readonly activeRunners: readonly ActiveRunnerInfo[]
   readonly locksHeld: readonly string[]
+  readonly machines: readonly ConnectedMachine[]
   readonly online: boolean
 }
 
 export interface DashboardCommand {
   readonly id: string
   readonly targetBot: string | null
-  readonly type: 'prompt' | 'cancel' | 'select_project' | 'switch_model' | 'new_session'
+  readonly type: 'prompt' | 'cancel' | 'select_project' | 'switch_model' | 'new_session' | 'dispatch_remote'
   readonly payload: Record<string, unknown>
   readonly createdAt: number
   readonly status: 'pending' | 'claimed' | 'completed' | 'failed'

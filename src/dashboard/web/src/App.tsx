@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Layout } from './components/Layout'
 import { OverviewPanel } from './components/OverviewPanel'
+import { MachinesPanel } from './components/MachinesPanel'
 import { ChatPanel } from './components/ChatPanel'
 import { ProjectPanel } from './components/ProjectPanel'
 import { KanbanBoard } from './components/KanbanBoard'
@@ -44,6 +45,7 @@ export function App() {
       ) : (
         <>
           <OverviewPanel />
+          <MachinesPanel />
           <KanbanBoard />
           <ProjectPanel />
         </>

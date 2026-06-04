@@ -579,12 +579,19 @@ function handleStreamEvent(event: StreamEvent, handlers: EventHandlers): void {
         const errorMsg = result.errors?.[0] ?? result.error ?? 'Unknown Claude error'
         handlers.onError(errorMsg)
       } else {
+        const u = result.usage
+        const contextTokens = u
+          ? (u.input_tokens ?? 0) +
+            (u.cache_creation_input_tokens ?? 0) +
+            (u.cache_read_input_tokens ?? 0)
+          : undefined
         handlers.onResult({
           sessionId: result.session_id,
           costUsd: result.total_cost_usd ?? result.cost_usd ?? 0,
           durationMs: result.duration_ms,
           cancelled: false,
           resultText: result.result ?? '',
+          contextTokens,
         })
       }
       break

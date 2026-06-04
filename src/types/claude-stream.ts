@@ -30,6 +30,16 @@ export interface StreamContentBlockStop {
   readonly index: number
 }
 
+/** Token usage reported on the final `result` event. The sum of the input-side
+ *  fields approximates how full the context window was for the last turn —
+ *  used to decide when to rotate the session before auto-compact kicks in. */
+export interface StreamUsage {
+  readonly input_tokens?: number
+  readonly cache_creation_input_tokens?: number
+  readonly cache_read_input_tokens?: number
+  readonly output_tokens?: number
+}
+
 export interface StreamResult {
   readonly type: 'result'
   readonly subtype: 'success' | 'error'
@@ -43,6 +53,7 @@ export interface StreamResult {
   readonly result?: string
   readonly error?: string
   readonly errors?: readonly string[]
+  readonly usage?: StreamUsage
 }
 
 export interface StreamAssistantMessage {
