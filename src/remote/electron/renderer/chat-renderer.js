@@ -459,6 +459,7 @@ document.getElementById('btn-reconnect').addEventListener('click', async () => {
   connectPanel.classList.remove('hidden')
   chatPanel.classList.add('hidden')
   inputPairCode.value = ''
+  refillRelayUrl() // re-discover the current relay URL (handles rotation)
   inputPairCode.focus()
 })
 
@@ -597,19 +598,20 @@ messageInput.addEventListener('keydown', (e) => {
   }
 })
 
-// Prefill the relay URL. Prefer the freshly DISCOVERED url (the current tunnel,
-// which the bot publishes to rawtxt) over the saved one — the saved value can
-// be stale after a tunnel rotation, while discover matches what /pair shows.
-// So the field is normally already correct; the ↻ button + paste cover edge cases.
-api.getRelayUrl().then(async (saved) => {
-  let url = typeof saved === 'string' ? saved : ''
-  if (api.discoverRelayUrl) {
-    const discovered = await api.discoverRelayUrl()
-    if (discovered) url = discovered
-  }
-  if (url) inputPairUrl.value = url
-  inputPairCode.focus()
-})
+// Prefill the relay URL from the freshly DISCOVERED current tunnel (rawtxt scan
+// = newest paste, matches what /pair shows). Reusable so ↻ reconnect re-runs it
+// and the field refreshes to the current URL instead of a stale one.
+async function refillRelayUrl() {
+  try {
+    if (api.discoverRelayUrl) {
+      const discovered = await api.discoverRelayUrl()
+      if (discovered) { inputPairUrl.value = discovered; return }
+    }
+    const saved = await api.getRelayUrl()
+    if (typeof saved === 'string' && saved) inputPairUrl.value = saved
+  } catch { /* leave field as-is */ }
+}
+refillRelayUrl().then(() => inputPairCode.focus())
 
 // Enter on pair code → connect
 inputPairCode.addEventListener('keydown', (e) => {

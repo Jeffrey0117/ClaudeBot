@@ -152,11 +152,14 @@ function buildRemoteSystemBlock(
     `- remote_system_info(): 遠端系統資訊（OS、磁碟、記憶體、網路）\n` +
     `\n` +
     `執行與傳輸：\n` +
-    `- remote_execute_command(command, cwd?): 執行指令（內建危險指令防護）\n` +
+    `- remote_execute_command(command, cwd?): 執行會「結束」的指令並拿輸出（隱藏視窗、會等到結束或 timeout）\n` +
     `- remote_fetch_file(path): 下載檔案（base64，限 20MB）\n` +
     `- remote_push_file(path, base64): 上傳檔案（base64，限 20MB）\n` +
     `- remote_fetch_archive(path, format?): 壓縮下載（zip/tar.gz，限 20MB）\n` +
-    `- remote_spawn_detached(command, cwd?): 啟動獨立行程（不受 bot 重啟影響）\n` +
+    `- remote_spawn_detached(command, cwd?): 啟動 GUI 程式 / 長駐服務（視窗會出現在使用者桌面、立即返回不阻塞）\n` +
+    `\n` +
+    `⚠️ 開 app/GUI（小畫家、瀏覽器、記事本…）或啟動服務 → 一律用 remote_spawn_detached（可見、秒回）。\n` +
+    `   絕對不要用 remote_execute_command 開 GUI：它會隱藏視窗、又卡到 timeout（30 秒）才回，又慢又像沒開。\n` +
     `\n` +
     `系統互動：\n` +
     `- remote_clipboard(action, text?): 讀寫剪貼簿（action: "read"/"write"）\n` +
