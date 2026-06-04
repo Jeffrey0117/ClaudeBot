@@ -35,26 +35,49 @@ function validateUrl(url: string): void {
   }
 }
 
-/** Run agent-browser CLI. Auto-prepends --cdp flag when Chrome CDP is available. */
-async function runAB(...args: readonly string[]): Promise<string> {
-  const cdp = await isCdpAvailable()
-  const finalArgs = cdp ? ['--cdp', String(CDP_PORT), ...args] : [...args]
+/** Raw agent-browser CLI exec. Prepends --cdp when Chrome CDP is available. */
+function runABRaw(...args: readonly string[]): Promise<string> {
+  return (async () => {
+    const cdp = await isCdpAvailable()
+    const finalArgs = cdp ? ['--cdp', String(CDP_PORT), ...args] : [...args]
+    return new Promise<string>((resolve, reject) => {
+      execFile(
+        'agent-browser',
+        finalArgs,
+        { timeout: AB_TIMEOUT_MS, shell: true, windowsHide: true },
+        (error, stdout, stderr) => {
+          if (error) {
+            reject(new Error(stderr?.trim() || error.message))
+            return
+          }
+          resolve(stdout.trim())
+        },
+      )
+    })
+  })()
+}
 
-  return new Promise((resolve, reject) => {
-    execFile(
-      'agent-browser',
-      finalArgs,
-      { timeout: AB_TIMEOUT_MS, shell: true, windowsHide: true },
-      (error, stdout, stderr) => {
-        if (error) {
-          const msg = stderr?.trim() || error.message
-          reject(new Error(msg))
-          return
-        }
-        resolve(stdout.trim())
-      },
-    )
-  })
+// Re-entrancy guard: handleBrowserConnect() runs agent-browser too, so we must
+// never let auto-connect recurse into another auto-connect.
+let autoConnecting = false
+
+/**
+ * Run agent-browser with auto-connect. If Chrome CDP isn't up, ab_* tools would
+ * otherwise run standalone agent-browser, fail to attach to port 9222 after
+ * ~30s, and report "Element not found". So when CDP is down we first launch
+ * Chrome with CDP (handleBrowserConnect), then run the command.
+ */
+async function runAB(...args: readonly string[]): Promise<string> {
+  if (!autoConnecting && !(await isCdpAvailable())) {
+    autoConnecting = true
+    try {
+      await handleBrowserConnect()
+    } catch { /* fall through — runABRaw will still try standalone */ }
+    finally {
+      autoConnecting = false
+    }
+  }
+  return runABRaw(...args)
 }
 
 let abAvailable: boolean | null = null
@@ -159,8 +182,9 @@ export async function handleBrowserConnect(): Promise<string> {
   await ensureBrowserAvailable()
 
   // Kill agent-browser daemon first — prevents an old standalone session
-  // from conflicting with CDP when we restart Chrome below.
-  await runAB('close').catch(() => {})
+  // from conflicting with CDP when we restart Chrome below. Use the RAW exec
+  // so it never recurses back into auto-connect.
+  await runABRaw('close').catch(() => {})
 
   const result = await ensureChromeCdp()
   return result.alreadyAvailable

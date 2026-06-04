@@ -27,4 +27,7 @@ test-*
 *.tsbuildinfo
 dist-electron/
 release/
+# Bundled binaries — never commit to the public repo
+*.exe
+cloudflared.exe
 !claudebot-logo.png

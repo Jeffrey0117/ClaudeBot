@@ -62,11 +62,16 @@ export function stripUploadDirectives(text: string): string {
 
 // --- Uploaders ---
 
-/** Upload an image to the duk.tw image host. Self-contained — uses DUK_API_KEY,
- *  independent of CloudPipe config. Contract: POST <DUK_UPLOAD_URL>, multipart
- *  field `image`, header `x-api-key`; response { result, extension, shortUrl }. */
+/** Upload an image to the configured image host. Self-contained — uses
+ *  DUK_API_KEY + DUK_UPLOAD_URL (set in .env), independent of CloudPipe config.
+ *  Contract: POST <DUK_UPLOAD_URL>, multipart field `image`, header `x-api-key`;
+ *  response { result, extension, shortUrl }. Host is derived from the URL, not
+ *  hardcoded. */
 export async function uploadToDuk(filePath: string): Promise<string> {
-  if (!env.DUK_API_KEY) throw new Error('DUK_API_KEY 未設定')
+  if (!env.DUK_API_KEY || !env.DUK_UPLOAD_URL) {
+    throw new Error('圖片上傳未設定 (需 DUK_API_KEY + DUK_UPLOAD_URL)')
+  }
+  const origin = new URL(env.DUK_UPLOAD_URL).origin
 
   const form = new FormData()
   form.append('image', new Blob([readFileSync(filePath)]), basename(filePath))
@@ -78,14 +83,14 @@ export async function uploadToDuk(filePath: string): Promise<string> {
     const res = await fetch(env.DUK_UPLOAD_URL, {
       method: 'POST',
       body: form,
-      headers: { 'x-api-key': env.DUK_API_KEY, Referer: 'https://duk.tw/' },
+      headers: { 'x-api-key': env.DUK_API_KEY, Referer: `${origin}/` },
       signal: controller.signal,
     })
     clearTimeout(timeout)
 
     const data = await res.json() as { result?: string; extension?: string; shortUrl?: string; message?: string }
     if (!res.ok) throw new Error(data.message ?? `HTTP ${res.status}`)
-    const url = data.shortUrl || (data.result ? `https://duk.tw/${data.result}${data.extension ?? '.png'}` : '')
+    const url = data.shortUrl || (data.result ? `${origin}/${data.result}${data.extension ?? '.png'}` : '')
     if (!url) throw new Error(data.message ?? '回應缺少 result')
     return url
   } catch (err) {
