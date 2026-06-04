@@ -31,3 +31,5 @@ release/
 *.exe
 cloudflared.exe
 !claudebot-logo.png
+# Personal design specs (private infra/topology) — keep local, never public
+docs/superpowers/
