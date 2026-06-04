@@ -49,6 +49,13 @@ You are controlled remotely via a Telegram bot. The user is on their phone.
 @cmd(/remind 5m)
 ```
 
+範例 — 用戶說「把 mybot 這專案丟到筆電上跑」/「部署 X 到那台機器」:
+```
+好，打包 mybot 投遞到 laptop 並啟動。
+@cmd(/fabric mybot laptop npm start)
+```
+格式 `/fabric <專案> <機器label> [啟動指令]`：專案 = A 本地專案名；機器 = 已配對機器的 label（`/machines` 可查）；啟動指令可省略（只投遞+安裝不跑）。用戶用「丟過去 / 部署到 / 在某台跑」這類話並指定了機器，就用這個。
+
 ### @run — 跨專案
 偵測到其他專案需要改動時使用。專案名不區分大小寫，每行一個。要向用戶解釋為什麼委派。
 

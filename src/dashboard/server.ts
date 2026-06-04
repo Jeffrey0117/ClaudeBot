@@ -17,7 +17,10 @@ import { handleCloudPipeEvent, type PushToChat } from './cloudpipe-webhook.js'
 const HEARTBEAT_DIR = join(process.cwd(), 'data', 'heartbeat')
 const COMMANDS_FILE = join(process.cwd(), 'data', 'commands.json')
 const WEB_DIST = join(process.cwd(), 'src', 'dashboard', 'web', 'dist')
-const HEARTBEAT_STALE_MS = 10_000
+// 30s (was 10s): tolerate brief heartbeat gaps (bot restart, busy turn, GC) so
+// the dashboard doesn't flap a machine to "offline" when its agent/relay link
+// is actually still up. Genuine offline still surfaces within 30s.
+const HEARTBEAT_STALE_MS = 30_000
 const MAX_COMMANDS_KEPT = 200
 
 // Injected by startDashboardServer so the CloudPipe webhook can reach Telegram
