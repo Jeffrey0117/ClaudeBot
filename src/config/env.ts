@@ -106,9 +106,10 @@ const envSchema = z.object({
   /** Shared secret for the CloudPipe webhook (X-CloudPipe-Token header).
    *  Empty disables the endpoint entirely (returns 503). */
   CLOUDPIPE_TOKEN: z.string().default(''),
-  /** duk.tw image host API key (x-api-key) for @upload of images. */
+  /** Image-host upload endpoint + API key (x-api-key) for @upload of images.
+   *  Configure both in .env; left blank by default so no host is hardcoded. */
   DUK_API_KEY: z.string().default(''),
-  DUK_UPLOAD_URL: z.string().default('https://duk.tw/api/upload'),
+  DUK_UPLOAD_URL: z.string().default(''),
   /** channel→chatId routing for CloudPipe events.
    *  Format: "alerts:12345,deploys:67890". Unknown/absent channel falls back
    *  to ADMIN_CHAT_ID. */
