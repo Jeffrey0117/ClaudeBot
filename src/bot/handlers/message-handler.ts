@@ -186,6 +186,9 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
               await remoteToolCall(code2, 'remote_browser_eval', { js: then2 }, 60_000).catch(() => {})
             })()
           }
+        } else if (intent.spawnArgs) {
+          // GUI launch — detached, returns instantly (remote_execute_command hangs on GUI → false timeout).
+          await remoteToolCall(pairing.code, 'remote_spawn_detached', { command: 'cmd', args: JSON.stringify(intent.spawnArgs) }, 15_000)
         } else if (intent.command) {
           await remoteToolCall(pairing.code, 'remote_execute_command', { command: intent.command }, 30_000)
         }
