@@ -143,6 +143,22 @@ async function executeCommand(cmd: DashboardCommand): Promise<boolean> {
       const label = typeof payload.label === 'string' ? payload.label : ''
       if (!prompt || !code || !label) return false
 
+      // Fast path: deterministic intent (open app / play URL in a browser) →
+      // run it directly on the machine, skip the model. Reliable + instant.
+      const { detectRemoteIntent } = await import('../utils/remote-intent.js')
+      const intent = detectRemoteIntent(prompt)
+      if (intent) {
+        const { remoteToolCall } = await import('../remote/relay-client.js')
+        const { emitResponseComplete, emitResponseError } = await import('./response-broker.js')
+        try {
+          await remoteToolCall(code, 'remote_execute_command', { command: intent.command }, 30_000)
+          emitResponseComplete(cmd.id, `${intent.reply}（直接執行，未經 AI）`, label, 0, 0)
+        } catch (err) {
+          emitResponseError(cmd.id, `${intent.kind} 失敗: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        return true
+      }
+
       const { getOrCreateVirtualChat } = await import('../remote/virtual-chat-store.js')
       const { autoAuth } = await import('../auth/auth-service.js')
       const { remoteProjectPath } = await import('../remote/pairing-store.js')

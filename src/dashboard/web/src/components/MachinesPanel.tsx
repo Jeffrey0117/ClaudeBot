@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useDashboardStore } from '../stores/dashboard-store'
 import { useDispatchStore, type DispatchTask } from '../stores/dispatch-store'
 import { apiPost } from '../hooks/useApi'
@@ -175,6 +175,14 @@ export function MachinesPanel() {
     }))
   )
 
+  // Only one machine? Auto-select it so the user can just type + dispatch.
+  // Keyed on that machine's code: re-selects if the sole machine changes, but
+  // a manual deselect sticks (effect won't re-run without a key change).
+  const soleCode = rows.length === 1 ? rows[0].code : null
+  useEffect(() => {
+    if (soleCode) setSelected((prev) => (prev.has(soleCode) ? prev : new Set([soleCode])))
+  }, [soleCode])
+
   const toggle = (code: string) => {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -185,14 +193,17 @@ export function MachinesPanel() {
 
   const selectedRows = rows.filter((r) => selected.has(r.code))
   const onlineCount = rows.filter((r) => r.online).length
+  // What we actually dispatch to: explicit selection, or — if nothing is
+  // ticked but there's exactly one machine — that machine (it's obviously her).
+  const effectiveTargets = selectedRows.length > 0 ? selectedRows : (rows.length === 1 ? rows : [])
 
   const dispatch = async () => {
     const prompt = task.trim()
-    if (!prompt || selectedRows.length === 0 || sending) return
+    if (!prompt || effectiveTargets.length === 0 || sending) return
     setSending(true)
     try {
       await Promise.all(
-        selectedRows.map(async (row) => {
+        effectiveTargets.map(async (row) => {
           const res = await apiPost<{ command: DashboardCommand }>('/api/commands', {
             targetBot: row.botId,
             type: 'dispatch_remote',
@@ -210,7 +221,7 @@ export function MachinesPanel() {
     }
   }
 
-  const canDispatch = selectedRows.length > 0 && task.trim() !== '' && !sending
+  const canDispatch = effectiveTargets.length > 0 && task.trim() !== '' && !sending
 
   return (
     <div style={{
@@ -304,7 +315,7 @@ export function MachinesPanel() {
             <textarea
               value={task}
               onChange={(e) => setTask(e.target.value)}
-              placeholder={selectedRows.length === 0
+              placeholder={effectiveTargets.length === 0
                 ? '先勾選上面的機器…'
                 : '要這些機器做什麼?(例:git clone <repo> && npm i && npm start)'}
               rows={2}
@@ -350,7 +361,7 @@ export function MachinesPanel() {
               onMouseDown={(e) => { if (canDispatch) e.currentTarget.style.transform = 'scale(0.97)' }}
               onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
             >
-              {sending ? '派發中…' : `派發 → ${selectedRows.length || ''}`}
+              {sending ? '派發中…' : `派發 → ${effectiveTargets.length || ''}`}
             </button>
           </div>
           <div style={{ marginTop: '7px', fontSize: '11px', color: 'var(--text-muted)' }}>

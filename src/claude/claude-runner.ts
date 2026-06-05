@@ -160,6 +160,9 @@ function buildRemoteSystemBlock(
     `\n` +
     `⚠️ 開 app/GUI（小畫家、瀏覽器、記事本…）或啟動服務 → 一律用 remote_spawn_detached（可見、秒回）。\n` +
     `   絕對不要用 remote_execute_command 開 GUI：它會隱藏視窗、又卡到 timeout（30 秒）才回，又慢又像沒開。\n` +
+    `🎬 開網頁/影片：用 remote_execute_command 跑 \`start <瀏覽器exe> "<url>"\`（exe: chrome / msedge / firefox）。\n` +
+    `   - 用戶指定瀏覽器就用哪個；沒指定預設 chrome（別讓系統開成 Edge）。\n` +
+    `   - YouTube 影片用 watch 連結（youtube.com/watch?v=...）並加 &autoplay=1，別開不會自動播的 audio/music 頁。\n` +
     `\n` +
     `系統互動：\n` +
     `- remote_clipboard(action, text?): 讀寫剪貼簿（action: "read"/"write"）\n` +
