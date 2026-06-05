@@ -7,7 +7,7 @@
 import { createPathValidator } from './path-validator.js'
 import { handleReadFile, handleWriteFile, handleListDirectory, handleSearchFiles, handleFetchFile, handlePushFile, handleListProjects, handleDelete, handleMoveFile, handleFetchArchive } from './file-tools.js'
 import { handleExecuteCommand, handleGrep, handleSystemInfo, handleProjectOverview, handleClipboard, handleNotify } from './exec-tools.js'
-import { handleBrowserOpen, handleBrowserSnapshot, handleBrowserClick, handleBrowserFill, handleBrowserPress, handleBrowserScreenshot, handleBrowserBack, handleBrowserGetUrl, handleBrowserConnect, handleSpawnDetached } from './browser-tools.js'
+import { handleBrowserOpen, handleBrowserSnapshot, handleBrowserClick, handleBrowserFill, handleBrowserPress, handleBrowserScreenshot, handleBrowserBack, handleBrowserGetUrl, handleBrowserConnect, handleSpawnDetached, handleBrowserEval } from './browser-tools.js'
 
 export { createPathValidator } from './path-validator.js'
 
@@ -53,6 +53,7 @@ export function createToolDispatcher(baseDir: string): ToolDispatcher {
         case 'ab_back': return handleBrowserBack()
         case 'ab_get_url': return handleBrowserGetUrl()
         case 'ab_connect_browser': return handleBrowserConnect()
+        case 'remote_browser_eval': return handleBrowserEval(args)
         case 'remote_spawn_detached': return handleSpawnDetached(args, baseDir)
         default: throw new Error(`Unknown tool: ${tool}`)
       }
