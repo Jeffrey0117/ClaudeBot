@@ -110,9 +110,9 @@ export async function jsCommand(ctx: BotContext): Promise<void> {
     await ctx.reply('❌ 沒有連線的機器（先 /pair 連上)')
     return
   }
-  await ctx.reply('🧩 在那台 Chrome 執行（CDP）…')
+  await ctx.reply('🧩 在那台 Chrome 執行（CDP）…（第一次會先啟動 Chrome 除錯埠,約 30-40 秒）')
   try {
-    const out = await remoteToolCall(pairing.code, 'remote_browser_eval', { js: code }, 30_000)
+    const out = await remoteToolCall(pairing.code, 'remote_browser_eval', { js: code }, 90_000)
     await ctx.reply(`🧩 ${out.slice(0, 3000)}`)
   } catch (err) {
     await ctx.reply(`⚠️ ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`)
