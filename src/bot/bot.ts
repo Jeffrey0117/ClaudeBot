@@ -43,7 +43,7 @@ import { bootstrapCommand } from './commands/bootstrap.js'
 import {
   ronCommand, rxCommand, rstatCommand, ropenCommand,
   rkillCommand, rpowerCommand, rpullCommand, rclipCommand,
-  rnotifyCommand, rlsCommand, rshotCommand,
+  rnotifyCommand, rlsCommand, rshotCommand, jsCommand,
 } from './commands/remote-ops.js'
 import { pairCommand, unpairCommand } from './commands/pair.js'
 import { machinesCommand } from './commands/machines.js'
@@ -143,6 +143,7 @@ export const CORE_COMMANDS = [
   { command: 'rnotify', description: '在遠端機器跳桌面通知' },
   { command: 'rls', description: '列遠端機器某目錄' },
   { command: 'rshot', description: '遠端機器螢幕截圖傳回來' },
+  { command: 'js', description: '在瀏覽器執行 JS (Tampermonkey 橋)' },
   { command: 'pair', description: '配對遠端電腦 (code@ip:port)' },
   { command: 'unpair', description: '斷開遠端配對' },
   { command: 'machines', description: '已配對機器列表/切換' },
@@ -265,6 +266,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['rnotify', rnotifyCommand],
     ['rls', rlsCommand],
     ['rshot', rshotCommand],
+    ['js', jsCommand],
     ['pair', pairCommand],
     ['unpair', unpairCommand],
     ['machines', machinesCommand],

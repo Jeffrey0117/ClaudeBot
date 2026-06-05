@@ -1,6 +1,7 @@
 import type { BotContext } from '../../types/context.js'
 import { getPairingByLabel } from '../../remote/pairing-store.js'
 import { remoteToolCall } from '../../remote/relay-client.js'
+import { pushUserscriptCommand } from '../../remote/userscript-bridge.js'
 
 /**
  * Remote-ops command pool: thin, deterministic wrappers around the remote_*
@@ -88,6 +89,20 @@ export async function ropenCommand(ctx: BotContext): Promise<void> {
   } catch (err) {
     await ctx.reply(`⚠️ 開啟失敗: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`)
   }
+}
+
+/** /js <code> — run JavaScript in the (remote) browser via the Tampermonkey bridge. */
+export async function jsCommand(ctx: BotContext): Promise<void> {
+  const raw = (ctx.message && 'text' in ctx.message) ? ctx.message.text ?? '' : ''
+  const code = raw.replace(/^\/js\s*/, '').trim()
+  if (!code) {
+    await ctx.reply('用法: `/js <JavaScript>`\n例: `/js document.title`（送到瀏覽器橋接腳本執行）', { parse_mode: 'Markdown' })
+    return
+  }
+  await ctx.reply('🧩 送到瀏覽器執行中…')
+  const r = await pushUserscriptCommand(code)
+  if (r.error) await ctx.reply(`⚠️ ${r.error}`)
+  else await ctx.reply(`🧩 結果:\n${(r.result ?? '(undefined)').slice(0, 3000)}`)
 }
 
 /** /rkill <machine> <name|pid> — kill a process on the remote. */
