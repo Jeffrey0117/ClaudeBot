@@ -35,6 +35,7 @@ import { setLastResponse } from './last-response-store.js'
 import { extractDigest, setContext, buildContextInjection } from './context-digest-store.js'
 import { recordResponse } from './memory-consolidator.js'
 import { autoCommitAndPush } from '../utils/auto-commit.js'
+import { reportCloudPipeDeploy } from './cloudpipe-deploy-report.js'
 import { env } from '../config/env.js'
 import { startDraft, updateDraft, finalizeDraft, cancelDraft, hasDraft } from './draft-sender.js'
 import path from 'node:path'
@@ -213,6 +214,11 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
             `\u{1F4E6} *[${ctx.tag}]* Auto-commit: ${commitResult.filesChanged} files | ${pushStatus}\n\`${commitResult.commitMessage}\``,
             { parse_mode: 'Markdown' },
           ).catch(() => {})
+          // If this is a CloudPipe project, track + report whether it actually
+          // went LIVE (fire-and-forget — don't block the queue).
+          void reportCloudPipeDeploy(
+            ctx.item.project, commitResult, ctx.item.chatId, ctx.telegram, ctx.tag,
+          )
         }
       } catch (err) {
         console.error('[queue] auto-commit error:', err)
