@@ -13,6 +13,8 @@ import { updateBotBio, pinProjectStatus } from '../bio-updater.js'
 import { recordActivity } from '../../plugins/stats/activity-logger.js'
 import { addText, clearBuffer } from '../ordered-message-buffer.js'
 import { getPairing, getPairings, remoteProjectPath } from '../../remote/pairing-store.js'
+import { remoteToolCall } from '../../remote/relay-client.js'
+import { detectRemoteIntent } from '../../utils/remote-intent.js'
 import { getPluginModule } from '../../plugins/loader.js'
 import { detectParallelCandidate } from '../../utils/parallel-detector.js'
 import { getActiveJob } from '../parallel-store.js'
@@ -168,6 +170,20 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
   // Remote pairing active — takes priority over local project selection
   const pairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId, state.activeMachine) : null
   if (pairing?.connected) {
+    // Fast path: deterministic remote intent (open app / play URL in a chosen
+    // browser) → run it directly on the machine, skip the AI. Instant, reliable,
+    // free — so it doesn't even touch the allot quota.
+    const intent = detectRemoteIntent(text)
+    if (intent && pairing.code) {
+      try {
+        await remoteToolCall(pairing.code, 'remote_execute_command', { command: intent.command }, 30_000)
+        await ctx.reply(`${intent.reply}（直接執行，未經 AI）`)
+      } catch (err) {
+        await ctx.reply(`\u{26A0}\u{FE0F} ${intent.kind} 失敗: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`)
+      }
+      return
+    }
+
     // Allot gate: check quota before enqueue (plugin may not be loaded)
     const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
     if (allotMod?.tryReserve) {
