@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useDashboardStore } from '../stores/dashboard-store'
 import { useDispatchStore, type DispatchTask } from '../stores/dispatch-store'
 import { apiPost } from '../hooks/useApi'
@@ -174,6 +174,14 @@ export function MachinesPanel() {
       runner: bot.activeRunners.find((r) => r.machine === m.label) ?? null,
     }))
   )
+
+  // Only one machine? Auto-select it so the user can just type + dispatch.
+  // Keyed on that machine's code: re-selects if the sole machine changes, but
+  // a manual deselect sticks (effect won't re-run without a key change).
+  const soleCode = rows.length === 1 ? rows[0].code : null
+  useEffect(() => {
+    if (soleCode) setSelected((prev) => (prev.has(soleCode) ? prev : new Set([soleCode])))
+  }, [soleCode])
 
   const toggle = (code: string) => {
     setSelected((prev) => {
