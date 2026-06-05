@@ -1,7 +1,7 @@
 import type { BotContext } from '../../types/context.js'
-import { getPairingByLabel } from '../../remote/pairing-store.js'
+import { getPairingByLabel, getPairing } from '../../remote/pairing-store.js'
 import { remoteToolCall } from '../../remote/relay-client.js'
-import { pushUserscriptCommand } from '../../remote/userscript-bridge.js'
+import { getActiveMachine } from '../state.js'
 
 /**
  * Remote-ops command pool: thin, deterministic wrappers around the remote_*
@@ -91,18 +91,32 @@ export async function ropenCommand(ctx: BotContext): Promise<void> {
   }
 }
 
-/** /js <code> — run JavaScript in the (remote) browser via the Tampermonkey bridge. */
+/** /js <code> — run JavaScript in the active machine's Chrome via CDP (bypasses
+ *  page CSP / Trusted Types; userGesture lets video.play() etc. actually run). */
 export async function jsCommand(ctx: BotContext): Promise<void> {
+  const chatId = ctx.chat?.id
+  if (!chatId) return
+  const threadId = ctx.message && 'message_thread_id' in ctx.message ? ctx.message.message_thread_id : undefined
+
   const raw = (ctx.message && 'text' in ctx.message) ? ctx.message.text ?? '' : ''
   const code = raw.replace(/^\/js\s*/, '').trim()
   if (!code) {
-    await ctx.reply('用法: `/js <JavaScript>`\n例: `/js document.title`（送到瀏覽器橋接腳本執行）', { parse_mode: 'Markdown' })
+    await ctx.reply('用法: `/js <JavaScript>`\n例: `/js document.querySelector("video").play()`（在那台 Chrome 執行）', { parse_mode: 'Markdown' })
     return
   }
-  await ctx.reply('🧩 送到瀏覽器執行中…')
-  const r = await pushUserscriptCommand(code)
-  if (r.error) await ctx.reply(`⚠️ ${r.error}`)
-  else await ctx.reply(`🧩 結果:\n${(r.result ?? '(undefined)').slice(0, 3000)}`)
+
+  const pairing = getPairing(chatId, threadId, getActiveMachine(chatId, threadId))
+  if (!pairing?.connected) {
+    await ctx.reply('❌ 沒有連線的機器（先 /pair 連上)')
+    return
+  }
+  await ctx.reply('🧩 在那台 Chrome 執行（CDP）…')
+  try {
+    const out = await remoteToolCall(pairing.code, 'remote_browser_eval', { js: code }, 30_000)
+    await ctx.reply(`🧩 ${out.slice(0, 3000)}`)
+  } catch (err) {
+    await ctx.reply(`⚠️ ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`)
+  }
 }
 
 /** /rkill <machine> <name|pid> — kill a process on the remote. */

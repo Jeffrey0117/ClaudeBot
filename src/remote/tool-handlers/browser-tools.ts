@@ -7,6 +7,7 @@ import { readFile, unlink } from 'node:fs/promises'
 import { execFile, spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { WebSocket } from 'ws'
 import {
   CDP_PORT,
   isCdpAvailable,
@@ -14,6 +15,60 @@ import {
 } from '../../bot/vision/chrome-cdp.js'
 
 const AB_TIMEOUT_MS = 60_000 // 60s — heavy pages like Gmail need time to load
+
+/**
+ * Run arbitrary JS in the live Chrome via CDP Runtime.evaluate. Unlike a
+ * userscript this is protocol-level: it bypasses the page's CSP / Trusted Types
+ * entirely, and userGesture:true lets things like video.play() actually run.
+ */
+export async function handleBrowserEval(args: Record<string, unknown>): Promise<string> {
+  const js = String(args.js ?? args.code ?? args.expression ?? '')
+  if (!js) return 'No JS provided'
+
+  if (!(await isCdpAvailable())) {
+    await ensureChromeCdp().catch(() => {})
+  }
+
+  let targets: Array<{ type: string; url: string; webSocketDebuggerUrl?: string }>
+  try {
+    targets = await fetch(`http://localhost:${CDP_PORT}/json`).then((r) => r.json())
+  } catch {
+    return 'CDP 連不上（Chrome 沒帶除錯埠?）'
+  }
+  // Prefer the most recently-opened real http(s) page (usually the active tab).
+  const pages = targets.filter((t) => t.type === 'page' && t.webSocketDebuggerUrl && /^https?:/i.test(t.url))
+  const target = pages[pages.length - 1] ?? targets.find((t) => t.type === 'page' && t.webSocketDebuggerUrl)
+  if (!target?.webSocketDebuggerUrl) return 'Chrome 沒有可用的分頁'
+
+  return await new Promise<string>((resolve) => {
+    const ws = new WebSocket(target.webSocketDebuggerUrl!)
+    const timer = setTimeout(() => { try { ws.close() } catch { /* */ } resolve('eval 逾時') }, 15_000)
+    ws.on('open', () => {
+      ws.send(JSON.stringify({
+        id: 1, method: 'Runtime.evaluate',
+        params: { expression: js, awaitPromise: true, returnByValue: true, userGesture: true },
+      }))
+    })
+    ws.on('message', (data) => {
+      try {
+        const m = JSON.parse(String(data)) as {
+          id?: number
+          result?: { exceptionDetails?: { exception?: { description?: string }; text?: string }; result?: { value?: unknown; description?: string } }
+        }
+        if (m.id !== 1) return
+        clearTimeout(timer)
+        ws.close()
+        if (m.result?.exceptionDetails) {
+          resolve('JS 錯誤: ' + (m.result.exceptionDetails.exception?.description ?? m.result.exceptionDetails.text ?? 'exception'))
+        } else {
+          const r = m.result?.result
+          resolve(r?.value !== undefined ? JSON.stringify(r.value) : (r?.description ?? 'undefined'))
+        }
+      } catch { /* ignore */ }
+    })
+    ws.on('error', () => { clearTimeout(timer); resolve('CDP ws error') })
+  })
+}
 
 const BLOCKED_URL_RE =
   /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|\[::1\]|0\.0\.0\.0)/i
