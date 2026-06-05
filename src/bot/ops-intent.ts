@@ -4,6 +4,7 @@ import {
   getProject,
   getLogs,
   getTelemetry,
+  isParasite,
   type CloudPipeProject,
   type CloudPipeDeployment,
 } from './cloudpipe-client.js'
@@ -175,8 +176,30 @@ function formatProjectStatus(
   }
   if (project.suspended) lines.push('💤 已休眠(scale-to-zero)')
   if (project.disabled) lines.push('🚫 已停用')
+  if (isParasite(project)) {
+    const prov = project.parasite?.provider ?? '遠端'
+    lines.push(`🦠 轉生獸 — 運算在 ${prov}${project.parasite?.origin ? ` (${project.parasite.origin})` : ''}`)
+    lines.push('部署 = push 到該 repo,遠端自動建置(cloudpipe 只路由)')
+  }
   if (last?.error) lines.push(`原因:${String(last.error).slice(0, 180)}`)
   return lines.join('\n')
+}
+
+/** A parasite's compute is remote — pm2 restart/rollback do nothing here. */
+async function replyParasiteOps(
+  ctx: BotContext,
+  project: CloudPipeProject,
+  action: string
+): Promise<boolean> {
+  const prov = project.parasite?.provider ?? '遠端'
+  await ctx.reply(
+    `🦠 *${project.id}* 是轉生獸(運算在 ${prov})。${action}在 cloudpipe 沒有意義 —\n` +
+      `· 重新部署 = push 到該 app 的 repo,${prov} 會自動建置\n` +
+      `· 回滾 = 在 ${prov} 重部前一個 commit,或改 parasite.origin\n` +
+      `· 資料在 Selfize,不在本機`,
+    { parse_mode: 'Markdown' }
+  )
+  return true
 }
 
 // ---- execution ----
@@ -199,8 +222,10 @@ export async function runOpsIntent(ctx: BotContext, intent: OpsIntent): Promise<
     case 'logs':
       return runLogs(ctx, project)
     case 'restart':
+      if (isParasite(project)) return replyParasiteOps(ctx, project, '重啟')
       return askConfirm(ctx, 'restart', project.id, `🔄 確定要重啟 *${project.id}*?`)
     case 'rollback':
+      if (isParasite(project)) return replyParasiteOps(ctx, project, '回滾')
       return askConfirm(ctx, 'rollback', project.id, `⚠️ 確定要把 *${project.id}* 回滾到上一版?`)
   }
 }

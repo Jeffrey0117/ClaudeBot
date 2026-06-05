@@ -23,6 +23,15 @@ export interface CloudPipeProject {
   readonly failedCommits?: readonly string[]
   readonly disabled?: boolean
   readonly suspended?: boolean
+  // 轉生獸 (parasite): compute runs on a remote origin (Render etc.); cloudpipe
+  // only routes. Deploy flow differs — push to the repo, the remote auto-builds.
+  readonly deployMethod?: string
+  readonly parasite?: { readonly origin?: string; readonly provider?: string } | null
+}
+
+/** True when a project's compute is remote (parasite/轉生獸), not a local pm2 process. */
+export function isParasite(p: CloudPipeProject | null | undefined): boolean {
+  return !!p && (p.deployMethod === 'parasite' || !!(p.parasite && p.parasite.origin))
 }
 
 export interface CloudPipeDeployment {
