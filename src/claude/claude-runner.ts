@@ -157,12 +157,17 @@ function buildRemoteSystemBlock(
     `- remote_push_file(path, base64): 上傳檔案（base64，限 20MB）\n` +
     `- remote_fetch_archive(path, format?): 壓縮下載（zip/tar.gz，限 20MB）\n` +
     `- remote_spawn_detached(command, cwd?): 啟動 GUI 程式 / 長駐服務（視窗會出現在使用者桌面、立即返回不阻塞）\n` +
+    `- remote_browser_eval(js): 在使用者的 Chrome（CDP）裡執行 JS,回傳結果。不受網頁 CSP/Trusted Types 限制,userGesture 已開(video.play() 會動)。\n` +
     `\n` +
     `⚠️ 開 app/GUI（小畫家、瀏覽器、記事本…）或啟動服務 → 一律用 remote_spawn_detached（可見、秒回）。\n` +
-    `   絕對不要用 remote_execute_command 開 GUI：它會隱藏視窗、又卡到 timeout（30 秒）才回，又慢又像沒開。\n` +
-    `🎬 開網頁/影片：用 remote_execute_command 跑 \`start <瀏覽器exe> "<url>"\`（exe: chrome / msedge / firefox）。\n` +
-    `   - 用戶指定瀏覽器就用哪個；沒指定預設 chrome（別讓系統開成 Edge）。\n` +
-    `   - YouTube 影片用 watch 連結（youtube.com/watch?v=...）並加 &autoplay=1，別開不會自動播的 audio/music 頁。\n` +
+    `   絕對不要用 remote_execute_command 開 GUI：它會隱藏視窗、又卡到 timeout（30 秒）才回。\n` +
+    `🎮 控制網頁/播放/音量/點擊/導航 → 一律用 remote_browser_eval 跑 JS,別土法煉鋼(別按音量鍵、別用 shell):\n` +
+    `   - 播放: remote_browser_eval({js:"document.querySelector('video,audio').play()"})\n` +
+    `   - 暫停: ...pause()  ｜ 音量: var v=...;v.volume=0.5  ｜ 下一首(YT): document.querySelector('.ytp-next-button').click()\n` +
+    `   - 導航/播某 YT: remote_browser_eval({js:"location.href='https://www.youtube.com/watch?v=...&autoplay=1'"})\n` +
+    `   - 搜尋並播: 先導到 youtube.com/results?search_query=X,等幾秒,再 eval 點第一個 a#video-title\n` +
+    `   - 找不到元素先 eval document.title / location.href 確認在哪一頁。\n` +
+    `🎬 只是「開」一個網址(不需後續控制) → remote_spawn_detached 或 remote_execute_command 跑 \`start chrome "<url>"\` 也可(沒指定瀏覽器預設 chrome,別開成 Edge)。\n` +
     `\n` +
     `系統互動：\n` +
     `- remote_clipboard(action, text?): 讀寫剪貼簿（action: "read"/"write"）\n` +
