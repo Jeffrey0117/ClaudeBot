@@ -17,27 +17,43 @@ export async function machinesCommand(ctx: BotContext): Promise<void> {
   }
 
   const activeMch = getActiveMachine(chatId, threadId)
+  // A bare pairing code with connected=false is NOT a usable machine — the
+  // desktop client never connected back. Listing it as a "machine" (it shows
+  // the raw 8-char code because label is still empty) is misleading, so we
+  // split connected machines from still-waiting codes.
+  const connectedMachines = pairings.filter((s) => s.connected)
+  const pendingCodes = pairings.filter((s) => !s.connected)
+
   const lines: string[] = []
   const buttons: ReturnType<typeof Markup.button.callback>[][] = []
 
-  for (const s of pairings) {
-    const label = s.label || s.code
-    const isActive = s.label === activeMch
-    const icon = s.connected ? (isActive ? '✅' : '🔗') : '⭕'
-    const activeTag = isActive ? ' ← active' : ''
-
-    // Try to get base dir from relay (only works if connected)
-    const baseDir = s.connected ? getAgentBaseDir(s.code) : undefined
-    const dirInfo = baseDir ? ` — ${baseDir}` : ''
-
-    lines.push(`${icon} *${label}*${dirInfo}${activeTag}`)
-
-    if (s.connected && !isActive) {
-      buttons.push([Markup.button.callback(`切換到 ${label}`, `machine:${label}`)])
+  if (connectedMachines.length > 0) {
+    for (const s of connectedMachines) {
+      const label = s.label || s.code
+      const isActive = s.label === activeMch
+      const icon = isActive ? '✅' : '🔗'
+      const activeTag = isActive ? ' ← active' : ''
+      const baseDir = getAgentBaseDir(s.code)
+      const dirInfo = baseDir ? ` — ${baseDir}` : ''
+      lines.push(`${icon} *${label}*${dirInfo}${activeTag}`)
+      if (!isActive) {
+        buttons.push([Markup.button.callback(`切換到 ${label}`, `machine:${label}`)])
+      }
     }
+  } else {
+    lines.push('_(目前沒有已連線的機器)_')
   }
 
-  const msg = `🖥️ *已配對機器:*\n${lines.join('\n')}`
+  if (pendingCodes.length > 0) {
+    lines.push('')
+    lines.push('⏳ *等待連線中的配對碼:*')
+    for (const s of pendingCodes) {
+      lines.push(`   \`${s.code}\` — 在桌面客戶端貼上此碼`)
+    }
+    lines.push('_客戶端要指向正確的 relay；連上後這裡才會變主機名。_')
+  }
+
+  const msg = `🖥️ *機器狀態:*\n${lines.join('\n')}`
   const opts = buttons.length > 0
     ? { parse_mode: 'Markdown' as const, ...Markup.inlineKeyboard(buttons) }
     : { parse_mode: 'Markdown' as const }

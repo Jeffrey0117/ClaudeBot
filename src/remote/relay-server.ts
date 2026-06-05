@@ -19,7 +19,7 @@ import {
   notifyOwnerError,
 } from './pairing-store.js'
 import { env } from '../config/env.js'
-import { startTunnel, setPublicRelayUrl, getPublicRelayUrl, getRelayPasteId } from './tunnel.js'
+import { startTunnel, setPublicRelayUrl, getPublicRelayUrl, getRelayPasteId, publishRelayUrl } from './tunnel.js'
 import type {
   RelayInbound,
   AgentRegistered,
@@ -370,6 +370,12 @@ export function startRelayServer(port: number): void {
   if (env.RELAY_PUBLIC_URL) {
     setPublicRelayUrl(env.RELAY_PUBLIC_URL)
     console.log(`[relay] Public URL (manual): ${env.RELAY_PUBLIC_URL}`)
+    // Even with a FIXED public URL we must publish it to rawtxt: Electron
+    // clients discover the relay by scanning rawtxt for the newest wss:// paste.
+    // Without this, clients keep resolving the stale (dead) auto-tunnel paste
+    // from a previous run and never connect back. Republishing each start keeps
+    // the fixed URL as the newest paste, beating any old trycloudflare paste.
+    publishRelayUrl(env.RELAY_PUBLIC_URL).catch(() => {})
   } else if (env.RELAY_TUNNEL) {
     startTunnel(port).catch((err) => {
       console.error(`[relay] Failed to start tunnel: ${err instanceof Error ? err.message : err}`)
