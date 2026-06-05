@@ -146,8 +146,9 @@ export function detectRemoteIntent(text: string): RemoteAction | null {
       return {
         kind: 'cdp-search-play',
         js: `location.href=${JSON.stringify(url)};'searching'`,
-        // After the results page loads, click the first video → navigates to watch (autoplays).
-        thenJs: "(document.querySelector('ytd-video-renderer a#thumbnail')||document.querySelector('a#video-title')||document.querySelector('ytd-video-renderer a')||{click(){}}).click();'opened first result'",
+        // Poll for the first result (the search page may still be loading) then
+        // click it → navigates to the watch page (which autoplays).
+        thenJs: "(function(){var n=0;var iv=setInterval(function(){var a=document.querySelector('ytd-video-renderer a#video-title,ytd-video-renderer a#thumbnail,a#video-title,ytd-video-renderer a');if(a){clearInterval(iv);a.click();}else if(++n>24){clearInterval(iv);}},500);})();'clicking first result'",
         reply: `🔎 搜尋並播放：${q}`,
       }
     }
