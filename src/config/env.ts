@@ -116,6 +116,9 @@ const envSchema = z.object({
   /** Git URL of your Claude-config repo for /bootstrap (clone + run install.ps1
    *  on a paired machine). Configured in .env; empty disables /bootstrap. */
   BOOTSTRAP_REPO: z.string().default(''),
+  /** Shared token for the Tampermonkey browser-bridge (/us/poll + /us/result).
+   *  Empty disables the bridge endpoints. */
+  USERSCRIPT_TOKEN: z.string().default(''),
   /** channel→chatId routing for CloudPipe events.
    *  Format: "alerts:12345,deploys:67890". Unknown/absent channel falls back
    *  to ADMIN_CHAT_ID. */

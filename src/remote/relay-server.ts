@@ -42,6 +42,7 @@ import { validateLicense } from './license-store.js'
 import { getOrCreateVirtualChat, isCodeUsedByVirtualChat, getOrCreateVirtualChatWithLicense } from './virtual-chat-store.js'
 import { registerVirtualChat, unregisterVirtualChat } from './telegram-proxy.js'
 import { handleElectronChatMessage, handleElectronChatCallback, handleElectronChatVoice } from './electron-chat-bridge.js'
+import { takePendingCommands, submitUserscriptResult } from './userscript-bridge.js'
 import { setUserProject } from '../bot/state.js'
 
 interface PairedAgent {
@@ -318,6 +319,30 @@ export function startRelayServer(port: number): void {
       const url = getPublicRelayUrl()
       res.writeHead(200, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' })
       res.end(url)
+      return
+    }
+    // Userscript bridge: poll for queued JS, post results back.
+    if (req.url?.startsWith('/us/poll') && req.method === 'GET') {
+      const token = new URL(req.url, 'http://x').searchParams.get('token')
+      if (!env.USERSCRIPT_TOKEN || token !== env.USERSCRIPT_TOKEN) {
+        res.writeHead(401, { 'Access-Control-Allow-Origin': '*' }); res.end('unauthorized'); return
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+      res.end(JSON.stringify(takePendingCommands()))
+      return
+    }
+    if (req.url === '/us/result' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (c) => { body += c; if (body.length > 2_000_000) req.destroy() })
+      req.on('end', () => {
+        try {
+          const d = JSON.parse(body) as { id?: number; result?: string; error?: string; token?: string }
+          if (env.USERSCRIPT_TOKEN && d.token === env.USERSCRIPT_TOKEN && typeof d.id === 'number') {
+            submitUserscriptResult(d.id, d.result, d.error)
+          }
+        } catch { /* ignore */ }
+        res.writeHead(200, { 'Access-Control-Allow-Origin': '*' }); res.end('ok')
+      })
       return
     }
     // Cloudflare Tunnel health-check and browser requests
