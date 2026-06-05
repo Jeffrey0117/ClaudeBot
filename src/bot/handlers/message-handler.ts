@@ -178,6 +178,14 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
       try {
         if (intent.js) {
           await remoteToolCall(pairing.code, 'remote_browser_eval', { js: intent.js }, 90_000)
+          if (intent.thenJs) {
+            const code2 = pairing.code
+            const then2 = intent.thenJs
+            void (async () => {
+              await new Promise((r) => setTimeout(r, 4000))
+              await remoteToolCall(code2, 'remote_browser_eval', { js: then2 }, 60_000).catch(() => {})
+            })()
+          }
         } else if (intent.command) {
           await remoteToolCall(pairing.code, 'remote_execute_command', { command: intent.command }, 30_000)
         }
