@@ -12,9 +12,10 @@
 export interface RemoteAction {
   readonly kind: string
   readonly reply: string
-  readonly command?: string // cmd.exe-native, runs via remote_execute_command
+  readonly command?: string // cmd.exe-native, runs via remote_execute_command (for commands that FINISH)
   readonly js?: string      // JS, runs in the CDP Chrome via remote_browser_eval
   readonly thenJs?: string  // optional 2nd JS, run ~4s after js (e.g. click first result after a search navigates)
+  readonly spawnArgs?: readonly string[] // GUI launch → remote_spawn_detached({command:'cmd', args}) — returns instantly
 }
 
 const BROWSERS: ReadonlyArray<readonly [RegExp, string]> = [
@@ -162,7 +163,7 @@ export function detectRemoteIntent(text: string): RemoteAction | null {
     }
     return {
       kind: 'open-url',
-      command: `start ${browser} "${url}"`,
+      spawnArgs: ['/c', 'start', '', browser, url],
       reply: `🌐 用 ${browser} 開啟並播放：${url}`,
     }
   }
@@ -171,7 +172,7 @@ export function detectRemoteIntent(text: string): RemoteAction | null {
   if (OPEN_VERB.test(t)) {
     for (const [re, exe] of APPS) {
       if (re.test(t)) {
-        return { kind: 'open-app', command: `start "" ${exe}`, reply: `🚀 已開啟 ${exe}` }
+        return { kind: 'open-app', spawnArgs: ['/c', 'start', '', exe], reply: `🚀 已開啟 ${exe}` }
       }
     }
   }
