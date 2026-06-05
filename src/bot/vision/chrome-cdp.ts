@@ -248,31 +248,34 @@ export async function deleteLockfiles(): Promise<void> {
  */
 export async function launchChromeWithCdp(): Promise<void> {
   const chromePath = await findChromePath()
-  const profileDir = getChromeProfileDir()
-  const profileName = await detectChromeProfile(profileDir)
+  // Recent Chrome (M136+) IGNORES --remote-debugging-port when --user-data-dir
+  // is the DEFAULT profile dir (security hardening). So we MUST use a dedicated
+  // dir for CDP to actually open the port. Trade-off: it's a separate profile
+  // (log into sites once there; it persists).
+  const profileDir = getCdpProfileDir()
+  for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'lockfile']) {
+    await unlink(join(profileDir, f)).catch(() => {})
+  }
 
   const args = [
     CDP_FLAG,
     `--user-data-dir=${profileDir}`,
-    `--profile-directory=${profileName}`,
+    '--no-first-run',
+    '--no-default-browser-check',
     '--restore-last-session',
     '--disable-blink-features=AutomationControlled',
   ]
 
-  if (IS_WIN) {
-    // cmd.exe `start` — standard way to launch GUI apps detached on Windows.
-    // Each arg individually double-quoted so paths with spaces ("User Data") stay intact.
-    // Previous PowerShell Start-Process broke because -ArgumentList joins with spaces.
-    const quotedArgs = args.map((a) => `"${a}"`).join(' ')
-    exec(
-      `start "" "${chromePath}" ${quotedArgs}`,
-      { windowsHide: true },
-      () => {},
-    )
-  } else {
-    const child = spawn(chromePath, args, { detached: true, stdio: 'ignore' })
-    child.unref()
-  }
+  // spawn passes args as an array (no shell quoting), so paths with spaces and
+  // the debug-port flag arrive intact — unlike cmd `start` / PowerShell.
+  const child = spawn(chromePath, args, { detached: true, stdio: 'ignore', windowsHide: false })
+  child.unref()
+}
+
+/** Dedicated, persistent user-data-dir for the CDP-controlled Chrome. */
+export function getCdpProfileDir(): string {
+  const base = process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local')
+  return join(base, 'ClaudeBot', 'cdp-profile')
 }
 
 /**

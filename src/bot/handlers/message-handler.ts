@@ -176,7 +176,11 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
     const intent = detectRemoteIntent(text)
     if (intent && pairing.code) {
       try {
-        await remoteToolCall(pairing.code, 'remote_execute_command', { command: intent.command }, 30_000)
+        if (intent.js) {
+          await remoteToolCall(pairing.code, 'remote_browser_eval', { js: intent.js }, 90_000)
+        } else if (intent.command) {
+          await remoteToolCall(pairing.code, 'remote_execute_command', { command: intent.command }, 30_000)
+        }
         await ctx.reply(`${intent.reply}（直接執行，未經 AI）`)
       } catch (err) {
         await ctx.reply(`\u{26A0}\u{FE0F} ${intent.kind} 失敗: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`)

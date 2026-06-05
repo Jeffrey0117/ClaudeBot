@@ -2,7 +2,7 @@ import type { BotContext } from '../types/context.js'
 import { getUserState, setUserProject } from './state.js'
 import { findProject } from '../config/projects.js'
 import { deployCommand } from './commands/deploy.js'
-import { getProject, type CloudPipeDeployment } from './cloudpipe-client.js'
+import { getProject, isParasite, type CloudPipeDeployment } from './cloudpipe-client.js'
 
 /**
  * Deploy-intent router.
@@ -101,6 +101,41 @@ export async function runDeployFromIntent(
 
   const finalProject = targetProject ?? selected
   const finalCommit = commitMsg || `chore: 透過 Telegram 快速部署`
+  const projectId = finalProject?.name
+
+  // 轉生獸 check: if this project's compute is remote (Render etc.), the deploy
+  // flow is DIFFERENT — pushing the repo triggers the remote's auto-build; the
+  // CloudPipe box does not build it. Tell the user the real flow instead of
+  // pretending a normal pm2 deploy happened (otherwise migrating was net-negative).
+  if (projectId) {
+    const info = await getProject(projectId)
+    const proj = info.ok ? info.data?.project : null
+    if (isParasite(proj)) {
+      const provider = proj?.parasite?.provider ?? 'Render'
+      try {
+        await ctx.reply(
+          `🦠 *${finalProject?.name}* 是轉生獸(運算在遠端 ${provider})。\n` +
+            `部署方式變了:push 到 repo → ${provider} 自動建置,cloudpipe 只負責路由。\n` +
+            `我直接幫你 push…`,
+          { parse_mode: 'Markdown' }
+        )
+      } catch {
+        // best-effort notice
+      }
+      // The push IS the real deploy (remote auto-builds on push). The CloudPipe
+      // sync inside deployCommand will return a parasite-skip — that's expected.
+      await deployCommand(ctx, { commitOverride: finalCommit })
+      try {
+        await ctx.reply(
+          `📤 已 push,${provider} 約 1–2 分鐘自動上線。cloudpipe 不追蹤遠端建置 — ` +
+            `要看結果就到 ${provider} 或直接打開該站。`
+        )
+      } catch {
+        // best-effort
+      }
+      return true
+    }
+  }
 
   try {
     await ctx.reply(
@@ -115,7 +150,6 @@ export async function runDeployFromIntent(
 
   // Fire-and-forget: follow the CloudPipe build and report the outcome here,
   // so the user doesn't have to ask "好了嗎?" — still no Claude involved.
-  const projectId = finalProject?.name
   if (projectId) void trackDeploy(ctx, projectId)
   return true
 }
