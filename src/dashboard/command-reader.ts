@@ -219,10 +219,14 @@ async function executeCommand(cmd: DashboardCommand): Promise<boolean> {
 }
 
 async function pollCommands(botId: string): Promise<void> {
-  // Acquire file lock to prevent race conditions with other bots
+  // --- Phase 1: claim ALL pending commands under the lock, then release it ---
+  // (We must NOT hold the lock during execution — a single dispatch can await a
+  //  remote tool for up to 90s, and that would serialize fan-out to N machines
+  //  and block sibling commands. Claiming is quick; execution runs lock-free.)
   const locked = await acquireCommandLock(botId)
   if (!locked) return
 
+  let toRun: DashboardCommand[] = []
   try {
     const commands = await readCommands()
     const pendingCommands = commands.filter((c) => {
@@ -230,7 +234,6 @@ async function pollCommands(botId: string): Promise<void> {
       if (c.targetBot !== null && c.targetBot !== botId) return false
       // Dashboard commands (chatId === 0) must be processed by the main bot
       // so response-broker events fire in the same process as dashboard server.
-      // Main bot uses .env (deriveBotId returns 'bot1'), so check env arg directly.
       const isBrowserCmd = c.type === 'prompt'
         && (typeof c.payload.chatId !== 'number' || c.payload.chatId === 0)
       const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
@@ -241,24 +244,35 @@ async function pollCommands(botId: string): Promise<void> {
 
     if (pendingCommands.length === 0) return
 
-    // Claim and execute the first pending command
-    const cmd = pendingCommands[0]
-    const claimed = claimCommand(commands, cmd, botId)
+    let claimed = commands
+    for (const c of pendingCommands) claimed = claimCommand(claimed, c, botId)
     await writeCommands(claimed)
-
-    try {
-      const success = await executeCommand(cmd)
-      const latest = await readCommands()
-      const completed = completeCommand(latest, cmd.id, success ? 'completed' : 'failed')
-      await writeCommands(completed)
-    } catch (err) {
-      console.error(`[command-reader] Execute failed for ${cmd.id}:`, err)
-      const latest = await readCommands()
-      const failed = completeCommand(latest, cmd.id, 'failed')
-      await writeCommands(failed)
-    }
+    toRun = pendingCommands
   } finally {
     await releaseCommandLock()
+  }
+
+  // --- Phase 2: execute all claimed commands CONCURRENTLY (no lock held) ---
+  const results = await Promise.all(
+    toRun.map(async (cmd) => {
+      try {
+        return { id: cmd.id, status: (await executeCommand(cmd)) ? 'completed' as const : 'failed' as const }
+      } catch (err) {
+        console.error(`[command-reader] Execute failed for ${cmd.id}:`, err)
+        return { id: cmd.id, status: 'failed' as const }
+      }
+    }),
+  )
+
+  // --- Phase 3: write all final statuses once, back under the lock ---
+  let gotLock = await acquireCommandLock(botId)
+  if (!gotLock) { await new Promise((r) => setTimeout(r, 250)); gotLock = await acquireCommandLock(botId) }
+  try {
+    let latest = await readCommands()
+    for (const r of results) latest = completeCommand(latest, r.id, r.status)
+    await writeCommands(latest)
+  } finally {
+    if (gotLock) await releaseCommandLock()
   }
 }
 

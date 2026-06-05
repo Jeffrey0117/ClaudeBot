@@ -228,11 +228,15 @@ export function MachinesPanel() {
 
   const dispatch = async () => {
     const prompt = task.trim()
-    if (!prompt || effectiveTargets.length === 0 || sending) return
+    const targets = effectiveTargets
+    if (!prompt || targets.length === 0 || sending) return
     setSending(true)
+    // Clear immediately (optimistic) — don't wait for slow/timing-out dispatches.
+    setTask('')
+    setSelected(new Set())
     try {
       await Promise.all(
-        effectiveTargets.map(async (row) => {
+        targets.map(async (row) => {
           const res = await apiPost<{ command: DashboardCommand }>('/api/commands', {
             targetBot: row.botId,
             type: 'dispatch_remote',
@@ -241,8 +245,6 @@ export function MachinesPanel() {
           if (res?.command?.id) startDispatch(res.command.id, row.label)
         }),
       )
-      setTask('')
-      setSelected(new Set())
     } catch {
       /* silent */
     } finally {
