@@ -38,6 +38,20 @@ const APPS: ReadonlyArray<readonly [RegExp, string]> = [
 const OPEN_VERB = /(開啟|打開|開一下|開個|開|啟動|跑|執行|open|launch|start|播放|播|看)/
 const URL_RE = /https?:\/\/[^\s"'）)]+/i
 
+/** Parse a number written as digits OR Chinese numerals (1–99). */
+function parseNum(s: string): number | null {
+  if (/^\d+$/.test(s)) return parseInt(s, 10)
+  const d: Record<string, number> = { 零: 0, 一: 1, 兩: 2, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 }
+  if (!/^[零一二兩三四五六七八九十]+$/.test(s)) return null
+  if (s === '十') return 10
+  if (s.length === 1) return d[s] ?? null
+  if (s.includes('十')) {
+    const [a, b] = s.split('十')
+    return (a ? (d[a] ?? 1) : 1) * 10 + (b ? (d[b] ?? 0) : 0)
+  }
+  return d[s[0]] ?? null
+}
+
 /** Try to map natural-language text to one deterministic remote command. */
 export function detectRemoteIntent(text: string): RemoteAction | null {
   const t = text.trim()
@@ -81,6 +95,36 @@ export function detectRemoteIntent(text: string): RemoteAction | null {
   }
   if (/^(繼續播放?|繼續放|繼續|播放|播|放|play|resume)\s*(一?下)?\s*(音樂|音乐|影片|歌曲?|歌|video)?$/i.test(t)) {
     return { kind: 'cdp-play', js: "var v=document.querySelector('video,audio');if(v){v.play();}'playing'", reply: '▶️ 繼續播放' }
+  }
+
+  // --- Time-axis control (loop / seek) via CDP ---
+  // Loop a range A–B sec: 「重複 10 到 20 秒」
+  const lr = t.match(/([0-9零一二兩三四五六七八九十]+)\s*(?:到|至|-|~|–)\s*([0-9零一二兩三四五六七八九十]+)\s*秒/)
+  if (lr && /(重複|跳針|一直|循環|loop|repeat)/i.test(t)) {
+    const a = parseNum(lr[1]); const b = parseNum(lr[2])
+    if (a != null && b != null && b > a) {
+      return { kind: 'cdp-loop', js: `var v=document.querySelector('video,audio');if(window.__cbLoop)clearInterval(window.__cbLoop);if(v){v.currentTime=${a};v.play();window.__cbLoop=setInterval(function(){if(v.currentTime>=${b}||v.currentTime<${a})v.currentTime=${a};},150);}'loop ${a}-${b}'`, reply: `🔁 循環 ${a}–${b} 秒` }
+    }
+  }
+  // Loop the first N sec: 「前 5 秒一直跳針」
+  const lf = t.match(/(?:前|頭)\s*([0-9零一二兩三四五六七八九十]+)\s*秒/)
+  if (lf && /(重複|跳針|一直|循環|loop|repeat)/i.test(t)) {
+    const n = parseNum(lf[1])
+    if (n != null && n > 0) {
+      return { kind: 'cdp-loop', js: `var v=document.querySelector('video,audio');if(window.__cbLoop)clearInterval(window.__cbLoop);if(v){v.currentTime=0;v.play();window.__cbLoop=setInterval(function(){if(v.currentTime>=${n})v.currentTime=0;},150);}'loop 0-${n}'`, reply: `🔁 循環前 ${n} 秒` }
+    }
+  }
+  // Stop loop
+  if (/停止跳針|取消(循環|跳針)|不要(再?重複|跳針)|停止循環|別跳了|stop\s*loop/i.test(t)) {
+    return { kind: 'cdp-loop-off', js: "if(window.__cbLoop){clearInterval(window.__cbLoop);window.__cbLoop=null;}'loop off'", reply: '⏹️ 停止循環' }
+  }
+  // Seek to second N: 「跳到第 30 秒」「從 30 秒播」
+  const sk = t.match(/(?:跳到|快轉到|轉到|到|從|seek)\s*第?\s*([0-9零一二兩三四五六七八九十]+)\s*秒/)
+  if (sk) {
+    const n = parseNum(sk[1])
+    if (n != null) {
+      return { kind: 'cdp-seek', js: `var v=document.querySelector('video,audio');if(v){v.currentTime=${n};v.play();}'seek ${n}'`, reply: `⏩ 跳到第 ${n} 秒` }
+    }
   }
 
   // Search + play: 「我要聽 周杰倫 稻香」「播放 X 的 Y」「放 X」→ YT 搜尋,點第一個。
