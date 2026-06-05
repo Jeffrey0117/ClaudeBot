@@ -153,6 +153,13 @@ async function executeCommand(cmd: DashboardCommand): Promise<boolean> {
         try {
           if (intent.js) {
             await remoteToolCall(code, 'remote_browser_eval', { js: intent.js }, 90_000)
+            if (intent.thenJs) {
+              const then2 = intent.thenJs
+              void (async () => {
+                await new Promise((r) => setTimeout(r, 4000))
+                await remoteToolCall(code, 'remote_browser_eval', { js: then2 }, 60_000).catch(() => {})
+              })()
+            }
           } else if (intent.command) {
             await remoteToolCall(code, 'remote_execute_command', { command: intent.command }, 30_000)
           }

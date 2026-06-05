@@ -14,6 +14,7 @@ export interface RemoteAction {
   readonly reply: string
   readonly command?: string // cmd.exe-native, runs via remote_execute_command
   readonly js?: string      // JS, runs in the CDP Chrome via remote_browser_eval
+  readonly thenJs?: string  // optional 2nd JS, run ~4s after js (e.g. click first result after a search navigates)
 }
 
 const BROWSERS: ReadonlyArray<readonly [RegExp, string]> = [
@@ -60,14 +61,42 @@ export function detectRemoteIntent(text: string): RemoteAction | null {
     const n = Math.min(100, Math.max(0, parseInt(vol[1], 10))) / 100
     return { kind: 'cdp-volume', js: `var v=document.querySelector('video,audio');if(v){v.muted=false;v.volume=${n};}'${Math.round(n * 100)}%'`, reply: `🔊 音量 ${Math.round(n * 100)}%` }
   }
+  if (/大聲|大聲點|再大聲|louder|大力一?點/i.test(t)) {
+    return { kind: 'cdp-vol-up', js: "var v=document.querySelector('video,audio');if(v){v.muted=false;v.volume=Math.min(1,v.volume+0.15);}Math.round((document.querySelector('video,audio')?.volume||0)*100)+'%'", reply: '🔊 大聲一點' }
+  }
+  if (/小聲|小聲點|降低?音量|quieter|softer/i.test(t)) {
+    return { kind: 'cdp-vol-down', js: "var v=document.querySelector('video,audio');if(v){v.volume=Math.max(0,v.volume-0.15);}Math.round((document.querySelector('video,audio')?.volume||0)*100)+'%'", reply: '🔉 小聲一點' }
+  }
+  if (/^(靜音|mute|閉嘴)$/i.test(t)) {
+    return { kind: 'cdp-mute', js: "var v=document.querySelector('video,audio');if(v)v.muted=true;'muted'", reply: '🔇 靜音' }
+  }
+  if (/取消靜音|解除靜音|unmute|有聲音/i.test(t)) {
+    return { kind: 'cdp-unmute', js: "var v=document.querySelector('video,audio');if(v)v.muted=false;'unmuted'", reply: '🔊 取消靜音' }
+  }
   if (/^(暫停|停一下|暫停一下|pause)$|暫停(影片|音樂|播放|video)/i.test(t)) {
     return { kind: 'cdp-pause', js: "var v=document.querySelector('video,audio');if(v)v.pause();'paused'", reply: '⏸️ 暫停' }
   }
-  if (/下一(首|個|支|部|集)|跳過|skip|\bnext\b/i.test(t)) {
-    return { kind: 'cdp-next', js: "(document.querySelector('.ytp-next-button')||{click(){}}).click();'next'", reply: '⏭️ 下一個' }
+  if (/下一(首|個|支|部|集)|換一?[首個支]|換歌|換一首|跳過|skip|\bnext\b/i.test(t)) {
+    return { kind: 'cdp-next', js: "(document.querySelector('.ytp-next-button')||{click(){}}).click();'next'", reply: '⏭️ 換下一個' }
   }
   if (/^(播放|播|play|resume|繼續播放|繼續播)$/i.test(t)) {
     return { kind: 'cdp-play', js: "var v=document.querySelector('video,audio');if(v){v.play();}'playing'", reply: '▶️ 播放' }
+  }
+
+  // Search + play: 「我要聽 周杰倫 稻香」「播放 X 的 Y」「放 X」→ YT 搜尋,點第一個。
+  const sp = t.match(/^(?:我?[要想]?聽|播放|播|放|搜尋?播放?|聽聽)\s*(.{2,})$/i)
+  if (sp && !URL_RE.test(t)) {
+    const q = sp[1].replace(/的?(歌曲?|音樂|影片|video|mv)\s*$/i, '').trim()
+    if (q.length >= 2) {
+      const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q)
+      return {
+        kind: 'cdp-search-play',
+        js: `location.href=${JSON.stringify(url)};'searching'`,
+        // After the results page loads, click the first video → navigates to watch (autoplays).
+        thenJs: "(document.querySelector('ytd-video-renderer a#thumbnail')||document.querySelector('a#video-title')||document.querySelector('ytd-video-renderer a')||{click(){}}).click();'opened first result'",
+        reply: `🔎 搜尋並播放：${q}`,
+      }
+    }
   }
 
   // 1. Open / play a URL in a browser (handles YouTube autoplay + browser choice)
