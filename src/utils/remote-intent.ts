@@ -127,10 +127,19 @@ export function detectRemoteIntent(text: string): RemoteAction | null {
     }
   }
 
+  // Jump to chorus (heuristic ~28% in — most songs hit the chorus early-ish).
+  // Only for a bare request; 「我要聽 X 的副歌」strips 副歌 and searches X instead.
+  if (/^(跳到?|去|播|到)?\s*(副歌|chorus|高潮|精華)$/i.test(t)) {
+    return { kind: 'cdp-chorus', js: "var v=document.querySelector('video,audio');if(v&&v.duration){v.currentTime=v.duration*0.28;v.play();}'chorus~'", reply: '🎶 跳到副歌（估約 28% 處）' }
+  }
+
   // Search + play: 「我要聽 周杰倫 稻香」「播放 X 的 Y」「放 X」→ YT 搜尋,點第一個。
   const sp = t.match(/^(?:我?[要想]?聽|播放|播|放|搜尋?播放?|聽聽)\s*(.{2,})$/i)
   if (sp && !URL_RE.test(t)) {
-    const q = sp[1].replace(/的?(歌曲?|音樂|影片|video|mv)\s*$/i, '').trim()
+    const q = sp[1]
+      .replace(/^(我?[要想]?聽|播放|播|放|要|想)\s*/i, '')          // 2nd leading verb (我聽要聽 X)
+      .replace(/的?(副歌|歌曲?|音樂|影片|video|mv|這首歌?|那首歌?)\s*$/i, '') // trailing noise
+      .trim()
     if (q.length >= 2) {
       const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q)
       return {
