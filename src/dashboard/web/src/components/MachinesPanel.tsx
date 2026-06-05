@@ -4,6 +4,34 @@ import { useDispatchStore, type DispatchTask } from '../stores/dispatch-store'
 import { apiPost } from '../hooks/useApi'
 import type { ActiveRunnerInfo, DashboardCommand } from '../types'
 
+interface DispatchTemplate {
+  readonly id: string
+  readonly name: string
+  readonly task: string
+}
+
+const DEFAULT_TEMPLATES: DispatchTemplate[] = [
+  { id: 'd1', name: '🌐 Chrome 開 YouTube', task: '用 chrome 開 https://youtube.com' },
+  { id: 'd2', name: '🛠️ 套用設定環境', task: '在這台 clone 並套用我的 myclaudeset 設定環境' },
+  { id: 'd3', name: '📊 系統狀態', task: '這台硬碟、記憶體還剩多少？' },
+  { id: 'd4', name: '🎨 開小畫家', task: '開小畫家' },
+]
+
+function loadTemplates(): DispatchTemplate[] {
+  try {
+    const raw = localStorage.getItem('cb_dispatch_templates')
+    if (raw) {
+      const t = JSON.parse(raw) as DispatchTemplate[]
+      if (Array.isArray(t)) return t
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_TEMPLATES
+}
+
+function saveTemplates(t: DispatchTemplate[]): void {
+  try { localStorage.setItem('cb_dispatch_templates', JSON.stringify(t)) } catch { /* ignore */ }
+}
+
 interface MachineRow {
   readonly botId: string
   readonly label: string
@@ -163,6 +191,7 @@ export function MachinesPanel() {
   const dispatchTasks = useDispatchStore((s) => s.tasks)
   const startDispatch = useDispatchStore((s) => s.start)
   const clearDispatch = useDispatchStore((s) => s.clear)
+  const [templates, setTemplates] = useState<DispatchTemplate[]>(loadTemplates)
 
   const rows: MachineRow[] = bots.flatMap((bot) =>
     bot.machines.map((m) => ({
@@ -222,6 +251,19 @@ export function MachinesPanel() {
   }
 
   const canDispatch = effectiveTargets.length > 0 && task.trim() !== '' && !sending
+
+  const saveAsTemplate = () => {
+    const t = task.trim()
+    if (!t) return
+    const name = window.prompt('模板名稱：', t.slice(0, 24))
+    if (!name) return
+    const next = [...templates, { id: `t${Date.now()}`, name, task: t }]
+    setTemplates(next); saveTemplates(next)
+  }
+  const removeTemplate = (id: string) => {
+    const next = templates.filter((x) => x.id !== id)
+    setTemplates(next); saveTemplates(next)
+  }
 
   return (
     <div style={{
@@ -311,6 +353,37 @@ export function MachinesPanel() {
           borderTop: '1px solid var(--border)',
           padding: '16px 0 22px',
         }}>
+          {/* Dispatch templates — click to fill, save current as a new one */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px', marginBottom: '10px', alignItems: 'center' }}>
+            {templates.map((tpl) => (
+              <span
+                key={tpl.id}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '6px',
+                  background: 'var(--bg-card)', border: '1px solid var(--border)',
+                  borderRadius: '999px', padding: '4px 6px 4px 11px', fontSize: '12.5px',
+                  boxShadow: 'var(--shadow)',
+                }}
+              >
+                <span style={{ cursor: 'pointer' }} onClick={() => setTask(tpl.task)} title={tpl.task}>{tpl.name}</span>
+                <span
+                  onClick={() => removeTemplate(tpl.id)}
+                  style={{ cursor: 'pointer', color: 'var(--text-muted)', fontSize: '14px', lineHeight: 1, padding: '0 2px' }}
+                  title="刪除模板"
+                >×</span>
+              </span>
+            ))}
+            <button
+              onClick={saveAsTemplate}
+              disabled={task.trim() === ''}
+              style={{
+                background: 'none', border: '1px dashed var(--border)', borderRadius: '999px',
+                padding: '5px 12px', fontSize: '12.5px', color: 'var(--text-secondary)',
+                cursor: task.trim() ? 'pointer' : 'not-allowed',
+              }}
+              title="把目前輸入存成模板"
+            >＋ 存成模板</button>
+          </div>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
             <textarea
               value={task}
