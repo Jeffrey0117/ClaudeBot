@@ -24,6 +24,7 @@
     "chat": "node run-electron.cjs dist/remote/electron/main.cjs --chat",
     "build:electron": "node scripts/build-electron.cjs",
     "pack": "npm run build:electron && electron-builder --win",
+    "pack:signed": "node scripts/pack-signed.cjs",
     "pack:mac": "npm run build:electron && electron-builder --mac",
     "pack:linux": "npm run build:electron && electron-builder --linux",
     "pack:dir": "npm run build:electron && electron-builder --dir"
