@@ -151,7 +151,11 @@ async function executeCommand(cmd: DashboardCommand): Promise<boolean> {
         const { remoteToolCall } = await import('../remote/relay-client.js')
         const { emitResponseComplete, emitResponseError } = await import('./response-broker.js')
         try {
-          await remoteToolCall(code, 'remote_execute_command', { command: intent.command }, 30_000)
+          if (intent.js) {
+            await remoteToolCall(code, 'remote_browser_eval', { js: intent.js }, 90_000)
+          } else if (intent.command) {
+            await remoteToolCall(code, 'remote_execute_command', { command: intent.command }, 30_000)
+          }
           emitResponseComplete(cmd.id, `${intent.reply}（直接執行，未經 AI）`, label, 0, 0)
         } catch (err) {
           emitResponseError(cmd.id, `${intent.kind} 失敗: ${err instanceof Error ? err.message : String(err)}`)
