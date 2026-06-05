@@ -119,6 +119,36 @@ export async function jsCommand(ctx: BotContext): Promise<void> {
   }
 }
 
+/** /selfupdate — on the active machine, trust the codesign cert (CurrentUser,
+ *  no admin) + download the latest signed exe + launch the installer. Lets you
+ *  update a machine from TG without touching it. */
+export async function selfupdateCommand(ctx: BotContext): Promise<void> {
+  const chatId = ctx.chat?.id
+  if (!chatId) return
+  const threadId = ctx.message && 'message_thread_id' in ctx.message ? ctx.message.message_thread_id : undefined
+  const pairing = getPairing(chatId, threadId, getActiveMachine(chatId, threadId))
+  if (!pairing?.connected) { await ctx.reply('❌ 沒有連線的機器（先 /pair）'); return }
+
+  const ps = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "'
+    + "$ErrorActionPreference='Stop';"
+    + "$r=Invoke-RestMethod 'https://api.github.com/repos/Jeffrey0117/ClaudeBot/releases/latest' -Headers @{'User-Agent'='cb'};"
+    + "$cer=($r.assets|?{$_.name -like '*.cer'}|select -First 1).browser_download_url;"
+    + "$exe=($r.assets|?{$_.name -like '*Setup*.exe'}|select -First 1).browser_download_url;"
+    + "$cp=Join-Path $env:TEMP 'cbcs.cer';Invoke-WebRequest $cer -OutFile $cp;"
+    + 'Import-Certificate -FilePath $cp -CertStoreLocation Cert:\\CurrentUser\\Root|Out-Null;'
+    + 'Import-Certificate -FilePath $cp -CertStoreLocation Cert:\\CurrentUser\\TrustedPublisher|Out-Null;'
+    + "$xp=Join-Path $env:TEMP 'cbsetup.exe';Invoke-WebRequest $exe -OutFile $xp;Start-Process $xp;'OK 已信任憑證+啟動安裝程式'"
+    + '"'
+
+  await ctx.reply('⬇️ 那台機器：信任憑證 + 抓最新簽章版 + 啟動安裝…（約 20-40 秒）')
+  try {
+    const out = await remoteToolCall(pairing.code, 'remote_execute_command', { command: ps }, 180_000)
+    await ctx.reply(`✅ ${out.slice(0, 400)}\n→ 安裝程式應在那台跳出,裝完重開 ClaudeBot 即可。`)
+  } catch (err) {
+    await ctx.reply(`⚠️ ${err instanceof Error ? err.message.slice(0, 200) : String(err)}\n(若是「斷線」,可能安裝程式已把舊版關掉,屬正常)`)
+  }
+}
+
 /** /rkill <machine> <name|pid> — kill a process on the remote. */
 export async function rkillCommand(ctx: BotContext): Promise<void> {
   const r = resolve(ctx, 'rkill')
