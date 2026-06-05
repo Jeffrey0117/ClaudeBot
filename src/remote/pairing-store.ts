@@ -251,11 +251,19 @@ export function findByCode(code: string): PairingSession | null {
 
 /** Mark a pairing code as connected and rename key to hostname label. */
 export function markConnected(code: string, label: string): boolean {
+  // Cancel any pending grace-period disconnect — the agent is back.
+  const pd = pendingDisconnects.get(code)
+  if (pd) { clearTimeout(pd); pendingDisconnects.delete(code) }
+
   const store = readStore()
   const oldKey = store.codeIndex[code]
   if (!oldKey) return false
   const session = store.pairings[oldKey]
   if (!session) return false
+
+  // Reconnected within the grace window — was never marked offline. Keep it
+  // as-is so we don't re-notify or churn on every brief tunnel hiccup.
+  if (session.connected) return true
 
   const pairings = { ...store.pairings }
   const codeIndex = { ...store.codeIndex }
@@ -281,16 +289,40 @@ export function markConnected(code: string, label: string): boolean {
   return true
 }
 
-export function markDisconnected(code: string, reason?: string): void {
+// Debounce connection-drop disconnects: a flaky tunnel drops the agent WS
+// periodically and it reconnects within seconds. Without this, the machine
+// flaps offline on the dashboard every hiccup. A reconnect (markConnected)
+// within the grace window cancels the pending disconnect.
+const DISCONNECT_GRACE_MS = 20_000
+const pendingDisconnects = new Map<string, ReturnType<typeof setTimeout>>()
+
+function applyDisconnect(code: string, reason: string): void {
   const store = readStore()
   const key = store.codeIndex[code]
   if (!key) return
   const session = store.pairings[key]
-  if (!session) return
+  if (!session || !session.connected) return
   const pairings = { ...store.pairings, [key]: { ...session, connected: false } }
   writeStore({ pairings, codeIndex: store.codeIndex })
-  onDisconnectFn(session, session.label, reason ?? '連線中斷')
-  sendDisconnectNotification(session, reason ?? '連線中斷')
+  onDisconnectFn(session, session.label, reason)
+  sendDisconnectNotification(session, reason)
+}
+
+export function markDisconnected(code: string, reason?: string): void {
+  // Graceful / intentional disconnects (unpair, graceful shutdown) apply now.
+  if (reason && reason !== '連線中斷') {
+    const pd = pendingDisconnects.get(code)
+    if (pd) { clearTimeout(pd); pendingDisconnects.delete(code) }
+    applyDisconnect(code, reason)
+    return
+  }
+  // Connection drop → wait out the grace window; a quick reconnect cancels it.
+  if (pendingDisconnects.has(code)) return
+  const timer = setTimeout(() => {
+    pendingDisconnects.delete(code)
+    applyDisconnect(code, '連線中斷')
+  }, DISCONNECT_GRACE_MS)
+  pendingDisconnects.set(code, timer)
 }
 
 /** Send connect/disconnect notifications using the pairing's stored botToken. */
