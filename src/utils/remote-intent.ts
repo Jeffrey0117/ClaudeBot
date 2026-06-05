@@ -79,8 +79,8 @@ export function detectRemoteIntent(text: string): RemoteAction | null {
   if (/下一(首|個|支|部|集)|換一?[首個支]|換歌|換一首|跳過|skip|\bnext\b/i.test(t)) {
     return { kind: 'cdp-next', js: "(document.querySelector('.ytp-next-button')||{click(){}}).click();'next'", reply: '⏭️ 換下一個' }
   }
-  if (/^(播放|播|play|resume|繼續播放|繼續播)$/i.test(t)) {
-    return { kind: 'cdp-play', js: "var v=document.querySelector('video,audio');if(v){v.play();}'playing'", reply: '▶️ 播放' }
+  if (/^(繼續播放?|繼續放|繼續|播放|播|放|play|resume)\s*(一?下)?\s*(音樂|音乐|影片|歌曲?|歌|video)?$/i.test(t)) {
+    return { kind: 'cdp-play', js: "var v=document.querySelector('video,audio');if(v){v.play();}'playing'", reply: '▶️ 繼續播放' }
   }
 
   // Search + play: 「我要聽 周杰倫 稻香」「播放 X 的 Y」「放 X」→ YT 搜尋,點第一個。
