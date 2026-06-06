@@ -28,6 +28,8 @@ import { z } from 'zod'
 import { createJsonFileStore } from '../utils/json-file-store.js'
 import { runIgPostScript, IG_VIDEOS_DIR } from '../bot/commands/ig-post.js'
 import { addEntry, getPending, type IgScheduleEntry } from '../bot/commands/ig-schedule-store.js'
+import { getPairing } from '../remote/pairing-store.js'
+import { remoteToolCall } from '../remote/relay-client.js'
 import { env } from '../config/env.js'
 
 const PAGE_PATH = join(process.cwd(), 'src', 'dashboard', 'web', 'ig-quickpost.html')
@@ -110,6 +112,53 @@ function sanitizeName(name: string): string {
   return name.replace(/[/\\]/g, '_').replace(/\.\./g, '_').trim()
 }
 
+// --- Readiness status ---
+
+interface IgWebStatus {
+  readonly ready: boolean
+  readonly mode: 'remote' | 'none'
+  readonly machine: string | null
+  readonly hint: string | null
+}
+
+// Probing the relay costs a round-trip — cache for 10s so UI polling is cheap
+let statusCache: { value: IgWebStatus; ts: number } | null = null
+const STATUS_CACHE_MS = 10_000
+
+async function checkStatus(): Promise<IgWebStatus> {
+  if (statusCache && Date.now() - statusCache.ts < STATUS_CACHE_MS) {
+    return statusCache.value
+  }
+
+  let status: IgWebStatus
+  const pairing = env.ADMIN_CHAT_ID ? getPairing(env.ADMIN_CHAT_ID, undefined) : null
+
+  if (!pairing?.connected) {
+    status = {
+      ready: false,
+      mode: 'none',
+      machine: null,
+      hint: '遠端機器未連線 — 先開 B 電腦的 ClaudeBot client（或在 Telegram /pair）',
+    }
+  } else {
+    // Pairing record says connected — probe the link for real (agent may be dead)
+    try {
+      await remoteToolCall(pairing.code, 'remote_system_info', {}, 6_000)
+      status = { ready: true, mode: 'remote', machine: pairing.label ?? pairing.code, hint: null }
+    } catch {
+      status = {
+        ready: false,
+        mode: 'none',
+        machine: pairing.label ?? pairing.code,
+        hint: '配對顯示連線但 agent 沒回應 — 在 Telegram /rpair 重啟遠端 agent',
+      }
+    }
+  }
+
+  statusCache = { value: status, ts: Date.now() }
+  return status
+}
+
 // --- Route handlers ---
 
 async function handleVideos(url: URL, res: ServerResponse): Promise<void> {
@@ -176,10 +225,18 @@ const PostSchema = z.object({
   caption: z.string().min(1).max(2200), // IG caption hard limit
 })
 
-function handlePost(body: string, res: ServerResponse): void {
+async function handlePost(body: string, res: ServerResponse): Promise<void> {
   const parsed = PostSchema.safeParse(JSON.parse(body))
   if (!parsed.success) { sendJson(res, { error: '需要 filename + caption' }, 400); return }
   const { filename, caption } = parsed.data
+
+  // Hard gate: without the remote machine, the local fallback would launch
+  // A's CDP Chrome (not logged into IG) and die mid-flow with a confusing error
+  const status = await checkStatus()
+  if (!status.ready) {
+    sendJson(res, { error: status.hint ?? '遠端機器未連線' }, 503)
+    return
+  }
 
   pruneJobs()
   const id = randomBytes(4).toString('hex')
@@ -295,6 +352,7 @@ export function startIgWebServer(port: number, token: string): void {
         return
       }
 
+      if (path === '/api/status' && req.method === 'GET') { sendJson(res, await checkStatus()); return }
       if (path === '/api/videos' && req.method === 'GET') { await handleVideos(url, res); return }
       if (path === '/api/upload' && req.method === 'PUT') { handleUpload(req, url, res); return }
       if (path === '/api/templates') {
@@ -302,7 +360,7 @@ export function startIgWebServer(port: number, token: string): void {
         handleTemplates(req.method ?? 'GET', url, body, res)
         return
       }
-      if (path === '/api/post' && req.method === 'POST') { handlePost(await readBody(req), res); return }
+      if (path === '/api/post' && req.method === 'POST') { await handlePost(await readBody(req), res); return }
       if (path === '/api/job' && req.method === 'GET') {
         const job = jobs.get(url.searchParams.get('id') ?? '')
         if (job) sendJson(res, { job })

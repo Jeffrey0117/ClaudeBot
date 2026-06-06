@@ -114,6 +114,11 @@
 
 <h1>⚡ <span class="grad">IG 快速發文</span></h1>
 
+<div id="ready" style="display:flex;align-items:center;gap:8px;margin:-6px 0 14px;padding:10px 14px;border-radius:12px;background:var(--card);font-size:13px;">
+  <span id="readyDot" style="width:9px;height:9px;border-radius:50%;background:var(--dim);flex:0 0 auto"></span>
+  <span id="readyTxt" style="color:var(--dim)">檢查發文機器狀態…</span>
+</div>
+
 <div class="section">
   <div class="label">🎬 選影片</div>
   <div class="tabs" id="tabs"></div>
@@ -305,6 +310,7 @@ async function post() {
   if (!filename) { setStatus('err', '❌ 先選一支影片'); return }
   if (!caption) { setStatus('err', '❌ 文案不能是空的'); return }
 
+  posting = true;
   $('postBtn').disabled = true;
   setStatus('run', '📤 發文中… 傳檔 → 遠端 Chrome 操作 IG，最多約 3 分鐘');
   try {
@@ -318,6 +324,7 @@ async function post() {
           return;
         }
         clearInterval(poll);
+        posting = false;
         $('postBtn').disabled = false;
         if (j.status === 'done') {
           setStatus('ok', '✅ 發文成功！⏱ ' + (j.result?.duration_s ?? 0).toFixed(0) + 's');
@@ -327,6 +334,7 @@ async function post() {
       } catch (_) { /* transient poll error — keep polling */ }
     }, 3000);
   } catch (e) {
+    posting = false;
     $('postBtn').disabled = false;
     setStatus('err', '❌ ' + e.message);
   }
@@ -376,9 +384,34 @@ async function loadQueue() {
   } catch (_) { /* ignore */ }
 }
 
+// --- Readiness ---
+
+let isReady = false;
+let posting = false;
+async function loadStatus() {
+  const dot = $('readyDot'), txt = $('readyTxt');
+  try {
+    const s = await api('status');
+    isReady = s.ready;
+    if (s.ready) {
+      dot.style.background = 'var(--ok)';
+      txt.style.color = 'var(--text)';
+      txt.textContent = '🖥 ' + (s.machine || '遠端機器') + ' 已連線，可發文';
+      if (!posting) $('postBtn').disabled = false;
+    } else {
+      dot.style.background = 'var(--err)';
+      txt.style.color = 'var(--err)';
+      txt.textContent = '⛔ ' + (s.hint || '無法發文');
+      if (!posting) $('postBtn').disabled = true;
+    }
+  } catch (_) { /* keep last state */ }
+}
+
 // --- Init ---
 
 function init() {
+  loadStatus();
+  setInterval(loadStatus, 15000);
   loadDir('');
   loadTemplates();
   loadQueue();
