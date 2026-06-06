@@ -184,13 +184,46 @@ async function enter() {
 
 async function loadDir(dir) {
   curDir = dir;
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.dir === dir));
+  document.querySelectorAll('.tab').forEach(t =>
+    t.classList.toggle('active', curDir === t.dataset.dir || (t.dataset.dir && curDir.startsWith(t.dataset.dir + '/'))));
   $('vlist').innerHTML = '<div class="empty">載入中…</div>';
   try {
     const d = await api('videos?dir=' + encodeURIComponent(dir));
     renderTabs(dir === '' ? d.dirs : null);
-    if (!d.files.length) { $('vlist').innerHTML = '<div class="empty">這層沒有影片</div>'; return }
-    $('vlist').innerHTML = '';
+    const list = $('vlist');
+    list.innerHTML = '';
+
+    // ".." back row when inside a subfolder
+    if (dir !== '') {
+      const up = document.createElement('div');
+      up.className = 'vitem';
+      up.innerHTML = '<span class="icon">↩️</span><span class="nm" style="color:var(--dim)">.. 返回上一層</span>';
+      up.onclick = () => loadDir(dir.includes('/') ? dir.slice(0, dir.lastIndexOf('/')) : '');
+      list.appendChild(up);
+    }
+
+    // Subfolders — drill down
+    for (const sub of d.dirs) {
+      const el = document.createElement('div');
+      el.className = 'vitem';
+      el.innerHTML = '<span class="icon">📂</span><span class="nm"></span><span class="sz">›</span>';
+      el.querySelector('.nm').textContent = sub;
+      el.onclick = () => loadDir(dir ? dir + '/' + sub : sub);
+      list.appendChild(el);
+    }
+
+    if (!d.files.length && !d.dirs.length && dir === '') {
+      list.innerHTML = '<div class="empty">Videos 是空的</div>';
+      return;
+    }
+    if (!d.files.length && !d.dirs.length) {
+      const e = document.createElement('div');
+      e.className = 'empty';
+      e.textContent = '這層是空的';
+      list.appendChild(e);
+      return;
+    }
+
     for (const f of d.files) {
       const el = document.createElement('div');
       el.className = 'vitem';
@@ -202,7 +235,7 @@ async function loadDir(dir) {
         document.querySelectorAll('.vitem').forEach(v => v.classList.remove('sel'));
         el.classList.add('sel');
       };
-      $('vlist').appendChild(el);
+      list.appendChild(el);
     }
   } catch (e) {
     $('vlist').innerHTML = '<div class="empty">' + e.message + '</div>';
@@ -217,17 +250,14 @@ function renderTabs(dirs) {
   tabs.innerHTML = '';
   const mk = (label, dir) => {
     const t = document.createElement('div');
-    t.className = 'tab' + (dir === curDir ? ' active' : '');
+    t.className = 'tab' + (dir === curDir || (dir && curDir.startsWith(dir + '/')) ? ' active' : '');
     t.dataset.dir = dir;
     t.textContent = label;
     t.onclick = () => loadDir(dir);
     tabs.appendChild(t);
   };
   mk('根目錄', '');
-  for (const d of rootDirs) {
-    mk(d, d);
-    if (d === 'IG短片') mk('西譯社', 'IG短片/西譯社短片');
-  }
+  for (const d of rootDirs) mk(d, d);
 }
 
 function fullPath() {
