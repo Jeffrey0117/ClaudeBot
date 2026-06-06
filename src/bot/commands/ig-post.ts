@@ -14,7 +14,7 @@ import type { BotContext } from '../../types/context.js'
 import { join, resolve, relative, basename } from 'node:path'
 import { stat, readdir, writeFile, mkdir, readFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
-import { runIgCdpPost } from '../vision/ig-cdp-flow.js'
+import { runIgCdpPost, runIgCdpResume } from '../vision/ig-cdp-flow.js'
 import { getPairing } from '../../remote/pairing-store.js'
 import { remoteToolCall } from '../../remote/relay-client.js'
 import { loadPokkitConfig, uploadToPokkit } from '../../utils/upload-executor.js'
@@ -197,7 +197,9 @@ export async function igCommand(ctx: BotContext): Promise<void> {
       '`/ig cancel <id>` — 取消排程\n' +
       '`/ig history` — 最近發文紀錄\n\n' +
       '*檔案:*\n' +
-      '`/ig ls [子資料夾]` — 列出 Videos 裡的影片',
+      '`/ig ls [子資料夾]` — 列出 Videos 裡的影片\n\n' +
+      '*救援:*\n' +
+      '`/ig resume <caption>` — 流程卡住時從目前畫面接著跑',
       { parse_mode: 'Markdown' },
     )
     return
@@ -244,6 +246,12 @@ export async function igCommand(ctx: BotContext): Promise<void> {
     return
   }
 
+  // --- /ig resume <caption> ---
+  if (args.startsWith('resume ')) {
+    await runIgResume(ctx, args.slice(7).trim())
+    return
+  }
+
   // --- /ig templates (legacy) ---
   if (args === 'templates') {
     await listTemplates(ctx)
@@ -251,6 +259,38 @@ export async function igCommand(ctx: BotContext): Promise<void> {
   }
 
   await ctx.reply('無效指令，用 `/ig` 查看用法', { parse_mode: 'Markdown' })
+}
+
+// --- Resume a stuck flow ---
+
+/**
+ * /ig resume <caption> — a popup interrupted the flow mid-create and the user
+ * dismissed it by hand; IG is sitting at the crop screen (or later). Re-runs
+ * crop → 下一步×2 → caption → 分享 on the CURRENT screen, no media transfer.
+ */
+async function runIgResume(ctx: BotContext, caption: string): Promise<void> {
+  const chatId = ctx.chat!.id
+  if (!caption) {
+    await ctx.reply('用法: `/ig resume <caption>`（從目前卡住的建立貼文畫面接著跑）', { parse_mode: 'Markdown' })
+    return
+  }
+
+  const statusMsg = await ctx.reply(`▶️ 從目前畫面接續 IG 發文...\n✏️ ${caption.slice(0, 60)}${caption.length > 60 ? '...' : ''}`)
+
+  try {
+    const pairing = getPairing(chatId, undefined)
+    const result: PostResult = pairing?.connected
+      ? JSON.parse(await remoteToolCall(pairing.code, 'remote_ig_post', { resume: true, caption }, REMOTE_IG_TIMEOUT_MS)) as PostResult
+      : await runIgCdpResume(caption)
+
+    const statusText = result.success
+      ? `✅ IG 發文成功！（接續）\n⏱ ${formatDuration(result.duration_s)}`
+      : `❌ 接續失敗\n💥 ${result.error ?? 'Unknown error'}${result.step ? `\n📍 步驟: ${result.step}` : ''}`
+    await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, statusText)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, `❌ 接續異常: ${msg}`)
+  }
 }
 
 // --- Post immediately ---

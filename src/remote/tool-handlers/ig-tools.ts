@@ -8,7 +8,7 @@
 import { writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { runIgCdpPost } from '../../bot/vision/ig-cdp-flow.js'
+import { runIgCdpPost, runIgCdpResume } from '../../bot/vision/ig-cdp-flow.js'
 
 const URL_DOWNLOAD_TIMEOUT_MS = 180_000
 
@@ -18,6 +18,12 @@ export async function handleIgPost(
 ): Promise<string> {
   const caption = String(args.caption ?? '').trim()
   if (!caption) throw new Error('caption is required')
+
+  // Resume mode: pick up a stuck flow from the current IG screen (no media)
+  if (args.resume === true || args.resume === 'true') {
+    const resumed = await runIgCdpResume(caption)
+    return JSON.stringify(resumed)
+  }
 
   let filePath = args.path ? validatePath(String(args.path)) : ''
 

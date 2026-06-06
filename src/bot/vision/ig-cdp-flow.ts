@@ -89,6 +89,31 @@ async function dismissDiscard() {
   }
   return false;
 }
+
+/**
+ * Dismiss IG's one-time popups (notifications prompt, cookies, feature
+ * intros) that cover the create dialog and block 下一步/分享.
+ * Only clicks well-known dismissal labels, scoped to dialogs.
+ */
+async function dismissPopups() {
+  const LABELS = ['稍後再說', 'Not Now', '允許所有 Cookie', 'Allow all cookies',
+    '知道了', 'Got it', '確定', 'OK'];
+  const dialogs = document.querySelectorAll('div[role="dialog"]');
+  // Walk from topmost dialog down; skip the create-post dialog itself
+  for (let i = dialogs.length - 1; i >= 0; i--) {
+    const d = dialogs[i];
+    if (d.querySelector('input[type="file"]') || /下一步|Next|分享|Share/.test(d.textContent || '')) continue;
+    for (const label of LABELS) {
+      const el = $byText(label, d);
+      if (el) {
+        clickEl(el);
+        await sleep(800);
+        return true;
+      }
+    }
+  }
+  return false;
+}
 `
 
 /** Phase 1: clean residue → open create dialog → tag the file input. */
@@ -97,6 +122,8 @@ const PHASE1_SCRIPT = String.raw`
 ${PAGE_HELPERS}
   let step = 'clean_state';
   try {
+    // One-time popups (notifications / cookies) block everything underneath
+    await dismissPopups();
     // Clear leftover create-post modal (closing it pops the discard confirm)
     await dismissDiscard();
     const stuck = $dialog();
@@ -155,30 +182,39 @@ function buildPhase3Script(caption: string, isVideo: boolean): string {
 ${PAGE_HELPERS}
   const CAPTION = ${JSON.stringify(caption)};
 
-  async function clickNext() {
-    const el = await waitFor(() => {
-      const dlg = $dialog();
-      if (!dlg) return null;
-      for (const e of dlg.querySelectorAll('[role="button"]')) {
+  function findDialogButton(labels) {
+    // Search ALL dialogs (a popup may stack above the create dialog)
+    const dialogs = document.querySelectorAll('div[role="dialog"]');
+    for (let i = dialogs.length - 1; i >= 0; i--) {
+      for (const e of dialogs[i].querySelectorAll('[role="button"]')) {
         const t = (e.textContent || '').trim();
-        if ((t === '下一步' || t === 'Next') && e.getAttribute('aria-disabled') !== 'true') return e;
+        if (labels.includes(t) && e.getAttribute('aria-disabled') !== 'true') return e;
       }
-      return null;
-    }, 30000, '下一步');
-    clickEl(el);
+    }
+    return null;
+  }
+
+  /** Wait for a dialog button; on timeout dismiss blocking popups and retry. */
+  async function clickDialogButton(labels, name) {
+    try {
+      const el = await waitFor(() => findDialogButton(labels), 15000, name);
+      clickEl(el);
+      return;
+    } catch (_) {
+      // A one-time popup (notifications / cookies / intro) may be covering
+      // the create dialog — dismiss and retry once.
+      await dismissPopups();
+      const el = await waitFor(() => findDialogButton(labels), 15000, name);
+      clickEl(el);
+    }
+  }
+
+  async function clickNext() {
+    await clickDialogButton(['下一步', 'Next'], '下一步');
   }
 
   async function clickShare() {
-    const el = await waitFor(() => {
-      const dlg = $dialog();
-      if (!dlg) return null;
-      for (const e of dlg.querySelectorAll('[role="button"]')) {
-        const t = (e.textContent || '').trim();
-        if ((t === '分享' || t === 'Share') && e.getAttribute('aria-disabled') !== 'true') return e;
-      }
-      return null;
-    }, 30000, '分享');
-    clickEl(el);
+    await clickDialogButton(['分享', 'Share'], '分享');
   }
 
   /**
@@ -307,6 +343,7 @@ ${PAGE_HELPERS}
   try {
     // Give IG time to process the injected file
     await sleep(${isVideo ? 5000 : 4000});
+    await dismissPopups();
 
     // Crop → 原始 aspect. Layout sometimes skips this screen — non-fatal.
     step = 'select_crop';
@@ -414,6 +451,49 @@ async function evalPhase(client: CdpClient, expression: string, timeoutMs: numbe
 
 const VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm)$/i
 
+/** Connect to the IG tab (launching Chrome with CDP if needed). */
+async function connectIgTab(): Promise<CdpClient> {
+  await ensureChromeCdp()
+  const target = await findOrOpenPage(IG_URL_RE, IG_URL)
+  return CdpClient.connect(target.webSocketDebuggerUrl!)
+}
+
+/**
+ * Resume a stuck create-post flow from the CURRENT screen state (crop step
+ * or later). Skips create/inject — runs crop → 下一步×2 → caption → 分享.
+ * For when a one-time popup interrupted a run and the user dismissed it.
+ */
+export async function runIgCdpResume(caption: string): Promise<IgPostResult> {
+  const started = Date.now()
+  let client: CdpClient
+  try {
+    client = await connectIgTab()
+  } catch (err) {
+    return {
+      success: false,
+      duration_s: (Date.now() - started) / 1000,
+      error: err instanceof Error ? err.message : String(err),
+      step: 'cdp_connect',
+    }
+  }
+
+  try {
+    await client.send('Page.bringToFront', {}, 5000).catch(() => { /* non-fatal */ })
+    const p3 = await evalPhase(client, buildPhase3Script(caption, false), PHASE3_TIMEOUT_MS)
+    if (!p3.ok) {
+      return {
+        success: false,
+        duration_s: (Date.now() - started) / 1000,
+        error: p3.error ?? 'resume failed',
+        step: p3.step ?? 'phase3',
+      }
+    }
+    return { success: true, duration_s: (Date.now() - started) / 1000 }
+  } finally {
+    client.close()
+  }
+}
+
 /**
  * Post a single video/image to Instagram through the CDP-controlled Chrome.
  * filePath must be an absolute local path; caption is plain text.
@@ -427,18 +507,10 @@ export async function runIgCdpPost(filePath: string, caption: string): Promise<I
     step,
   })
 
-  // 1. Chrome with CDP up (launches/restarts Chrome if needed)
-  try {
-    await ensureChromeCdp()
-  } catch (err) {
-    return fail('cdp_setup', err instanceof Error ? err.message : String(err))
-  }
-
-  // 2. Find or open the IG tab
+  // 1+2. Chrome with CDP up + connected to the IG tab
   let client: CdpClient
   try {
-    const target = await findOrOpenPage(IG_URL_RE, IG_URL)
-    client = await CdpClient.connect(target.webSocketDebuggerUrl!)
+    client = await connectIgTab()
   } catch (err) {
     return fail('cdp_connect', err instanceof Error ? err.message : String(err))
   }
