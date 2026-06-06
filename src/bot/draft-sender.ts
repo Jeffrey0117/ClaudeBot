@@ -48,15 +48,23 @@ const DRAFT_PREFIX = '\u{1F4AD} '
 /**
  * Check if a chat is private (DM) or group/channel
  */
+// A chat's type never changes, so cache it and skip the per-reply getChat()
+// round-trip (was 100–500ms at the start of every streamed response).
+const chatTypeCache = new Map<number, 'private' | 'group'>()
+
 async function checkChatType(
   telegram: Telegraf<BotContext>['telegram'],
   chatId: number,
 ): Promise<'private' | 'group'> {
+  const cached = chatTypeCache.get(chatId)
+  if (cached) return cached
   try {
     const chat = await telegram.getChat(chatId)
-    return chat.type === 'private' ? 'private' : 'group'
+    const type = chat.type === 'private' ? 'private' : 'group'
+    chatTypeCache.set(chatId, type)
+    return type
   } catch {
-    // Default to group behavior if check fails
+    // Default to group behavior if check fails — don't cache the failure.
     return 'group'
   }
 }
@@ -117,7 +125,14 @@ export async function updateDraft(
     return
   }
 
-  const displayText = DRAFT_PREFIX + (stripForDisplay(newText) || '...')
+  // Only stream the live TAIL: Telegram caps messages at 4096 chars, so for a
+  // long /deep stream sending the whole accumulated text every 300ms both
+  // wastes bandwidth and (past 4096) silently fails the edit. Show the last
+  // ~3500 chars with a leading ellipsis; finalizeDraft sends the full text.
+  const MAX_DRAFT_CHARS = 3500
+  const stripped = stripForDisplay(newText) || '...'
+  const tail = stripped.length > MAX_DRAFT_CHARS ? '…' + stripped.slice(-MAX_DRAFT_CHARS) : stripped
+  const displayText = DRAFT_PREFIX + tail
 
   // Skip update if display text hasn't meaningfully changed after stripping
   if (displayText === state.lastText) return
