@@ -6,16 +6,25 @@
 <title>IG 快速發文</title>
 <style>
   :root {
+    --bg: #f3f4f9; --card: #ffffff; --card2: #eceef6;
+    --text: #1c2130; --dim: #6b7390; --accent: #e1306c;
+    --accent2: #f77737; --ok: #1faf63; --err: #e23a3a;
+    --border: #e3e6f0; --border2: #edeff6;
+    --shadow: 0 1px 6px rgba(20,24,40,.06);
+  }
+  body.dark {
     --bg: #0f1117; --card: #1a1d27; --card2: #232736;
-    --text: #e8eaf0; --dim: #8a91a5; --accent: #e1306c;
-    --accent2: #f77737; --ok: #2ecc71; --err: #ef4444;
+    --text: #e8eaf0; --dim: #8a91a5; --ok: #2ecc71; --err: #ef4444;
+    --border: #2a2f40; --border2: #242938;
+    --shadow: none;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   body {
     background: var(--bg); color: var(--text);
     font-family: -apple-system, "Segoe UI", "Microsoft JhengHei", sans-serif;
-    padding: 16px 14px calc(28px + env(safe-area-inset-bottom));
+    padding: 16px 14px calc(100px + env(safe-area-inset-bottom));
     max-width: 560px; margin: 0 auto; font-size: 15px;
+    transition: background .2s, color .2s;
   }
   h1 { font-size: 20px; margin-bottom: 14px; }
   h1 .grad { background: linear-gradient(45deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
@@ -26,14 +35,14 @@
   .tabs::-webkit-scrollbar { display: none; }
   .tab {
     flex: 0 0 auto; padding: 8px 14px; border-radius: 999px; font-size: 13px;
-    background: var(--card); color: var(--dim); border: 1px solid #2a2f40; cursor: pointer; white-space: nowrap;
+    background: var(--card); color: var(--dim); border: 1px solid var(--border); cursor: pointer; white-space: nowrap;
   }
   .tab.active { background: linear-gradient(45deg, var(--accent), var(--accent2)); color: #fff; border-color: transparent; font-weight: 700; }
 
   .vlist { background: var(--card); border-radius: 14px; overflow: hidden; max-height: 42vh; overflow-y: auto; }
   .vitem {
     display: flex; align-items: center; gap: 10px; padding: 12px 14px;
-    border-bottom: 1px solid #242938; cursor: pointer;
+    border-bottom: 1px solid var(--border2); cursor: pointer;
   }
   .vitem:last-child { border-bottom: none; }
   .vitem.sel { background: rgba(225,48,108,.14); box-shadow: inset 3px 0 0 var(--accent); }
@@ -44,7 +53,7 @@
 
   .upbtn {
     display: block; width: 100%; text-align: center; padding: 11px; border-radius: 12px;
-    border: 1.5px dashed #3a4156; color: var(--dim); font-size: 14px; cursor: pointer; background: transparent;
+    border: 1.5px dashed var(--border); color: var(--dim); font-size: 14px; cursor: pointer; background: transparent;
     margin-top: 8px; font-family: inherit;
   }
   .upprog { height: 6px; border-radius: 3px; background: var(--card2); margin-top: 8px; overflow: hidden; display: none; }
@@ -52,14 +61,14 @@
 
   textarea {
     width: 100%; min-height: 110px; background: var(--card); color: var(--text);
-    border: 1px solid #2a2f40; border-radius: 14px; padding: 12px 14px; font-size: 15px;
+    border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; font-size: 15px;
     font-family: inherit; resize: vertical; outline: none;
   }
   textarea:focus { border-color: var(--accent); }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   .chip {
     display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px;
-    background: var(--card2); font-size: 13px; cursor: pointer; border: 1px solid #2f3548; color: var(--text);
+    background: var(--card2); font-size: 13px; cursor: pointer; border: 1px solid var(--border); color: var(--text);
     font-family: inherit;
   }
   .chip .x { color: var(--dim); font-size: 14px; padding: 0 2px; }
@@ -72,20 +81,33 @@
   }
   .btn:disabled { opacity: .45; }
   .btn.go { background: linear-gradient(45deg, var(--accent), var(--accent2)); }
-  .btn.sched { background: var(--card2); border: 1px solid #2f3548; flex: 0 0 30%; }
+  .btn.sched { background: var(--card2); border: 1px solid var(--border); flex: 0 0 30%; }
   .schedrow { display: none; gap: 10px; margin-top: 10px; }
   .schedrow.show { display: flex; }
-  .schedrow input { flex: 1; background: var(--card); color: var(--text); border: 1px solid #2a2f40; border-radius: 12px; padding: 11px; font-family: inherit; font-size: 14px; }
+  .schedrow input { flex: 1; background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 11px; font-family: inherit; font-size: 14px; }
   .schedrow .btn { flex: 0 0 32%; padding: 11px; font-size: 14px; }
 
-  #status { margin-top: 14px; padding: 13px 15px; border-radius: 12px; font-size: 14px; display: none; line-height: 1.55; }
-  #status.show { display: block; }
-  #status.run { background: rgba(247,119,55,.12); border-left: 3px solid var(--accent2); }
-  #status.ok  { background: rgba(46,204,113,.12); border-left: 3px solid var(--ok); }
-  #status.err { background: rgba(239,68,68,.12);  border-left: 3px solid var(--err); }
+  /* fixed bottom toast */
+  #status {
+    position: fixed; left: 14px; right: 14px; bottom: calc(16px + env(safe-area-inset-bottom));
+    max-width: 532px; margin: 0 auto; z-index: 60;
+    padding: 14px 16px; border-radius: 14px; font-size: 14px; line-height: 1.55;
+    display: none; background: var(--card); color: var(--text);
+    box-shadow: 0 8px 30px rgba(10, 12, 24, .28);
+  }
+  #status.show { display: block; animation: toastUp .22s ease; }
+  @keyframes toastUp { from { transform: translateY(14px); opacity: 0 } to { transform: none; opacity: 1 } }
+  #status.run { border-left: 4px solid var(--accent2); }
+  #status.ok  { border-left: 4px solid var(--ok); }
+  #status.err { border-left: 4px solid var(--err); }
+
+  #themeBtn {
+    border: 1px solid var(--border); background: var(--card); border-radius: 999px;
+    width: 36px; height: 36px; font-size: 17px; cursor: pointer; line-height: 1;
+  }
 
   .qlist { background: var(--card); border-radius: 14px; overflow: hidden; }
-  .qitem { padding: 10px 14px; border-bottom: 1px solid #242938; font-size: 13px; color: var(--dim); }
+  .qitem { padding: 10px 14px; border-bottom: 1px solid var(--border2); font-size: 13px; color: var(--dim); }
   .qitem b { color: var(--text); font-weight: 600; }
   .qitem:last-child { border-bottom: none; }
 
@@ -96,7 +118,7 @@
   #gate.hidden { display: none; }
   #gate input {
     width: 100%; max-width: 300px; background: var(--card); color: var(--text); text-align: center;
-    border: 1px solid #2a2f40; border-radius: 12px; padding: 14px; font-size: 18px; letter-spacing: 3px;
+    border: 1px solid var(--border); border-radius: 12px; padding: 14px; font-size: 18px; letter-spacing: 3px;
     font-family: inherit;
   }
   #gate .btn { flex: none; padding: 13px 40px; }
@@ -112,7 +134,10 @@
   <div id="gateerr" style="color:var(--err);font-size:13px"></div>
 </div>
 
-<h1>⚡ <span class="grad">IG 快速發文</span></h1>
+<h1 style="display:flex;align-items:center;justify-content:space-between">
+  <span>⚡ <span class="grad">IG 快速發文</span></span>
+  <button id="themeBtn" title="切換深淺色">🌙</button>
+</h1>
 
 <div id="ready" style="display:flex;align-items:center;gap:8px;margin:-6px 0 14px;padding:10px 14px;border-radius:12px;background:var(--card);font-size:13px;">
   <span id="readyDot" style="width:9px;height:9px;border-radius:50%;background:var(--dim);flex:0 0 auto"></span>
@@ -328,10 +353,15 @@ async function loadTemplates() {
 
 // --- Post / Schedule ---
 
+let statusTimer = null;
 function setStatus(kind, msg) {
   const s = $('status');
   s.className = 'show ' + kind;
   s.textContent = msg;
+  if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
+  // success auto-hides; errors stay until tapped; running stays until done
+  if (kind === 'ok') statusTimer = setTimeout(() => { s.className = ''; }, 6000);
+  s.onclick = () => { if (kind !== 'run') s.className = ''; };
 }
 
 async function post() {
@@ -453,6 +483,15 @@ if (TOKEN) {
     .catch(() => { /* gate stays */ });
 }
 $('pin').addEventListener('keydown', e => { if (e.key === 'Enter') enter(); });
+
+// --- Theme (default light, persisted) ---
+function applyTheme(t) {
+  document.body.classList.toggle('dark', t === 'dark');
+  $('themeBtn').textContent = t === 'dark' ? '☀️' : '🌙';
+  localStorage.setItem('igtheme', t);
+}
+$('themeBtn').onclick = () => applyTheme(document.body.classList.contains('dark') ? 'light' : 'dark');
+applyTheme(localStorage.getItem('igtheme') || 'light');
 </script>
 </body>
 </html>
