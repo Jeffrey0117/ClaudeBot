@@ -139,9 +139,10 @@
   <button id="themeBtn" title="切換深淺色">🌙</button>
 </h1>
 
-<div id="ready" style="display:flex;align-items:center;gap:8px;margin:-6px 0 14px;padding:10px 14px;border-radius:12px;background:var(--card);font-size:13px;">
-  <span id="readyDot" style="width:9px;height:9px;border-radius:50%;background:var(--dim);flex:0 0 auto"></span>
-  <span id="readyTxt" style="color:var(--dim)">檢查發文機器狀態…</span>
+<div id="ready" style="margin:-6px 0 14px;padding:10px 14px;border-radius:12px;background:var(--card);font-size:13px;">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap" id="machines">
+    <span id="readyTxt" style="color:var(--dim)">檢查發文機器狀態…</span>
+  </div>
 </div>
 
 <div class="section">
@@ -374,7 +375,7 @@ async function post() {
   $('postBtn').disabled = true;
   setStatus('run', '📤 發文中… 傳檔 → 遠端 Chrome 操作 IG，最多約 3 分鐘');
   try {
-    const d = await api('post', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ filename, caption }) });
+    const d = await api('post', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ filename, caption, machine: selMachine || undefined }) });
     const t0 = Date.now();
     const poll = setInterval(async () => {
       try {
@@ -418,7 +419,7 @@ async function schedule() {
   if (!caption) { setStatus('err', '❌ 文案不能是空的'); return }
   if (!datetime) { setStatus('err', '❌ 選個時間'); return }
   try {
-    await api('schedule', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ datetime, filename, caption }) });
+    await api('schedule', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ datetime, filename, caption, machine: selMachine || undefined }) });
     setStatus('ok', '✅ 已排程 ' + datetime.replace('T', ' '));
     $('schedrow').classList.remove('show');
     loadQueue();
@@ -448,22 +449,58 @@ async function loadQueue() {
 
 let isReady = false;
 let posting = false;
+let selMachine = localStorage.getItem('igmachine') || null; // pairing label = IG 帳號
+
 async function loadStatus() {
-  const dot = $('readyDot'), txt = $('readyTxt');
+  const box = $('machines');
   try {
     const s = await api('status');
     isReady = s.ready;
-    if (s.ready) {
-      dot.style.background = 'var(--ok)';
-      txt.style.color = 'var(--text)';
-      txt.textContent = '🖥 ' + (s.machine || '遠端機器') + ' 已連線，可發文';
-      if (!posting) $('postBtn').disabled = false;
-    } else {
-      dot.style.background = 'var(--err)';
-      txt.style.color = 'var(--err)';
-      txt.textContent = '⛔ ' + (s.hint || '無法發文');
+    box.innerHTML = '';
+
+    if (!s.machines.length) {
+      box.innerHTML = '<span style="color:var(--err)">⛔ ' + (s.hint || '沒有配對機器') + '</span>';
       if (!posting) $('postBtn').disabled = true;
+      return;
     }
+
+    // Auto-pick: saved choice if still ready, else first ready machine
+    const readyOnes = s.machines.filter(m => m.ready);
+    if (!readyOnes.some(m => m.label === selMachine)) {
+      selMachine = readyOnes.length ? readyOnes[0].label : null;
+    }
+
+    const lbl = document.createElement('span');
+    lbl.style.cssText = 'color:var(--dim);flex:0 0 auto';
+    lbl.textContent = '發文機台:';
+    box.appendChild(lbl);
+
+    for (const m of s.machines) {
+      const chip = document.createElement('button');
+      chip.className = 'chip';
+      const isSel = m.label === selMachine;
+      chip.style.cssText = isSel
+        ? 'border-color:var(--accent);background:rgba(225,48,108,.10);font-weight:700'
+        : '';
+      chip.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;flex:0 0 auto"></span><span></span>';
+      chip.firstElementChild.style.background = m.ready ? 'var(--ok)' : 'var(--err)';
+      chip.lastElementChild.textContent = '🖥 ' + m.label;
+      chip.onclick = () => {
+        if (!m.ready) { setStatus('err', '⛔ ' + m.label + ': ' + (m.hint || '離線')); return }
+        selMachine = m.label;
+        localStorage.setItem('igmachine', m.label);
+        loadStatus();
+      };
+      box.appendChild(chip);
+    }
+
+    if (!s.ready) {
+      const warn = document.createElement('div');
+      warn.style.cssText = 'color:var(--err);width:100%;margin-top:6px';
+      warn.textContent = '⛔ ' + (s.hint || '所有機器離線');
+      box.appendChild(warn);
+    }
+    if (!posting) $('postBtn').disabled = !selMachine;
   } catch (_) { /* keep last state */ }
 }
 

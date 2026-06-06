@@ -28,7 +28,7 @@ import { z } from 'zod'
 import { createJsonFileStore } from '../utils/json-file-store.js'
 import { runIgPostScript, IG_VIDEOS_DIR } from '../bot/commands/ig-post.js'
 import { addEntry, getPending, type IgScheduleEntry } from '../bot/commands/ig-schedule-store.js'
-import { getPairing } from '../remote/pairing-store.js'
+import { getPairings } from '../remote/pairing-store.js'
 import { remoteToolCall } from '../remote/relay-client.js'
 import { env } from '../config/env.js'
 
@@ -114,49 +114,69 @@ function sanitizeName(name: string): string {
 
 // --- Readiness status ---
 
-interface IgWebStatus {
+interface MachineStatus {
+  readonly label: string
   readonly ready: boolean
-  readonly mode: 'remote' | 'none'
-  readonly machine: string | null
   readonly hint: string | null
 }
 
-// Probing the relay costs a round-trip — cache for 10s so UI polling is cheap
+interface IgWebStatus {
+  readonly ready: boolean // at least one machine can post
+  readonly machines: readonly MachineStatus[]
+  readonly hint: string | null
+}
+
+// Probing the relay costs round-trips — cache for 10s so UI polling is cheap
 let statusCache: { value: IgWebStatus; ts: number } | null = null
 const STATUS_CACHE_MS = 10_000
 
+/**
+ * Every paired machine = one IG account (its CDP Chrome's login).
+ * Probe each in parallel so the page can offer "post from which machine".
+ */
 async function checkStatus(): Promise<IgWebStatus> {
   if (statusCache && Date.now() - statusCache.ts < STATUS_CACHE_MS) {
     return statusCache.value
   }
 
-  let status: IgWebStatus
-  const pairing = env.ADMIN_CHAT_ID ? getPairing(env.ADMIN_CHAT_ID, undefined) : null
-
-  if (!pairing?.connected) {
-    status = {
-      ready: false,
-      mode: 'none',
-      machine: null,
-      hint: '遠端機器未連線 — 先開 B 電腦的 ClaudeBot client（或在 Telegram /pair）',
-    }
-  } else {
-    // Pairing record says connected — probe the link for real (agent may be dead)
-    try {
-      await remoteToolCall(pairing.code, 'remote_system_info', {}, 6_000)
-      status = { ready: true, mode: 'remote', machine: pairing.label ?? pairing.code, hint: null }
-    } catch {
-      status = {
-        ready: false,
-        mode: 'none',
-        machine: pairing.label ?? pairing.code,
-        hint: '配對顯示連線但 agent 沒回應 — 在 Telegram /rpair 重啟遠端 agent',
+  const pairings = env.ADMIN_CHAT_ID ? getPairings(env.ADMIN_CHAT_ID, undefined) : []
+  const machines: MachineStatus[] = await Promise.all(
+    pairings.map(async (p): Promise<MachineStatus> => {
+      const label = p.label ?? p.code
+      if (!p.connected) {
+        return { label, ready: false, hint: '未連線 — 開該機器的 client 或 /pair' }
       }
-    }
+      try {
+        await remoteToolCall(p.code, 'remote_system_info', {}, 6_000)
+        return { label, ready: true, hint: null }
+      } catch {
+        return { label, ready: false, hint: '配對在但 agent 沒回應 — /rpair 重啟' }
+      }
+    }),
+  )
+
+  const anyReady = machines.some((m) => m.ready)
+  const status: IgWebStatus = {
+    ready: anyReady,
+    machines,
+    hint: anyReady
+      ? null
+      : machines.length === 0
+        ? '沒有配對任何機器 — 先在 Telegram /pair'
+        : '所有機器都離線 — 開機器的 ClaudeBot client（或 /rpair）',
   }
 
   statusCache = { value: status, ts: Date.now() }
   return status
+}
+
+/** Readiness of one specific machine (or any, when label omitted). */
+async function isMachineReady(machine?: string): Promise<{ ok: boolean; hint: string | null }> {
+  const status = await checkStatus()
+  if (!machine) return { ok: status.ready, hint: status.hint }
+  const m = status.machines.find((x) => x.label === machine)
+  if (!m) return { ok: false, hint: `機器 ${machine} 不在配對清單` }
+  return { ok: m.ready, hint: m.hint }
 }
 
 // --- Route handlers ---
@@ -223,18 +243,19 @@ function handleUpload(req: IncomingMessage, url: URL, res: ServerResponse): void
 const PostSchema = z.object({
   filename: z.string().min(1).max(500),
   caption: z.string().min(1).max(2200), // IG caption hard limit
+  machine: z.string().max(100).optional(), // pairing label = which IG account
 })
 
 async function handlePost(body: string, res: ServerResponse): Promise<void> {
   const parsed = PostSchema.safeParse(JSON.parse(body))
   if (!parsed.success) { sendJson(res, { error: '需要 filename + caption' }, 400); return }
-  const { filename, caption } = parsed.data
+  const { filename, caption, machine } = parsed.data
 
   // Hard gate: without the remote machine, the local fallback would launch
   // A's CDP Chrome (not logged into IG) and die mid-flow with a confusing error
-  const status = await checkStatus()
-  if (!status.ready) {
-    sendJson(res, { error: status.hint ?? '遠端機器未連線' }, 503)
+  const gate = await isMachineReady(machine)
+  if (!gate.ok) {
+    sendJson(res, { error: gate.hint ?? '遠端機器未連線' }, 503)
     return
   }
 
@@ -243,7 +264,7 @@ async function handlePost(body: string, res: ServerResponse): Promise<void> {
   jobs.set(id, { id, filename, status: 'running', result: null, startedAt: Date.now() })
 
   // Fire and poll — the CDP flow takes minutes
-  runIgPostScript(filename, caption, env.ADMIN_CHAT_ID)
+  runIgPostScript(filename, caption, env.ADMIN_CHAT_ID, machine)
     .then((result) => {
       jobs.set(id, { id, filename, status: result.success ? 'done' : 'failed', result, startedAt: Date.now() })
     })
@@ -262,12 +283,13 @@ const ScheduleSchema = z.object({
   datetime: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/),
   filename: z.string().min(1).max(500),
   caption: z.string().min(1).max(2200),
+  machine: z.string().max(100).optional(),
 })
 
 async function handleSchedule(body: string, res: ServerResponse): Promise<void> {
   const parsed = ScheduleSchema.safeParse(JSON.parse(body))
   if (!parsed.success) { sendJson(res, { error: '需要 datetime + filename + caption' }, 400); return }
-  const { datetime, filename, caption } = parsed.data
+  const { datetime, filename, caption, machine } = parsed.data
 
   const scheduled = new Date(datetime)
   if (isNaN(scheduled.getTime()) || scheduled.getTime() <= Date.now()) {
@@ -292,6 +314,7 @@ async function handleSchedule(body: string, res: ServerResponse): Promise<void> 
     status: 'pending',
     createdAt: new Date().toISOString(),
     result: null,
+    ...(machine ? { machine } : {}),
   }
   addEntry(entry)
   sendJson(res, { scheduled: entry.id, datetime }, 201)

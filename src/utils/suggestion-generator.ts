@@ -27,6 +27,12 @@ function resolveClaudeCli(): { cmd: string; prefix: readonly string[] } {
 
 const cli = resolveClaudeCli()
 
+// Each call spawns a (heavyweight) Claude CLI process. Cap how many can run at
+// once so a burst of replies can't fork a pile of CLIs, and allow turning the
+// feature off entirely (SUGGESTIONS_DISABLED=1).
+const MAX_INFLIGHT_SUGGESTIONS = 2
+let inFlightSuggestions = 0
+
 const SYSTEM_PROMPT = `你是一個 Telegram bot 的建議引擎。根據 Claude 剛完成的任務回應，建議 1-3 個使用者可能想做的下一步。
 
 規則：
@@ -45,10 +51,16 @@ export async function generateSuggestions(
   responseText: string,
   projectName: string,
 ): Promise<readonly string[]> {
+  if (process.env.SUGGESTIONS_DISABLED === '1') return []
+  // Shed load instead of piling up CLI processes when many replies land together.
+  if (inFlightSuggestions >= MAX_INFLIGHT_SUGGESTIONS) return []
+
   const truncated = responseText.slice(-1500)
   const prompt = `專案: ${projectName}\n\nClaude 的回應:\n---\n${truncated}\n---\n\n建議下一步 (JSON 陣列):`
 
-  return new Promise<readonly string[]>((resolve) => {
+  inFlightSuggestions++
+  try {
+    return await new Promise<readonly string[]>((resolve) => {
     let done = false
     const finish = (result: readonly string[]) => {
       if (done) return
@@ -128,5 +140,8 @@ export async function generateSuggestions(
       clearTimeout(timeout)
       finish([])
     })
-  })
+    })
+  } finally {
+    inFlightSuggestions--
+  }
 }

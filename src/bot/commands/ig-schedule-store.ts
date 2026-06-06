@@ -14,6 +14,8 @@ export interface IgScheduleEntry {
   readonly status: IgPostStatus
   readonly createdAt: string
   readonly result: { success: boolean; duration_s: number; error?: string } | null
+  /** Pairing label of the machine (= IG account) that should post. Optional → active machine. */
+  readonly machine?: string
 }
 
 // --- Store ---

@@ -74,13 +74,19 @@ export async function runIgPostScript(
   filename: string,
   caption: string,
   chatId?: number,
+  machine?: string,
 ): Promise<PostResult> {
   const fullPath = safeVideoPath(filename)
   if (!fullPath) {
     return { success: false, duration_s: 0, error: '無效的檔案路徑' }
   }
 
-  const pairing = chatId !== undefined ? getPairing(chatId, undefined) : null
+  // machine = pairing label → pick WHICH paired machine (= which IG account)
+  // posts this. Omitted → active/first-connected machine.
+  const pairing = chatId !== undefined ? getPairing(chatId, undefined, machine) : null
+  if (machine && pairing?.label !== machine) {
+    return { success: false, duration_s: 0, error: `機器 ${machine} 未連線`, step: 'machine_offline' }
+  }
   if (pairing?.connected) {
     return runRemoteIgPost(pairing.code, fullPath, caption)
   }

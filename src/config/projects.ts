@@ -8,7 +8,11 @@ export function getBaseDirs(): readonly string[] {
   return env.PROJECTS_BASE_DIR.map((d) => resolve(d))
 }
 
-const SCAN_TTL_MS = 5_000
+// 60s (was 5s): the heartbeat writer calls scanProjects() every 2s, so a 5s
+// TTL meant a full readdir+statSync of every base dir roughly every 3rd tick.
+// New projects still appear immediately via invalidateProjectCache() (called
+// after mkdir), so a longer TTL is safe.
+const SCAN_TTL_MS = 60_000
 let scanCache: readonly ProjectInfo[] | null = null
 let scanCacheTime = 0
 
