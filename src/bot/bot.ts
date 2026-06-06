@@ -63,6 +63,7 @@ import { licenseCommand } from './commands/license.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
+import { videoHandler } from './handlers/ig-media-handler.js'
 import { voiceHandler } from './handlers/voice-handler.js'
 import { setAllotRejectNotify } from './ordered-message-buffer.js'
 import { warmupSherpa, addHotwords, isSherpaAvailable } from '../asr/sherpa-client.js'
@@ -386,6 +387,8 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   // Photo, document, and voice messages → Claude
   bot.on('photo', photoHandler)
   bot.on('document', documentHandler)
+  // Videos → IG media flow (save to Videos dir; `/ig 文案` caption posts now)
+  bot.on('video', videoHandler)
   bot.on('voice', voiceHandler)
 
   // Deploy-intent shortcut — runs `/deploy` directly for terse "部署 …" / "deploy …"

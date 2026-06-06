@@ -49,12 +49,7 @@ You are controlled remotely via a Telegram bot. The user is on their phone.
 @cmd(/remind 5m)
 ```
 
-範例 — 用戶說「把 mybot 這專案丟到筆電上跑」/「部署 X 到那台機器」:
-```
-好，打包 mybot 投遞到 laptop 並啟動。
-@cmd(/fabric mybot laptop npm start)
-```
-格式 `/fabric <專案> <機器label> [啟動指令]`：專案 = A 本地專案名；機器 = 已配對機器的 label（`/machines` 可查）；啟動指令可省略（只投遞+安裝不跑）。用戶用「丟過去 / 部署到 / 在某台跑」這類話並指定了機器，就用這個。
+**遠端機器操作(指令池)**：用戶要「在某台機器」做任何事(開 app、跑指令、看狀態、截圖、電源、開網址、git pull、部署專案、裝設定環境…)→ **先掃上面「可用指令」表**,有對應就用 `@cmd(/指令 <機器> ...)`,機器 label 從 `/machines`。尤其 `/r` 開頭那批 + `/fabric`(投遞專案)`/bootstrap`(裝環境)。**有指令能做的事,絕不要自己用 remote_* 工具慢慢操作(又慢又貴)。開 GUI app 一定用 `/ron`(秒開可見),別用 remote_execute_command(會隱藏又卡 timeout)。**
 
 ### @run — 跨專案
 偵測到其他專案需要改動時使用。專案名不區分大小寫，每行一個。要向用戶解釋為什麼委派。

@@ -19,7 +19,7 @@ import {
   notifyOwnerError,
 } from './pairing-store.js'
 import { env } from '../config/env.js'
-import { startTunnel, setPublicRelayUrl, getPublicRelayUrl, getRelayPasteId } from './tunnel.js'
+import { startTunnel, setPublicRelayUrl, getPublicRelayUrl, getRelayPasteId, publishRelayUrl } from './tunnel.js'
 import type {
   RelayInbound,
   AgentRegistered,
@@ -225,7 +225,7 @@ function handleAgentMessage(_ws: WebSocket, code: string, msg: RelayInbound, raw
 let nextBotRequestId = 900_000
 
 /** Pending bot-initiated tool call resolvers: requestId → resolve */
-const botPendingCalls = new Map<number, { resolve: (result: string) => void; timer: ReturnType<typeof setTimeout> }>()
+const botPendingCalls = new Map<number, { code: string; resolve: (result: string) => void; timer: ReturnType<typeof setTimeout> }>()
 
 /**
  * Call a tool on a remote agent directly from the bot (not via MCP proxy).
@@ -250,7 +250,7 @@ function callAgentToolOnce(
       reject(new Error('Agent tool call timeout'))
     }, timeoutMs)
 
-    botPendingCalls.set(id, { resolve, timer })
+    botPendingCalls.set(id, { code, resolve, timer })
 
     send(agent.ws, { type: 'tool_call', id, tool, args })
   })
@@ -370,6 +370,12 @@ export function startRelayServer(port: number): void {
   if (env.RELAY_PUBLIC_URL) {
     setPublicRelayUrl(env.RELAY_PUBLIC_URL)
     console.log(`[relay] Public URL (manual): ${env.RELAY_PUBLIC_URL}`)
+    // Even with a FIXED public URL we must publish it to rawtxt: Electron
+    // clients discover the relay by scanning rawtxt for the newest wss:// paste.
+    // Without this, clients keep resolving the stale (dead) auto-tunnel paste
+    // from a previous run and never connect back. Republishing each start keeps
+    // the fixed URL as the newest paste, beating any old trycloudflare paste.
+    publishRelayUrl(env.RELAY_PUBLIC_URL).catch(() => {})
   } else if (env.RELAY_TUNNEL) {
     startTunnel(port).catch((err) => {
       console.error(`[relay] Failed to start tunnel: ${err instanceof Error ? err.message : err}`)
@@ -532,8 +538,11 @@ export function startRelayServer(port: number): void {
             requestOrigins.delete(assignedCode)
           }
 
-          // Reject all pending bot-initiated calls for this agent
+          // Reject only THIS agent's pending bot-initiated calls. Previously
+          // this rejected EVERY pending call, so one agent dropping aborted
+          // other connected agents' in-flight /projects, /chat, etc.
           for (const [id, pending] of botPendingCalls) {
+            if (pending.code !== assignedCode) continue
             clearTimeout(pending.timer)
             pending.resolve('Error: Agent disconnected')
             botPendingCalls.delete(id)

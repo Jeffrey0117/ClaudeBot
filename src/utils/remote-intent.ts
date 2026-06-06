@@ -128,9 +128,29 @@ export function detectRemoteIntent(text: string): RemoteAction | null {
     }
   }
 
+  // Seek to a percentage of the timeline: 「跳到 50%」「快轉到 80%」
+  const pct = t.match(/(?:跳到?|快轉到|轉到|到|seek)\s*(?:百分之\s*)?([0-9零一二兩三四五六七八九十]+)\s*[%％]/)
+  if (pct) {
+    const n = parseNum(pct[1])
+    if (n != null) {
+      const f = Math.min(100, Math.max(0, n)) / 100
+      return { kind: 'cdp-seek-pct', js: `var v=document.querySelector('video,audio');if(v&&v.duration){v.currentTime=v.duration*${f};v.play();}'seek ${Math.round(f * 100)}%'`, reply: `⏩ 跳到 ${Math.round(f * 100)}%` }
+    }
+  }
+  // Seek to the middle / start / end: 「跳到一半」「到中間」「跳到開頭/結尾」
+  if (/(?:跳到?|到|快轉到|轉到)\s*(?:一半|正?中間|中段|正中央)/.test(t)) {
+    return { kind: 'cdp-seek-pct', js: "var v=document.querySelector('video,audio');if(v&&v.duration){v.currentTime=v.duration*0.5;v.play();}'seek 50%'", reply: '⏩ 跳到一半' }
+  }
+  if (/(?:跳到?|回到?|到)\s*(?:開頭|開始|最前面?|頭)$/.test(t)) {
+    return { kind: 'cdp-seek-pct', js: "var v=document.querySelector('video,audio');if(v){v.currentTime=0;v.play();}'seek 0'", reply: '⏮️ 跳到開頭' }
+  }
+  if (/(?:跳到?|到)\s*(?:結尾|最後面?|尾巴?|結束)$/.test(t)) {
+    return { kind: 'cdp-seek-pct', js: "var v=document.querySelector('video,audio');if(v&&v.duration){v.currentTime=Math.max(0,v.duration-3);v.play();}'seek end'", reply: '⏭️ 跳到結尾' }
+  }
+
   // Jump to chorus (heuristic ~28% in — most songs hit the chorus early-ish).
   // Only for a bare request; 「我要聽 X 的副歌」strips 副歌 and searches X instead.
-  if (/^(跳到?|去|播|到)?\s*(副歌|chorus|高潮|精華)$/i.test(t)) {
+  if (/^(?:跳到?|切換?到?|換到?|轉到?|去|播|到|skip\s*to|jump\s*to)?\s*(?:副歌|chorus|高潮|精華|最high的?段?)$/i.test(t)) {
     return { kind: 'cdp-chorus', js: "var v=document.querySelector('video,audio');if(v&&v.duration){v.currentTime=v.duration*0.28;v.play();}'chorus~'", reply: '🎶 跳到副歌（估約 28% 處）' }
   }
 

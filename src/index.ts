@@ -76,6 +76,12 @@ async function main(): Promise<void> {
     startRelayServer(env.RELAY_PORT)
   }
 
+  // IG quick-post web (tunnel-exposed; refuses to start without a token)
+  if (isMainBot && env.IG_WEB_TOKEN) {
+    const { startIgWebServer } = await import('./dashboard/ig-web.js')
+    startIgWebServer(env.IG_WEB_PORT, env.IG_WEB_TOKEN)
+  }
+
   const shutdown = (signal: string) => {
     console.log(`\n${signal} received. Shutting down...`)
     bot.stop(signal)

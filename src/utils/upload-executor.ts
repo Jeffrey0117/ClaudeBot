@@ -19,7 +19,6 @@ import { resolve, basename, extname } from 'node:path'
 import { existsSync } from 'node:fs'
 import type { Telegraf } from 'telegraf'
 import type { BotContext } from '../types/context.js'
-import { loadPipeConfig, type PipeConfig } from './pipe-executor.js'
 import { env } from '../config/env.js'
 
 // --- Types ---
@@ -99,18 +98,54 @@ export async function uploadToDuk(filePath: string): Promise<string> {
   }
 }
 
-export async function uploadToPokkit(filePath: string, config: PipeConfig): Promise<string> {
+// --- Pokkit (direct, NOT via the CloudPipe gateway) ---
+// The old `${gateway}/api/pokkit/upload` route never existed (gateway only
+// proxies JSON tool calls, not multipart) → every pokkit upload 404'd with
+// "Not found". Pokkit is its own server: POST {POKKIT_URL}/upload with
+// Bearer POKKIT_API_KEY.
+
+export interface PokkitConfig {
+  readonly baseUrl: string
+  readonly apiKey: string
+}
+
+export function loadPokkitConfig(): PokkitConfig | null {
+  const apiKey = process.env.POKKIT_API_KEY
+  if (!apiKey) return null
+  return {
+    baseUrl: (process.env.POKKIT_URL ?? 'http://localhost:4009').replace(/\/$/, ''),
+    apiKey,
+  }
+}
+
+export interface PokkitUploadOptions {
+  /** Auto-expiry on pokkit: '1h' | '1d' | '7d' | '30d' | 'forever' */
+  readonly expiresIn?: string
+}
+
+/** Upload a file to pokkit; returns the public directUrl. */
+export async function uploadToPokkit(
+  filePath: string,
+  options: PokkitUploadOptions = {},
+): Promise<string> {
+  const config = loadPokkitConfig()
+  if (!config) {
+    throw new Error('POKKIT_API_KEY 未設定（.env 加 POKKIT_API_KEY、選配 POKKIT_URL）')
+  }
+
   const form = new FormData()
   form.append('file', new Blob([readFileSync(filePath)]), basename(filePath))
+  if (options.expiresIn) form.append('expiresIn', options.expiresIn)
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 30_000)
+  // 120s — pokkit also carries large videos (IG remote route), not just docs
+  const timeout = setTimeout(() => controller.abort(), 120_000)
 
   try {
-    const res = await fetch(`${config.baseUrl}/api/pokkit/upload`, {
+    const res = await fetch(`${config.baseUrl}/upload`, {
       method: 'POST',
       body: form,
-      headers: { authorization: `Bearer ${config.serviceToken}` },
+      headers: { authorization: `Bearer ${config.apiKey}` },
       signal: controller.signal,
     })
     clearTimeout(timeout)
@@ -134,8 +169,6 @@ export async function executeUploadDirectives(
   telegram: Telegraf<BotContext>['telegram'],
   projectPath: string,
 ): Promise<void> {
-  const config = loadPipeConfig()
-
   for (const d of directives) {
     try {
       const filePath = resolve(projectPath, d.path)
@@ -154,18 +187,14 @@ export async function executeUploadDirectives(
       const ext = extname(filePath).toLowerCase()
       const isImage = IMAGE_EXTS.has(ext)
 
-      // Images → duk.tw (self-contained). Other files → pokkit (needs CloudPipe).
+      // Images → duk.tw (self-contained). Other files → pokkit (direct).
       let url: string
       let target: string
       if (isImage) {
         url = await uploadToDuk(filePath)
         target = '圖床'
       } else {
-        if (!config) {
-          telegram.sendMessage(chatId, '⚠️ @upload 失敗: 非圖片需 CloudPipe，但未設定').catch(() => {})
-          continue
-        }
-        url = await uploadToPokkit(filePath, config)
+        url = await uploadToPokkit(filePath)
         target = 'pokkit'
       }
 

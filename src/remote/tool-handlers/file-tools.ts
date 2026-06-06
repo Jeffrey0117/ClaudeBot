@@ -4,9 +4,9 @@
  */
 
 import { readFile, writeFile, readdir, stat, mkdir, open, rm, rename, copyFile } from 'node:fs/promises'
-import { resolve, join, relative, sep, isAbsolute, dirname } from 'node:path'
+import { resolve, join, relative, sep, isAbsolute, dirname, basename } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
-import { exec } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { MAX_FILE_SIZE, MAX_TRANSFER_SIZE, MAX_SEARCH_RESULTS, IS_WIN } from './index.js'
 
 export async function handleReadFile(args: Record<string, unknown>, validatePath: (p: string) => string): Promise<string> {
@@ -275,14 +275,29 @@ export async function handleFetchArchive(
 
   const tmpPath = join(tmpdir(), `remote-archive-${Date.now()}.${format === 'tar.gz' ? 'tar.gz' : 'zip'}`)
 
-  const cmd = IS_WIN
-    ? `powershell -NoProfile -Command "Compress-Archive -Path '${targetPath.replace(/'/g, "''")}' -DestinationPath '${tmpPath.replace(/'/g, "''")}' -Force"`
-    : format === 'tar.gz'
-      ? `tar -czf "${tmpPath}" -C "${dirname(targetPath)}" "${targetPath.split('/').pop()}"`
-      : `cd "${dirname(targetPath)}" && zip -r "${tmpPath}" "${targetPath.split('/').pop()}"`
+  // Build the archive via execFile with ARRAY args (no shell), so a file whose
+  // name contains shell metacharacters can't inject a command. Windows passes
+  // the paths through env vars read back by PowerShell.
+  const entryName = basename(targetPath)
+  let bin: string
+  let argv: string[]
+  let opts: { timeout: number; windowsHide: boolean; cwd?: string; env?: NodeJS.ProcessEnv } = { timeout: 60_000, windowsHide: true }
+  if (IS_WIN) {
+    const ps = 'Compress-Archive -Path $env:CB_ARC_SRC -DestinationPath $env:CB_ARC_DEST -Force'
+    bin = 'powershell'
+    argv = ['-NoProfile', '-Command', ps]
+    opts = { ...opts, env: { ...process.env, CB_ARC_SRC: targetPath, CB_ARC_DEST: tmpPath } }
+  } else if (format === 'tar.gz') {
+    bin = 'tar'
+    argv = ['-czf', tmpPath, '-C', dirname(targetPath), entryName]
+  } else {
+    bin = 'zip'
+    argv = ['-r', tmpPath, entryName]
+    opts = { ...opts, cwd: dirname(targetPath) }
+  }
 
   await new Promise<void>((res, rej) => {
-    exec(cmd, { timeout: 60_000, windowsHide: true }, (err) => {
+    execFile(bin, argv, opts, (err) => {
       if (err) rej(new Error(`Archive creation failed: ${err.message}`))
       else res()
     })

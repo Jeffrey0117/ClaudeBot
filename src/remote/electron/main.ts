@@ -6,7 +6,7 @@
  * Communicates with the renderer via IPC for UI updates.
  */
 
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu } from 'electron'
 import { resolve } from 'node:path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -241,6 +241,12 @@ function connectToRelay(relayUrl: string, code: string): void {
 
     if (msg.type === 'error') {
       log(`Relay error: ${msg.error}`)
+      // A pairing rejection is permanent — stop the 3s reconnect loop so we
+      // don't hammer the relay with the same bad/expired code (the misleading
+      // "connecting… / retrying" 6–9s loop the user saw on a typo).
+      if (typeof msg.error === 'string' && /pairing|invalid|expired/i.test(msg.error)) {
+        shouldReconnect = false
+      }
       socket.close()
       return
     }
@@ -379,6 +385,10 @@ function connectChat(relayUrl: string, code: string): void {
 
     if (msg.type === 'error') {
       log(`Relay error: ${msg.error}`)
+      // Permanent pairing rejection → stop the chat reconnect loop.
+      if (typeof msg.error === 'string' && /pairing|invalid|expired/i.test(msg.error)) {
+        chatShouldReconnect = false
+      }
       socket.close()
       return
     }
@@ -722,6 +732,25 @@ function createWindow(): void {
   // Grant microphone access for voice input (Electron blocks getUserMedia by default).
   mainWindow.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(permission === 'media')
+  })
+
+  // Right-click context menu — paste the pairing code (or anything) into inputs
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const items: Electron.MenuItemConstructorOptions[] = []
+    if (params.isEditable) {
+      items.push(
+        { role: 'cut', label: '剪下', enabled: params.selectionText.length > 0 },
+        { role: 'copy', label: '複製', enabled: params.selectionText.length > 0 },
+        { role: 'paste', label: '貼上' },
+        { type: 'separator' },
+        { role: 'selectAll', label: '全選' },
+      )
+    } else if (params.selectionText.length > 0) {
+      items.push({ role: 'copy', label: '複製' })
+    }
+    if (items.length > 0) {
+      Menu.buildFromTemplate(items).popup()
+    }
   })
 
   mainWindow.loadFile(htmlPath).catch((err) => {

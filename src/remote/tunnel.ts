@@ -109,14 +109,20 @@ const RELAY_PASTE_ID_FILE = join(process.cwd(), 'data', '.relay-paste-id')
  * can still reach rawtxt (even though the URL in the old paste is dead).
  * The scan-based discovery in Electron will find the newest paste containing wss://.
  */
-async function publishRelayUrl(wsUrl: string): Promise<void> {
+export async function publishRelayUrl(wsUrl: string): Promise<void> {
   if (!RAWTXT_BASE) return // no paste host configured — skip discovery publish
   try {
+    // Electron clients discover the relay by scanning rawtxt and only consider
+    // pastes with sizeBytes in [30,120] (a filter tuned for long auto-tunnel
+    // URLs). A short FIXED URL like wss://relay.<domain> can be <30 bytes and
+    // get silently skipped. Pad with trailing spaces to clear the floor — the
+    // client trim()s the raw content before use, so padding is invisible.
+    const content = wsUrl.length >= 40 ? wsUrl : wsUrl + ' '.repeat(40 - wsUrl.length)
     // Create new paste (30d expiry) — don't delete old one so stale clients can still hit rawtxt
     const res = await fetch(`${RAWTXT_BASE}/api/paste`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: wsUrl, expiresIn: '30d' }),
+      body: JSON.stringify({ content, expiresIn: '30d' }),
     })
     if (!res.ok) {
       console.error(`[tunnel] rawtxt publish failed: ${res.status}`)

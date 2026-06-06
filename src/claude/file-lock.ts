@@ -81,8 +81,17 @@ export async function acquireLock(projectPath: string, task?: string): Promise<b
     ...(task ? { task } : {}),
   }
 
-  await writeFile(lockPath(projectPath), JSON.stringify(info), 'utf-8')
-  return true
+  // Atomic create: 'wx' fails if the file already exists, so if two bots race
+  // past the check-then-act above, exactly ONE wins the lock. (Plain 'w' let
+  // both overwrite and both believe they held it → concurrent --resume on the
+  // same session.)
+  try {
+    await writeFile(lockPath(projectPath), JSON.stringify(info), { flag: 'wx', encoding: 'utf-8' })
+    return true
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false
+    throw err
+  }
 }
 
 export async function releaseLock(projectPath: string): Promise<void> {

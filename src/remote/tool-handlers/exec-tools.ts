@@ -135,13 +135,16 @@ export async function handleGrep(
 
   if (rgAvailable === null) rgAvailable = await checkRgAvailable()
 
-  const escapedPattern = pattern.replace(/"/g, '\\"')
-  const cmd = rgAvailable
-    ? buildRgCommand(escapedPattern, searchPath, include, maxResults)
-    : buildGrepCommand(escapedPattern, searchPath, include, maxResults)
+  // Pass the pattern as a separate argv element (after `--`) via execFile — NOT
+  // interpolated into a shell string. With the old `exec(\`rg ... "${pattern}"\`)`
+  // approach, `$(...)`/backticks inside the (Claude-supplied, unvalidated)
+  // pattern were still evaluated by the shell → command injection.
+  const [bin, argv] = rgAvailable
+    ? buildRgArgs(pattern, searchPath, include, maxResults)
+    : buildGrepArgs(pattern, searchPath, include, maxResults)
 
   return new Promise((res) => {
-    exec(cmd, { timeout: EXEC_TIMEOUT_MS, maxBuffer: 512 * 1024, windowsHide: true }, (error, stdout) => {
+    execFile(bin, argv, { timeout: EXEC_TIMEOUT_MS, maxBuffer: 512 * 1024, windowsHide: true }, (error, stdout) => {
       if (stdout.trim()) {
         const lines = stdout.trim().split('\n').slice(0, maxResults)
         const relativized = lines.map((line) => {
@@ -158,15 +161,18 @@ export async function handleGrep(
   })
 }
 
-function buildRgCommand(pattern: string, searchPath: string, include: string, maxResults: number): string {
-  const globFlag = include ? `--glob "${include}"` : ''
-  return `rg -n --no-heading --max-count ${maxResults} ${globFlag} -- "${pattern}" "${searchPath}"`
+function buildRgArgs(pattern: string, searchPath: string, include: string, maxResults: number): [string, string[]] {
+  const argv = ['-n', '--no-heading', '--max-count', String(maxResults)]
+  if (include) argv.push('--glob', include)
+  argv.push('--', pattern, searchPath)
+  return ['rg', argv]
 }
 
-function buildGrepCommand(pattern: string, searchPath: string, include: string, maxResults: number): string {
-  const excludeDirs = '--exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=.next'
-  const includeFlag = include ? `--include="${include}"` : ''
-  return `grep -rn ${excludeDirs} ${includeFlag} -m ${maxResults} -- "${pattern}" "${searchPath}"`
+function buildGrepArgs(pattern: string, searchPath: string, include: string, maxResults: number): [string, string[]] {
+  const argv = ['-rn', '--exclude-dir=node_modules', '--exclude-dir=.git', '--exclude-dir=dist', '--exclude-dir=.next']
+  if (include) argv.push(`--include=${include}`)
+  argv.push('-m', String(maxResults), '--', pattern, searchPath)
+  return ['grep', argv]
 }
 
 export function handleSystemInfo(baseDir: string): Promise<string> {
@@ -305,14 +311,27 @@ export async function handleNotify(args: Record<string, unknown>): Promise<strin
   const title = String(args.title ?? 'ClaudeBot')
   const body = String(args.body ?? '')
 
-  const cmd = IS_WIN
-    ? `powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; $n.Visible = $true; $n.ShowBalloonTip(5000, '${title.replace(/'/g, "''")}', '${body.replace(/'/g, "''")}', 'Info'); Start-Sleep -Seconds 3; $n.Dispose()"`
-    : process.platform === 'darwin'
-      ? `osascript -e 'display notification "${body.replace(/"/g, '\\"')}" with title "${title.replace(/"/g, '\\"')}"'`
-      : `notify-send "${title.replace(/"/g, '\\"')}" "${body.replace(/"/g, '\\"')}"`
+  // Pass title/body through ENV vars (not interpolated into the script/command
+  // string) so notification text can never break out into shell/PowerShell/
+  // AppleScript injection. Each platform reads them back from the environment.
+  const env = { ...process.env, CB_NTITLE: title, CB_NBODY: body }
+  let bin: string
+  let argv: string[]
+  if (IS_WIN) {
+    const ps = "Add-Type -AssemblyName System.Windows.Forms; $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; $n.Visible = $true; $n.ShowBalloonTip(5000, $env:CB_NTITLE, $env:CB_NBODY, 'Info'); Start-Sleep -Seconds 3; $n.Dispose()"
+    bin = 'powershell'
+    argv = ['-NoProfile', '-Command', ps]
+  } else if (process.platform === 'darwin') {
+    bin = 'osascript'
+    argv = ['-e', 'display notification (system attribute "CB_NBODY") with title (system attribute "CB_NTITLE")']
+  } else {
+    // notify-send via execFile array — args are not shell-parsed, so safe as-is.
+    bin = 'notify-send'
+    argv = [title, body]
+  }
 
   return new Promise((res) => {
-    exec(cmd, { timeout: 15_000, windowsHide: true }, (err) => {
+    execFile(bin, argv, { timeout: 15_000, windowsHide: true, env }, (err) => {
       if (err) res(`Notification failed: ${err.message}`)
       else res(`Notification sent: ${title}`)
     })

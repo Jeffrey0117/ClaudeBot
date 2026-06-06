@@ -23,6 +23,31 @@ const WEB_DIST = join(process.cwd(), 'src', 'dashboard', 'web', 'dist')
 const HEARTBEAT_STALE_MS = 30_000
 const MAX_COMMANDS_KEPT = 200
 
+// Optional hard lock: if set, every /api/ request must present this token
+// (Authorization: Bearer <t> or ?token=<t>). Even without it, the server binds
+// to 127.0.0.1 and rejects cross-origin POSTs, so a remote host or a malicious
+// website cannot drive the bot (POST /api/commands is effectively RCE).
+const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN || ''
+
+/** True if a request's Origin (if any) is a loopback origin. */
+function isLocalOrigin(req: IncomingMessage): boolean {
+  const origin = req.headers.origin
+  if (!origin) return true // non-browser / same-origin requests omit Origin
+  try {
+    const host = new URL(origin).hostname
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1'
+  } catch {
+    return false
+  }
+}
+
+/** Returns the token presented by the request (header or query), if any. */
+function presentedToken(req: IncomingMessage, url: URL): string {
+  const auth = req.headers.authorization
+  if (auth && auth.startsWith('Bearer ')) return auth.slice(7).trim()
+  return url.searchParams.get('token') ?? ''
+}
+
 // Injected by startDashboardServer so the CloudPipe webhook can reach Telegram
 // without this module importing the bot instance.
 let pushToChat: PushToChat | null = null
@@ -108,12 +133,9 @@ async function addCommand(cmd: DashboardCommand): Promise<void> {
 // --- HTTP routing ---
 
 function sendJson(res: ServerResponse, data: unknown, status = 200): void {
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  })
+  // No wildcard CORS: same-origin dashboard requests don't need it, and we must
+  // not let arbitrary websites read API responses cross-origin.
+  res.writeHead(status, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify(data))
 }
 
@@ -145,14 +167,31 @@ async function handleApi(req: IncomingMessage, res: ServerResponse): Promise<voi
   const url = new URL(req.url ?? '/', `http://localhost`)
   const path = url.pathname
 
-  // CORS preflight
+  // CORS preflight — only acknowledge loopback origins.
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
+    const origin = req.headers.origin
+    const headers: Record<string, string> = {
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    })
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    }
+    if (origin && isLocalOrigin(req)) headers['Access-Control-Allow-Origin'] = origin
+    res.writeHead(204, headers)
     res.end()
+    return
+  }
+
+  // --- Access control (defense-in-depth on top of the 127.0.0.1 bind) ---
+  // 1. Optional token gate: if DASHBOARD_TOKEN is configured, demand it.
+  if (DASHBOARD_TOKEN && presentedToken(req, url) !== DASHBOARD_TOKEN) {
+    sendJson(res, { error: 'Unauthorized' }, 401)
+    return
+  }
+  // 2. CSRF guard: a malicious website could fire a simple cross-origin POST
+  //    (text/plain) at localhost to drive the bot. Reject state-changing
+  //    methods whose Origin is present and non-loopback. Same-origin dashboard
+  //    POSTs carry a localhost Origin and pass; non-browser callers omit Origin.
+  if (req.method !== 'GET' && !isLocalOrigin(req)) {
+    sendJson(res, { error: 'Forbidden: cross-origin request rejected' }, 403)
     return
   }
 
@@ -467,8 +506,15 @@ export function startDashboardServer(port: number, push?: PushToChat): void {
   const wss = new WebSocketServer({ server })
   startWsRelay(wss)
 
-  server.listen(port, () => {
-    console.log(`[dashboard] Server running at http://localhost:${port}`)
+  // Bind loopback by default — the API can drive the bot (POST /api/commands),
+  // so it must NOT be exposed on the network. Override with DASHBOARD_HOST
+  // (e.g. 0.0.0.0 for LAN access) only together with DASHBOARD_TOKEN.
+  const host = process.env.DASHBOARD_HOST || '127.0.0.1'
+  if (host !== '127.0.0.1' && host !== 'localhost' && !DASHBOARD_TOKEN) {
+    console.error(`[dashboard] WARNING: bound to ${host} without DASHBOARD_TOKEN — API is exposed unauthenticated.`)
+  }
+  server.listen(port, host, () => {
+    console.log(`[dashboard] Server running at http://${host}:${port}`)
   })
 }
 

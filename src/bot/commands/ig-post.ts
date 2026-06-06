@@ -1,5 +1,5 @@
 /**
- * /ig — Instagram automation.
+ * /ig — Instagram automation (CDP engine, see ../vision/ig-cdp-flow.ts).
  *
  * Usage:
  *   /ig post <filename> <caption>           — post immediately
@@ -11,10 +11,13 @@
  */
 
 import type { BotContext } from '../../types/context.js'
-import { execFile } from 'node:child_process'
-import { join, resolve, relative } from 'node:path'
-import { stat, readdir, writeFile, mkdir } from 'node:fs/promises'
+import { join, resolve, relative, basename } from 'node:path'
+import { stat, readdir, writeFile, mkdir, readFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
+import { runIgCdpPost, runIgCdpResume } from '../vision/ig-cdp-flow.js'
+import { getPairing } from '../../remote/pairing-store.js'
+import { remoteToolCall } from '../../remote/relay-client.js'
+import { loadPokkitConfig, uploadToPokkit } from '../../utils/upload-executor.js'
 import {
   addEntry,
   listSchedule,
@@ -25,10 +28,8 @@ import {
 
 // --- Constants ---
 
-const SCRIPT_DIR = join(process.cwd(), 'scripts')
-const IG_FLOW_SCRIPT = join(SCRIPT_DIR, 'ig-post-flow.py')
 const TEMPLATES_DIR = join(process.cwd(), 'data', 'ig-templates')
-const VIDEOS_DIR = process.env.IG_VIDEOS_DIR ?? 'C:\\Users\\jeffb\\Videos'
+export const IG_VIDEOS_DIR = process.env.IG_VIDEOS_DIR ?? 'C:\\Users\\jeffb\\Videos'
 
 // --- Types ---
 
@@ -41,10 +42,10 @@ interface PostResult {
 
 // --- Path safety ---
 
-/** Validate filename stays within VIDEOS_DIR (prevent path traversal). */
+/** Validate filename stays within IG_VIDEOS_DIR (prevent path traversal). */
 function safeVideoPath(filename: string): string | null {
-  const resolved = resolve(VIDEOS_DIR, filename)
-  const rel = relative(VIDEOS_DIR, resolved)
+  const resolved = resolve(IG_VIDEOS_DIR, filename)
+  const rel = relative(IG_VIDEOS_DIR, resolved)
   if (rel.startsWith('..') || rel.includes('..')) return null
   return resolved
 }
@@ -58,27 +59,87 @@ export async function saveIgTemplate(name: string, buffer: Buffer): Promise<void
   await writeFile(join(TEMPLATES_DIR, `${safeName}.png`), buffer)
 }
 
-/** Run the ig-post-flow.py script. Exported for use by ig-scheduler. */
-export async function runIgPostScript(filename: string, caption: string): Promise<PostResult> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      'py',
-      [IG_FLOW_SCRIPT, '--video', filename, '--caption', caption, '--videos-dir', VIDEOS_DIR],
-      { timeout: 120_000, windowsHide: true, shell: false },
-      (err, stdout, stderr) => {
-        if (err && !stdout.trim()) {
-          reject(new Error(stderr?.trim() || err.message))
-          return
-        }
-        try {
-          const result = JSON.parse(stdout.trim()) as PostResult
-          resolve(result)
-        } catch {
-          reject(new Error(`Invalid script output: ${stdout.trim()}`))
-        }
-      },
-    )
+/**
+ * Post to IG via the CDP-controlled Chrome (DOM-based, resolution-independent).
+ *
+ * Routing — the CDP Chrome may live on a DIFFERENT machine than the bot:
+ *   paired (chatId given)  → transfer media to the agent machine, then run
+ *                            the CDP flow THERE via remote_ig_post
+ *   not paired             → run the CDP flow on this machine
+ *
+ * Same PostResult contract as the old pyautogui engine, so ig-scheduler
+ * keeps working unchanged. Exported for use by ig-scheduler.
+ */
+export async function runIgPostScript(
+  filename: string,
+  caption: string,
+  chatId?: number,
+): Promise<PostResult> {
+  const fullPath = safeVideoPath(filename)
+  if (!fullPath) {
+    return { success: false, duration_s: 0, error: '無效的檔案路徑' }
+  }
+
+  const pairing = chatId !== undefined ? getPairing(chatId, undefined) : null
+  if (pairing?.connected) {
+    return runRemoteIgPost(pairing.code, fullPath, caption)
+  }
+  return runIgCdpPost(fullPath, caption)
+}
+
+/** Transfer limit for the relay (remote_push_file caps at 20MB). */
+const RELAY_PUSH_LIMIT = 20 * 1024 * 1024
+const REMOTE_PUSH_TIMEOUT_MS = 180_000
+const REMOTE_IG_TIMEOUT_MS = 360_000 // CDP flow on the agent can take minutes
+
+/**
+ * Remote route: media lives on THIS machine, CDP Chrome on the agent machine.
+ *   ≤20MB → push file through the relay → agent posts from local path
+ *   >20MB → upload to pokkit → agent downloads from URL and posts
+ */
+async function runRemoteIgPost(
+  code: string,
+  fullPath: string,
+  caption: string,
+): Promise<PostResult> {
+  const started = Date.now()
+  const fail = (step: string, error: string): PostResult => ({
+    success: false,
+    duration_s: (Date.now() - started) / 1000,
+    error,
+    step,
   })
+
+  const fileName = basename(fullPath)
+  try {
+    const stats = await stat(fullPath)
+
+    let raw: string
+    if (stats.size <= RELAY_PUSH_LIMIT) {
+      // Relay push: lands under the agent's baseDir at ig-videos/<name>
+      const base64 = (await readFile(fullPath)).toString('base64')
+      const remotePath = `ig-videos/${fileName}`
+      await remoteToolCall(code, 'remote_push_file', { path: remotePath, base64 }, REMOTE_PUSH_TIMEOUT_MS)
+      raw = await remoteToolCall(code, 'remote_ig_post', { path: remotePath, caption }, REMOTE_IG_TIMEOUT_MS)
+    } else {
+      // Pokkit route: agent pulls from URL (no relay size pressure).
+      // 1d auto-expiry — the file only exists to make the transfer.
+      if (!loadPokkitConfig()) {
+        return fail('upload_pokkit', `檔案 ${(stats.size / 1024 / 1024).toFixed(1)}MB 超過 relay 上限 20MB，且 POKKIT_API_KEY 未設定`)
+      }
+      const url = await uploadToPokkit(fullPath, { expiresIn: '1d' })
+      raw = await remoteToolCall(code, 'remote_ig_post', { url, filename: fileName, caption }, REMOTE_IG_TIMEOUT_MS)
+    }
+
+    try {
+      return JSON.parse(raw) as PostResult
+    } catch {
+      return fail('remote_ig_post', `agent 回傳非 JSON: ${raw.slice(0, 200)}`)
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return fail('remote_transfer', msg)
+  }
 }
 
 // --- Helpers ---
@@ -134,7 +195,11 @@ export async function igCommand(ctx: BotContext): Promise<void> {
       '`/ig add <datetime> <filename> <caption>`\n' +
       '`/ig list` — 查看排程\n' +
       '`/ig cancel <id>` — 取消排程\n' +
-      '`/ig history` — 最近發文紀錄',
+      '`/ig history` — 最近發文紀錄\n\n' +
+      '*檔案:*\n' +
+      '`/ig ls [子資料夾]` — 列出 Videos 裡的影片\n\n' +
+      '*救援:*\n' +
+      '`/ig resume <caption>` — 流程卡住時從目前畫面接著跑',
       { parse_mode: 'Markdown' },
     )
     return
@@ -175,6 +240,18 @@ export async function igCommand(ctx: BotContext): Promise<void> {
     return
   }
 
+  // --- /ig ls [subdir] ---
+  if (args === 'ls' || args.startsWith('ls ')) {
+    await handleListVideos(ctx, args === 'ls' ? '' : args.slice(3).trim())
+    return
+  }
+
+  // --- /ig resume <caption> ---
+  if (args.startsWith('resume ')) {
+    await runIgResume(ctx, args.slice(7).trim())
+    return
+  }
+
   // --- /ig templates (legacy) ---
   if (args === 'templates') {
     await listTemplates(ctx)
@@ -182,6 +259,38 @@ export async function igCommand(ctx: BotContext): Promise<void> {
   }
 
   await ctx.reply('無效指令，用 `/ig` 查看用法', { parse_mode: 'Markdown' })
+}
+
+// --- Resume a stuck flow ---
+
+/**
+ * /ig resume <caption> — a popup interrupted the flow mid-create and the user
+ * dismissed it by hand; IG is sitting at the crop screen (or later). Re-runs
+ * crop → 下一步×2 → caption → 分享 on the CURRENT screen, no media transfer.
+ */
+async function runIgResume(ctx: BotContext, caption: string): Promise<void> {
+  const chatId = ctx.chat!.id
+  if (!caption) {
+    await ctx.reply('用法: `/ig resume <caption>`（從目前卡住的建立貼文畫面接著跑）', { parse_mode: 'Markdown' })
+    return
+  }
+
+  const statusMsg = await ctx.reply(`▶️ 從目前畫面接續 IG 發文...\n✏️ ${caption.slice(0, 60)}${caption.length > 60 ? '...' : ''}`)
+
+  try {
+    const pairing = getPairing(chatId, undefined)
+    const result: PostResult = pairing?.connected
+      ? JSON.parse(await remoteToolCall(pairing.code, 'remote_ig_post', { resume: true, caption }, REMOTE_IG_TIMEOUT_MS)) as PostResult
+      : await runIgCdpResume(caption)
+
+    const statusText = result.success
+      ? `✅ IG 發文成功！（接續）\n⏱ ${formatDuration(result.duration_s)}`
+      : `❌ 接續失敗\n💥 ${result.error ?? 'Unknown error'}${result.step ? `\n📍 步驟: ${result.step}` : ''}`
+    await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, statusText)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, `❌ 接續異常: ${msg}`)
+  }
 }
 
 // --- Post immediately ---
@@ -200,7 +309,7 @@ async function runIgPost(ctx: BotContext, filename: string, caption: string): Pr
   try {
     await stat(fullPath)
   } catch {
-    await ctx.reply(`❌ 找不到檔案: ${filename}\n📁 目錄: ${VIDEOS_DIR}`)
+    await ctx.reply(`❌ 找不到檔案: ${filename}\n📁 目錄: ${IG_VIDEOS_DIR}`)
     return
   }
 
@@ -209,7 +318,7 @@ async function runIgPost(ctx: BotContext, filename: string, caption: string): Pr
   )
 
   try {
-    const result = await runIgPostScript(filename, caption)
+    const result = await runIgPostScript(filename, caption, chatId)
 
     const statusText = result.success
       ? `✅ IG 發文成功！\n📁 ${filename}\n⏱ ${formatDuration(result.duration_s)}`
@@ -272,7 +381,7 @@ async function handleAddSchedule(ctx: BotContext, input: string): Promise<void> 
   try {
     await stat(fullPath)
   } catch {
-    await ctx.reply(`❌ 找不到檔案: ${parsed.filename}\n📁 目錄: ${VIDEOS_DIR}`)
+    await ctx.reply(`❌ 找不到檔案: ${parsed.filename}\n📁 目錄: ${IG_VIDEOS_DIR}`)
     return
   }
 
@@ -356,6 +465,78 @@ async function handleHistory(ctx: BotContext): Promise<void> {
     lines.push(`${icon} ${entry.datetime.replace('T', ' ')} — ${entry.filename}${duration}${error}`)
   }
 
+  await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' })
+}
+
+// --- List videos in IG_VIDEOS_DIR ---
+
+const MEDIA_EXTS = new Set(['.mp4', '.mov', '.m4v', '.webm', '.jpg', '.jpeg', '.png'])
+const LS_LIMIT = 20
+
+async function handleListVideos(ctx: BotContext, subdir: string): Promise<void> {
+  const dirPath = subdir ? safeVideoPath(subdir) : IG_VIDEOS_DIR
+  if (!dirPath) {
+    await ctx.reply('❌ 無效的資料夾路徑')
+    return
+  }
+
+  let entries
+  try {
+    entries = await readdir(dirPath, { withFileTypes: true })
+  } catch {
+    await ctx.reply(`❌ 找不到資料夾: ${subdir || IG_VIDEOS_DIR}`)
+    return
+  }
+
+  const folders = entries.filter((e) => e.isDirectory()).map((e) => e.name)
+  const mediaFiles = entries.filter(
+    (e) => e.isFile() && MEDIA_EXTS.has(e.name.slice(e.name.lastIndexOf('.')).toLowerCase()),
+  )
+
+  // Newest first — the file you just produced is the one you want to post
+  const withTimes = await Promise.all(
+    mediaFiles.map(async (e) => {
+      const s = await stat(join(dirPath, e.name)).catch(() => null)
+      return { name: e.name, size: s?.size ?? 0, mtime: s?.mtimeMs ?? 0 }
+    }),
+  )
+  const sorted = [...withTimes].sort((a, b) => b.mtime - a.mtime)
+  const shown = sorted.slice(0, LS_LIMIT)
+
+  // Markdown safety: filenames like 翻譯專案_xxx contain `_` which Telegram
+  // parses as italic → "can't parse entities" 400. Everything user-derived
+  // goes inside backtick code entities (where _ * [ are inert).
+  const prefix = subdir ? `${subdir.replace(/\\/g, '/')}/` : ''
+  const lines = [`📁 \`${subdir || 'Videos'}\``, '']
+
+  if (folders.length > 0) {
+    lines.push(...folders.map((f) => `📂 \`/ig ls ${prefix}${f}\``), '')
+  }
+
+  if (shown.length === 0) {
+    lines.push('(沒有影片/圖片)')
+  } else {
+    // Stay under Telegram's 4096-char message cap (leave room for footer)
+    const MAX_CHARS = 3800
+    let used = lines.join('\n').length
+    let displayed = 0
+    for (const f of shown) {
+      const mb = (f.size / 1024 / 1024).toFixed(1)
+      const quoted = f.name.includes(' ') || prefix.includes(' ')
+        ? `"${prefix}${f.name}"`
+        : `${prefix}${f.name}`
+      const block = `🎬 \`${f.name}\` (${mb}MB)\n   \`/ig post ${quoted} \``
+      if (used + block.length > MAX_CHARS) break
+      lines.push(block)
+      used += block.length + 1
+      displayed++
+    }
+    if (sorted.length > displayed) {
+      lines.push('', `(還有 ${sorted.length - displayed} 個，只顯示最新 ${displayed})`)
+    }
+  }
+
+  lines.push('', '點指令複製 → 補上文案送出')
   await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' })
 }
 
