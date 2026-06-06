@@ -47,7 +47,10 @@ const PID_FILE = path.join(root, '.launcher.pid')
 // concurrent `npm run dev` invocations can't both acquire it.
 const SINGLETON_PORT = 47615
 
-const wait = (ms: number) => { const end = Date.now() + ms; while (Date.now() < end) {} }
+// Synchronous sleep WITHOUT busy-spinning a CPU core: Atomics.wait blocks the
+// thread for `ms` on a never-signalled lock (allowed on Node's main thread).
+// (The old `while (Date.now() < end) {}` pegged a core for the full duration.)
+const wait = (ms: number) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) }
 
 function pidAlive(pid: number): boolean {
   try {

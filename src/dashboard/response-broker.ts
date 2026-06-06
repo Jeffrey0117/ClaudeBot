@@ -4,6 +4,12 @@ import { join } from 'node:path'
 const RESPONSE_DIR = join(process.cwd(), 'data', 'responses')
 const POLL_INTERVAL_MS = 300
 const STALE_MS = 60_000
+// Run the stale-file sweep (a per-file stat() of every response file) only
+// every Nth poll instead of every 300ms — at POLL_INTERVAL_MS that's ~once a
+// minute, which is plenty for cleaning abandoned chunk files and removes the
+// second full readdir+stat pass from the hot path.
+const STALE_SWEEP_EVERY = 200
+let pollCount = 0
 
 export interface ResponseChunkEvent {
   readonly type: 'response_chunk'
@@ -117,16 +123,19 @@ async function pollEvents(): Promise<void> {
       else break
     }
 
-    // Clean up stale chunk files older than STALE_MS
-    const now = Date.now()
-    for (const file of jsonFiles) {
-      try {
-        const filePath = join(RESPONSE_DIR, file)
-        const fileStat = await stat(filePath)
-        if (now - fileStat.mtimeMs > STALE_MS) {
-          await unlink(filePath).catch(() => {})
-        }
-      } catch { /* ignore */ }
+    // Clean up stale chunk files older than STALE_MS — only on the periodic
+    // sweep, not on every 300ms poll.
+    if (++pollCount % STALE_SWEEP_EVERY === 0) {
+      const now = Date.now()
+      for (const file of jsonFiles) {
+        try {
+          const filePath = join(RESPONSE_DIR, file)
+          const fileStat = await stat(filePath)
+          if (now - fileStat.mtimeMs > STALE_MS) {
+            await unlink(filePath).catch(() => {})
+          }
+        } catch { /* ignore */ }
+      }
     }
   } catch {
     // directory might not exist yet

@@ -21,11 +21,12 @@ async function executeDuePost(entry: {
   readonly chatId: number
   readonly filename: string
   readonly caption: string
+  readonly machine?: string
 }): Promise<void> {
   updateEntry(entry.id, { status: 'posting' })
 
   try {
-    const result = await runIgPostScript(entry.filename, entry.caption, entry.chatId)
+    const result = await runIgPostScript(entry.filename, entry.caption, entry.chatId, entry.machine)
     updateEntry(entry.id, { status: result.success ? 'done' : 'failed', result })
 
     if (sendFn) {
