@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { parseDirectives, stripDirectives } from '../../src/utils/directives.js'
+import { resolve, join } from 'node:path'
+import { parseDirectives, stripDirectives, isFileWithinProject } from '../../src/utils/directives.js'
 
 const FENCE = '```'
 
@@ -67,5 +68,33 @@ describe('stripDirectives', () => {
 
   it('collapses the blank gap left behind to at most two newlines', () => {
     expect(stripDirectives('a\n@notify(x)\n\n\nb')).not.toMatch(/\n{3,}/)
+  })
+})
+
+describe('isFileWithinProject (@file path-traversal guard)', () => {
+  const root = resolve('test-project-root')
+
+  it('allows a relative path inside the project', () => {
+    expect(isFileWithinProject(root, 'sub/ok.txt')).toBe(true)
+  })
+
+  it('allows a normalised path that stays inside', () => {
+    expect(isFileWithinProject(root, 'a/../b.txt')).toBe(true)
+  })
+
+  it('blocks ../ traversal out of the project', () => {
+    expect(isFileWithinProject(root, '../../.env')).toBe(false)
+  })
+
+  it('blocks the project root itself', () => {
+    expect(isFileWithinProject(root, '.')).toBe(false)
+  })
+
+  it('blocks an absolute path outside the project', () => {
+    expect(isFileWithinProject(root, resolve(root, '..', 'secret.env'))).toBe(false)
+  })
+
+  it('allows an absolute path inside the project', () => {
+    expect(isFileWithinProject(root, join(root, 'data', 'ok.txt'))).toBe(true)
   })
 })

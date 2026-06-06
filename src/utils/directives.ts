@@ -202,6 +202,21 @@ export async function executeDirectives(
   }
 }
 
+// --- Security ---
+
+/**
+ * True if `requestedPath` (relative to or absolute against `projectPath`)
+ * resolves to a location INSIDE the project dir. Pure + exported so the
+ * @file path-traversal guard is unit-testable. Blocks `../../.env`, absolute
+ * paths outside the project, and the project root itself.
+ */
+export function isFileWithinProject(projectPath: string, requestedPath: string): boolean {
+  const root = resolve(projectPath)
+  const filePath = resolve(root, requestedPath)
+  const rel = relative(root, filePath)
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
 // --- Handlers ---
 
 async function executeFile(
@@ -213,17 +228,12 @@ async function executeFile(
   // Resolve relative paths against project dir
   const filePath = projectPath ? resolve(projectPath, d.path) : d.path
 
-  // Path-traversal guard: a resolved @file path must stay INSIDE the project
-  // dir. Without this, `@file(../../.env)` or an absolute path could exfiltrate
-  // secrets (.env with BOT_TOKEN/API keys, SSH private keys) straight to chat.
-  if (projectPath) {
-    const root = resolve(projectPath)
-    const rel = relative(root, filePath)
-    if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
-      console.error(`[directive] @file blocked path traversal: ${d.path}`)
-      telegram.sendMessage(chatId, `⚠️ 拒絕存取專案目錄外的檔案: \`${d.path}\``, { parse_mode: 'Markdown' }).catch(() => {})
-      return
-    }
+  // Path-traversal guard (see isFileWithinProject): `@file(../../.env)` or an
+  // absolute path could otherwise exfiltrate secrets (.env, SSH keys) to chat.
+  if (projectPath && !isFileWithinProject(projectPath, d.path)) {
+    console.error(`[directive] @file blocked path traversal: ${d.path}`)
+    telegram.sendMessage(chatId, `⚠️ 拒絕存取專案目錄外的檔案: \`${d.path}\``, { parse_mode: 'Markdown' }).catch(() => {})
+    return
   }
 
   if (!existsSync(filePath)) {

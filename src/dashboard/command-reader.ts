@@ -39,7 +39,7 @@ async function writeCommands(commands: readonly DashboardCommand[]): Promise<voi
   await writeFile(COMMANDS_FILE, JSON.stringify(pruned, null, 2), 'utf-8')
 }
 
-function claimCommand(
+export function claimCommand(
   commands: DashboardCommand[],
   cmd: DashboardCommand,
   botId: string,
@@ -51,7 +51,7 @@ function claimCommand(
   )
 }
 
-function completeCommand(
+export function completeCommand(
   commands: DashboardCommand[],
   cmdId: string,
   status: 'completed' | 'failed',

@@ -99,19 +99,27 @@ function drainAndMerge(projectPath: string, first: QueueItem): QueueItem {
     queues.delete(projectPath)
   }
 
-  // Merge all images
+  return mergeQueueItems(first, sameChatItems)
+}
+
+/**
+ * Pure merge: combine `first` with same-chat follow-up items into one compound
+ * QueueItem (numbered prompt, concatenated images, max of all maxTurns).
+ * Exported so the merge logic is unit-testable without the queue Map.
+ */
+export function mergeQueueItems(first: QueueItem, sameChatItems: readonly QueueItem[]): QueueItem {
+  if (sameChatItems.length === 0) return first
+
   const allImages = [
     ...first.imagePaths,
     ...sameChatItems.flatMap((i) => [...i.imagePaths]),
   ]
 
-  // Merge prompts into compound instruction
   const allPrompts = [first.prompt, ...sameChatItems.map((i) => i.prompt)]
   const mergedPrompt = allPrompts.length === 1
     ? allPrompts[0]
     : `以下是多個任務，請依序處理：\n\n${allPrompts.map((p, i) => `${i + 1}. ${p}`).join('\n')}`
 
-  // Use the highest maxTurns from any merged item
   const allMaxTurns = [first.maxTurns, ...sameChatItems.map((i) => i.maxTurns)].filter(
     (v): v is number => v !== undefined,
   )
