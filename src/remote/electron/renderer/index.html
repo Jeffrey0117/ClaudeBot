@@ -21,7 +21,7 @@
 
   <div class="form-group">
     <label for="pairing-code">Pairing Code</label>
-    <input type="text" id="pairing-code" placeholder="Pairing code" maxlength="12" autocomplete="off">
+    <input type="text" id="pairing-code" placeholder="Pairing code (8 chars)" maxlength="8" autocomplete="off">
   </div>
 
   <div class="form-group">
@@ -92,6 +92,13 @@
     btnDisconnect.addEventListener('click', () => {
       api.disconnect()
     })
+
+    // Enter in the URL or pairing-code field triggers Connect.
+    for (const el of [inputUrl, inputCode]) {
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') btnConnect.click()
+      })
+    }
 
     // Load last used relay URL, or auto-discover from rawtxt
     api.getRelayUrl().then(async (url) => {

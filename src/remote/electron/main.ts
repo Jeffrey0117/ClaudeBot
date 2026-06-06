@@ -241,6 +241,12 @@ function connectToRelay(relayUrl: string, code: string): void {
 
     if (msg.type === 'error') {
       log(`Relay error: ${msg.error}`)
+      // A pairing rejection is permanent — stop the 3s reconnect loop so we
+      // don't hammer the relay with the same bad/expired code (the misleading
+      // "connecting… / retrying" 6–9s loop the user saw on a typo).
+      if (typeof msg.error === 'string' && /pairing|invalid|expired/i.test(msg.error)) {
+        shouldReconnect = false
+      }
       socket.close()
       return
     }
@@ -379,6 +385,10 @@ function connectChat(relayUrl: string, code: string): void {
 
     if (msg.type === 'error') {
       log(`Relay error: ${msg.error}`)
+      // Permanent pairing rejection → stop the chat reconnect loop.
+      if (typeof msg.error === 'string' && /pairing|invalid|expired/i.test(msg.error)) {
+        chatShouldReconnect = false
+      }
       socket.close()
       return
     }
