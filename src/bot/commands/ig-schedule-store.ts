@@ -16,6 +16,8 @@ export interface IgScheduleEntry {
   readonly result: { success: boolean; duration_s: number; error?: string } | null
   /** Pairing label of the machine (= IG account) that should post. Optional → active machine. */
   readonly machine?: string
+  /** File path relative to the REMOTE machine's ~/Videos (zero-transfer post). */
+  readonly remotePath?: string
 }
 
 // --- Store ---

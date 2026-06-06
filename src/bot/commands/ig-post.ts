@@ -98,6 +98,66 @@ const RELAY_PUSH_LIMIT = 20 * 1024 * 1024
 const REMOTE_PUSH_TIMEOUT_MS = 180_000
 const REMOTE_IG_TIMEOUT_MS = 360_000 // CDP flow on the agent can take minutes
 
+// --- Remote-file posting (file already lives on the posting machine) ---
+
+const remoteHomeCache = new Map<string, string>() // pairing code → home dir
+
+/** Get the remote machine's home directory (cached per pairing). */
+async function getRemoteHome(code: string): Promise<string> {
+  const cached = remoteHomeCache.get(code)
+  if (cached) return cached
+  const out = await remoteToolCall(code, 'remote_execute_command', { command: 'echo %USERPROFILE%' }, 15_000)
+  const home = (out.trim().split('\n').pop() ?? '').trim()
+  if (!/^[a-zA-Z]:\\/.test(home)) {
+    throw new Error(`無法取得遠端 home 目錄: ${out.slice(0, 100)}`)
+  }
+  remoteHomeCache.set(code, home)
+  return home
+}
+
+/** Resolve a path RELATIVE to the remote machine's Videos dir (traversal-safe). */
+export async function resolveRemoteVideosPath(code: string, rel: string): Promise<string> {
+  const safe = rel.replace(/\.\./g, '').replace(/^[/\\]+/, '')
+  const home = await getRemoteHome(code)
+  return `${home}\\Videos${safe ? '\\' + safe.replace(/\//g, '\\') : ''}`
+}
+
+/**
+ * Post a file that ALREADY LIVES on the posting machine — zero transfer.
+ * relPath is relative to that machine's ~/Videos.
+ */
+export async function runIgPostRemoteFile(
+  machine: string,
+  relPath: string,
+  caption: string,
+  chatId: number,
+): Promise<PostResult> {
+  const started = Date.now()
+  const fail = (step: string, error: string): PostResult => ({
+    success: false,
+    duration_s: (Date.now() - started) / 1000,
+    error,
+    step,
+  })
+
+  const pairing = getPairing(chatId, undefined, machine)
+  if (!pairing?.connected || pairing.label !== machine) {
+    return fail('machine_offline', `機器 ${machine} 未連線`)
+  }
+
+  try {
+    const remotePath = await resolveRemoteVideosPath(pairing.code, relPath)
+    const raw = await remoteToolCall(pairing.code, 'remote_ig_post', { path: remotePath, caption }, REMOTE_IG_TIMEOUT_MS)
+    try {
+      return JSON.parse(raw) as PostResult
+    } catch {
+      return fail('remote_ig_post', `agent 回傳非 JSON: ${raw.slice(0, 200)}`)
+    }
+  } catch (err) {
+    return fail('remote_ig_post', err instanceof Error ? err.message : String(err))
+  }
+}
+
 /**
  * Remote route: media lives on THIS machine, CDP Chrome on the agent machine.
  *   ≤20MB → push file through the relay → agent posts from local path

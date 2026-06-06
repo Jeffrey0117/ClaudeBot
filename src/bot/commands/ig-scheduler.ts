@@ -5,7 +5,7 @@
  */
 
 import { getPending, updateEntry, cleanupOldEntries } from './ig-schedule-store.js'
-import { runIgPostScript } from './ig-post.js'
+import { runIgPostScript, runIgPostRemoteFile } from './ig-post.js'
 
 let schedulerInterval: NodeJS.Timeout | null = null
 let sendFn: ((chatId: number, text: string) => Promise<void>) | null = null
@@ -22,11 +22,15 @@ async function executeDuePost(entry: {
   readonly filename: string
   readonly caption: string
   readonly machine?: string
+  readonly remotePath?: string
 }): Promise<void> {
   updateEntry(entry.id, { status: 'posting' })
 
   try {
-    const result = await runIgPostScript(entry.filename, entry.caption, entry.chatId, entry.machine)
+    // remotePath = file already on the posting machine → zero-transfer route
+    const result = entry.remotePath && entry.machine
+      ? await runIgPostRemoteFile(entry.machine, entry.remotePath, entry.caption, entry.chatId)
+      : await runIgPostScript(entry.filename, entry.caption, entry.chatId, entry.machine)
     updateEntry(entry.id, { status: result.success ? 'done' : 'failed', result })
 
     if (sendFn) {

@@ -180,7 +180,8 @@
 'use strict';
 let TOKEN = localStorage.getItem('igtoken') || '';
 let curDir = '';
-let selected = null; // { dir, name }
+let srcRemote = false; // false = A 本機 Videos, true = 選中機台的 Videos
+let selected = null; // { remote, dir, name }
 
 const $ = id => document.getElementById(id);
 
@@ -210,12 +211,11 @@ async function enter() {
 
 async function loadDir(dir) {
   curDir = dir;
-  document.querySelectorAll('.tab').forEach(t =>
-    t.classList.toggle('active', curDir === t.dataset.dir || (t.dataset.dir && curDir.startsWith(t.dataset.dir + '/'))));
+  renderTabs();
   $('vlist').innerHTML = '<div class="empty">載入中…</div>';
   try {
-    const d = await api('videos?dir=' + encodeURIComponent(dir));
-    renderTabs(dir === '' ? d.dirs : null);
+    const q = 'videos?dir=' + encodeURIComponent(dir) + (srcRemote && selMachine ? '&machine=' + encodeURIComponent(selMachine) : '');
+    const d = await api(q);
     const list = $('vlist');
     list.innerHTML = '';
 
@@ -257,7 +257,7 @@ async function loadDir(dir) {
       el.querySelector('.nm').textContent = f.name;
       el.querySelector('.sz').textContent = (f.size / 1048576).toFixed(1) + 'MB';
       el.onclick = () => {
-        selected = { dir, name: f.name };
+        selected = { remote: srcRemote, dir, name: f.name };
         document.querySelectorAll('.vitem').forEach(v => v.classList.remove('sel'));
         el.classList.add('sel');
       };
@@ -268,22 +268,24 @@ async function loadDir(dir) {
   }
 }
 
-let rootDirs = null;
-function renderTabs(dirs) {
-  if (dirs) rootDirs = dirs;
-  if (!rootDirs) return;
+/** Source switcher: A's Videos vs the selected machine's Videos. */
+function renderTabs() {
   const tabs = $('tabs');
   tabs.innerHTML = '';
-  const mk = (label, dir) => {
+  const mk = (label, remote) => {
     const t = document.createElement('div');
-    t.className = 'tab' + (dir === curDir || (dir && curDir.startsWith(dir + '/')) ? ' active' : '');
-    t.dataset.dir = dir;
+    t.className = 'tab' + (srcRemote === remote ? ' active' : '');
     t.textContent = label;
-    t.onclick = () => loadDir(dir);
+    t.onclick = () => {
+      if (remote && !selMachine) { setStatus('err', '⛔ 先選一台連線中的機台'); return }
+      srcRemote = remote;
+      selected = null;
+      loadDir('');
+    };
     tabs.appendChild(t);
   };
-  mk('根目錄', '');
-  for (const d of rootDirs) mk(d, d);
+  mk('💻 A 機影片', false);
+  if (selMachine) mk('🖥 ' + selMachine + ' 的影片', true);
 }
 
 function fullPath() {
@@ -306,7 +308,8 @@ function upload(file) {
     prog.style.display = 'none'; bar.style.width = '0%';
     if (xhr.status >= 200 && xhr.status < 300) {
       const d = JSON.parse(xhr.responseText);
-      selected = { dir: '上傳', name: d.saved.split('/').pop() };
+      srcRemote = false; // uploads land on A
+      selected = { remote: false, dir: '上傳', name: d.saved.split('/').pop() };
       setStatus('ok', '✅ 已上傳 ' + file.name + '，已自動選取');
       loadDir('上傳');
     } else {
@@ -375,7 +378,10 @@ async function post() {
   $('postBtn').disabled = true;
   setStatus('run', '📤 發文中… 傳檔 → 遠端 Chrome 操作 IG，最多約 3 分鐘');
   try {
-    const d = await api('post', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ filename, caption, machine: selMachine || undefined }) });
+    const payload = selected.remote
+      ? { remoteFile: filename, caption, machine: selMachine }
+      : { filename, caption, machine: selMachine || undefined };
+    const d = await api('post', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
     const t0 = Date.now();
     const poll = setInterval(async () => {
       try {
@@ -419,7 +425,10 @@ async function schedule() {
   if (!caption) { setStatus('err', '❌ 文案不能是空的'); return }
   if (!datetime) { setStatus('err', '❌ 選個時間'); return }
   try {
-    await api('schedule', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ datetime, filename, caption, machine: selMachine || undefined }) });
+    const spayload = selected.remote
+      ? { datetime, remoteFile: filename, caption, machine: selMachine }
+      : { datetime, filename, caption, machine: selMachine || undefined };
+    await api('schedule', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(spayload) });
     setStatus('ok', '✅ 已排程 ' + datetime.replace('T', ' '));
     $('schedrow').classList.remove('show');
     loadQueue();
@@ -468,6 +477,7 @@ async function loadStatus() {
     const readyOnes = s.machines.filter(m => m.ready);
     if (!readyOnes.some(m => m.label === selMachine)) {
       selMachine = readyOnes.length ? readyOnes[0].label : null;
+      renderTabs(); // remote-source tab follows the picked machine
     }
 
     const lbl = document.createElement('span');
@@ -487,9 +497,12 @@ async function loadStatus() {
       chip.lastElementChild.textContent = '🖥 ' + m.label;
       chip.onclick = () => {
         if (!m.ready) { setStatus('err', '⛔ ' + m.label + ': ' + (m.hint || '離線')); return }
+        const changed = selMachine !== m.label;
         selMachine = m.label;
         localStorage.setItem('igmachine', m.label);
         loadStatus();
+        renderTabs();
+        if (changed && srcRemote) { selected = null; loadDir(''); }
       };
       box.appendChild(chip);
     }

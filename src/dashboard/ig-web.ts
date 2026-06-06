@@ -26,7 +26,12 @@ import { join, resolve, basename } from 'node:path'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
 import { createJsonFileStore } from '../utils/json-file-store.js'
-import { runIgPostScript, IG_VIDEOS_DIR } from '../bot/commands/ig-post.js'
+import {
+  runIgPostScript,
+  runIgPostRemoteFile,
+  resolveRemoteVideosPath,
+  IG_VIDEOS_DIR,
+} from '../bot/commands/ig-post.js'
 import { addEntry, getPending, type IgScheduleEntry } from '../bot/commands/ig-schedule-store.js'
 import { getPairings } from '../remote/pairing-store.js'
 import { remoteToolCall } from '../remote/relay-client.js'
@@ -181,8 +186,52 @@ async function isMachineReady(machine?: string): Promise<{ ok: boolean; hint: st
 
 // --- Route handlers ---
 
+/** Browse a REMOTE machine's ~/Videos via remote_list_directory. */
+async function handleVideosRemote(machine: string, dir: string, res: ServerResponse): Promise<void> {
+  const pairing = env.ADMIN_CHAT_ID
+    ? getPairings(env.ADMIN_CHAT_ID, undefined).find((p) => (p.label ?? p.code) === machine)
+    : null
+  if (!pairing?.connected) {
+    sendJson(res, { error: `機器 ${machine} 未連線` }, 503)
+    return
+  }
+
+  let raw: string
+  try {
+    const path = await resolveRemoteVideosPath(pairing.code, dir)
+    raw = await remoteToolCall(pairing.code, 'remote_list_directory', { path }, 15_000)
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 502)
+    return
+  }
+
+  // Lines look like: [file] name (2026-06-06 10:30, 23.8MB) / [dir] name (2026-06-06 10:30)
+  const SIZE_MULT: Record<string, number> = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824 }
+  const dirs: string[] = []
+  const files: Array<{ name: string; size: number; mtime: number }> = []
+  for (const line of raw.split('\n')) {
+    const m = line.match(/^\[(dir|file)\] (.+?) \((\d{4}-\d{2}-\d{2} \d{2}:\d{2})(?:, ([\d.]+)(B|KB|MB|GB))?\)\s*$/)
+    if (!m) continue
+    if (m[1] === 'dir') { dirs.push(m[2]); continue }
+    const ext = m[2].slice(m[2].lastIndexOf('.')).toLowerCase()
+    if (!MEDIA_EXTS.has(ext)) continue
+    files.push({
+      name: m[2],
+      size: Math.round(parseFloat(m[4] ?? '0') * (SIZE_MULT[m[5] ?? 'B'] ?? 1)),
+      mtime: Date.parse(m[3]) || 0,
+    })
+  }
+  const sorted = [...files].sort((a, b) => b.mtime - a.mtime)
+  sendJson(res, { dir, dirs, files: sorted, machine })
+}
+
 async function handleVideos(url: URL, res: ServerResponse): Promise<void> {
+  const machine = url.searchParams.get('machine')
   const dir = url.searchParams.get('dir') ?? ''
+  if (machine) {
+    await handleVideosRemote(machine, dir, res)
+    return
+  }
   const dirPath = dir ? safePath(dir) : IG_VIDEOS_DIR
   if (!dirPath) { sendJson(res, { error: 'bad dir' }, 400); return }
 
@@ -241,15 +290,23 @@ function handleUpload(req: IncomingMessage, url: URL, res: ServerResponse): void
 }
 
 const PostSchema = z.object({
-  filename: z.string().min(1).max(500),
+  filename: z.string().min(1).max(500).optional(), // file on A (will be transferred)
+  remoteFile: z.string().min(1).max(500).optional(), // file already on the machine, rel to ~/Videos
   caption: z.string().min(1).max(2200), // IG caption hard limit
   machine: z.string().max(100).optional(), // pairing label = which IG account
 })
 
 async function handlePost(body: string, res: ServerResponse): Promise<void> {
   const parsed = PostSchema.safeParse(JSON.parse(body))
-  if (!parsed.success) { sendJson(res, { error: '需要 filename + caption' }, 400); return }
-  const { filename, caption, machine } = parsed.data
+  if (!parsed.success || (!parsed.data.filename && !parsed.data.remoteFile)) {
+    sendJson(res, { error: '需要 filename（或 remoteFile）+ caption' }, 400)
+    return
+  }
+  const { filename, remoteFile, caption, machine } = parsed.data
+  if (remoteFile && !machine) {
+    sendJson(res, { error: '遠端檔案需要指定 machine' }, 400)
+    return
+  }
 
   // Hard gate: without the remote machine, the local fallback would launch
   // A's CDP Chrome (not logged into IG) and die mid-flow with a confusing error
@@ -261,16 +318,21 @@ async function handlePost(body: string, res: ServerResponse): Promise<void> {
 
   pruneJobs()
   const id = randomBytes(4).toString('hex')
-  jobs.set(id, { id, filename, status: 'running', result: null, startedAt: Date.now() })
+  const display = remoteFile ?? filename ?? ''
+  jobs.set(id, { id, filename: display, status: 'running', result: null, startedAt: Date.now() })
 
-  // Fire and poll — the CDP flow takes minutes
-  runIgPostScript(filename, caption, env.ADMIN_CHAT_ID, machine)
+  // Fire and poll — the CDP flow takes minutes.
+  // remoteFile → zero-transfer (file already on the posting machine)
+  const run = remoteFile
+    ? runIgPostRemoteFile(machine!, remoteFile, caption, env.ADMIN_CHAT_ID ?? 0)
+    : runIgPostScript(filename!, caption, env.ADMIN_CHAT_ID, machine)
+  run
     .then((result) => {
-      jobs.set(id, { id, filename, status: result.success ? 'done' : 'failed', result, startedAt: Date.now() })
+      jobs.set(id, { id, filename: display, status: result.success ? 'done' : 'failed', result, startedAt: Date.now() })
     })
     .catch((err) => {
       jobs.set(id, {
-        id, filename, status: 'failed',
+        id, filename: display, status: 'failed',
         result: { success: false, duration_s: 0, error: err instanceof Error ? err.message : String(err) },
         startedAt: Date.now(),
       })
@@ -281,40 +343,54 @@ async function handlePost(body: string, res: ServerResponse): Promise<void> {
 
 const ScheduleSchema = z.object({
   datetime: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/),
-  filename: z.string().min(1).max(500),
+  filename: z.string().min(1).max(500).optional(),
+  remoteFile: z.string().min(1).max(500).optional(),
   caption: z.string().min(1).max(2200),
   machine: z.string().max(100).optional(),
 })
 
 async function handleSchedule(body: string, res: ServerResponse): Promise<void> {
   const parsed = ScheduleSchema.safeParse(JSON.parse(body))
-  if (!parsed.success) { sendJson(res, { error: '需要 datetime + filename + caption' }, 400); return }
-  const { datetime, filename, caption, machine } = parsed.data
+  if (!parsed.success || (!parsed.data.filename && !parsed.data.remoteFile)) {
+    sendJson(res, { error: '需要 datetime + filename（或 remoteFile）+ caption' }, 400)
+    return
+  }
+  const { datetime, filename, remoteFile, caption, machine } = parsed.data
+  if (remoteFile && !machine) {
+    sendJson(res, { error: '遠端檔案需要指定 machine' }, 400)
+    return
+  }
 
   const scheduled = new Date(datetime)
   if (isNaN(scheduled.getTime()) || scheduled.getTime() <= Date.now()) {
     sendJson(res, { error: '排程時間必須是未來' }, 400)
     return
   }
-  const fullPath = safePath(filename)
-  if (!fullPath) { sendJson(res, { error: '無效路徑' }, 400); return }
-  try {
-    await stat(fullPath)
-  } catch {
-    sendJson(res, { error: `找不到檔案: ${filename}` }, 404)
-    return
+
+  // Local files are verified now; remote files are checked at fire time
+  // (the machine may be offline right now — that's fine for a future post)
+  if (!remoteFile) {
+    const fullPath = safePath(filename!)
+    if (!fullPath) { sendJson(res, { error: '無效路徑' }, 400); return }
+    try {
+      await stat(fullPath)
+    } catch {
+      sendJson(res, { error: `找不到檔案: ${filename}` }, 404)
+      return
+    }
   }
 
   const entry: IgScheduleEntry = {
     id: randomBytes(4).toString('hex'),
     chatId: env.ADMIN_CHAT_ID ?? 0,
     datetime,
-    filename,
+    filename: remoteFile ?? filename ?? '',
     caption,
     status: 'pending',
     createdAt: new Date().toISOString(),
     result: null,
     ...(machine ? { machine } : {}),
+    ...(remoteFile ? { remotePath: remoteFile } : {}),
   }
   addEntry(entry)
   sendJson(res, { scheduled: entry.id, datetime }, 201)
