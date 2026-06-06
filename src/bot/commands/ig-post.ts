@@ -464,8 +464,11 @@ async function handleListVideos(ctx: BotContext, subdir: string): Promise<void> 
   const sorted = [...withTimes].sort((a, b) => b.mtime - a.mtime)
   const shown = sorted.slice(0, LS_LIMIT)
 
+  // Markdown safety: filenames like 翻譯專案_xxx contain `_` which Telegram
+  // parses as italic → "can't parse entities" 400. Everything user-derived
+  // goes inside backtick code entities (where _ * [ are inert).
   const prefix = subdir ? `${subdir.replace(/\\/g, '/')}/` : ''
-  const lines = [`📁 *${subdir || 'Videos'}*`, '']
+  const lines = [`📁 \`${subdir || 'Videos'}\``, '']
 
   if (folders.length > 0) {
     lines.push(...folders.map((f) => `📂 \`/ig ls ${prefix}${f}\``), '')
@@ -474,16 +477,23 @@ async function handleListVideos(ctx: BotContext, subdir: string): Promise<void> 
   if (shown.length === 0) {
     lines.push('(沒有影片/圖片)')
   } else {
+    // Stay under Telegram's 4096-char message cap (leave room for footer)
+    const MAX_CHARS = 3800
+    let used = lines.join('\n').length
+    let displayed = 0
     for (const f of shown) {
       const mb = (f.size / 1024 / 1024).toFixed(1)
-      lines.push(`🎬 ${f.name} (${mb}MB)`)
       const quoted = f.name.includes(' ') || prefix.includes(' ')
         ? `"${prefix}${f.name}"`
         : `${prefix}${f.name}`
-      lines.push(`   \`/ig post ${quoted} \``)
+      const block = `🎬 \`${f.name}\` (${mb}MB)\n   \`/ig post ${quoted} \``
+      if (used + block.length > MAX_CHARS) break
+      lines.push(block)
+      used += block.length + 1
+      displayed++
     }
-    if (sorted.length > LS_LIMIT) {
-      lines.push('', `(還有 ${sorted.length - LS_LIMIT} 個，只顯示最新 ${LS_LIMIT})`)
+    if (sorted.length > displayed) {
+      lines.push('', `(還有 ${sorted.length - displayed} 個，只顯示最新 ${displayed})`)
     }
   }
 
