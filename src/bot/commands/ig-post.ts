@@ -1,5 +1,5 @@
 /**
- * /ig — Instagram automation.
+ * /ig — Instagram automation (CDP engine, see ../vision/ig-cdp-flow.ts).
  *
  * Usage:
  *   /ig post <filename> <caption>           — post immediately
@@ -11,10 +11,10 @@
  */
 
 import type { BotContext } from '../../types/context.js'
-import { execFile } from 'node:child_process'
 import { join, resolve, relative } from 'node:path'
 import { stat, readdir, writeFile, mkdir } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
+import { runIgCdpPost } from '../vision/ig-cdp-flow.js'
 import {
   addEntry,
   listSchedule,
@@ -25,8 +25,6 @@ import {
 
 // --- Constants ---
 
-const SCRIPT_DIR = join(process.cwd(), 'scripts')
-const IG_FLOW_SCRIPT = join(SCRIPT_DIR, 'ig-post-flow.py')
 const TEMPLATES_DIR = join(process.cwd(), 'data', 'ig-templates')
 const VIDEOS_DIR = process.env.IG_VIDEOS_DIR ?? 'C:\\Users\\jeffb\\Videos'
 
@@ -58,27 +56,17 @@ export async function saveIgTemplate(name: string, buffer: Buffer): Promise<void
   await writeFile(join(TEMPLATES_DIR, `${safeName}.png`), buffer)
 }
 
-/** Run the ig-post-flow.py script. Exported for use by ig-scheduler. */
+/**
+ * Post to IG via the CDP-controlled Chrome (DOM-based, resolution-independent).
+ * Replaces the old pyautogui ig-post-flow.py engine — same PostResult contract,
+ * so ig-scheduler keeps working unchanged. Exported for use by ig-scheduler.
+ */
 export async function runIgPostScript(filename: string, caption: string): Promise<PostResult> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      'py',
-      [IG_FLOW_SCRIPT, '--video', filename, '--caption', caption, '--videos-dir', VIDEOS_DIR],
-      { timeout: 120_000, windowsHide: true, shell: false },
-      (err, stdout, stderr) => {
-        if (err && !stdout.trim()) {
-          reject(new Error(stderr?.trim() || err.message))
-          return
-        }
-        try {
-          const result = JSON.parse(stdout.trim()) as PostResult
-          resolve(result)
-        } catch {
-          reject(new Error(`Invalid script output: ${stdout.trim()}`))
-        }
-      },
-    )
-  })
+  const fullPath = safeVideoPath(filename)
+  if (!fullPath) {
+    return { success: false, duration_s: 0, error: '無效的檔案路徑' }
+  }
+  return runIgCdpPost(fullPath, caption)
 }
 
 // --- Helpers ---

@@ -1,7 +1,7 @@
 /**
  * IG Scheduler — checks every 60s for due posts and executes them.
- * Uses ig-post-flow.py for the actual posting.
- * Concurrency lock ensures only one post runs at a time (screen automation).
+ * Posting runs through the CDP engine (runIgPostScript → ig-cdp-flow).
+ * Concurrency lock ensures only one post runs at a time (single IG tab).
  */
 
 import { getPending, updateEntry, cleanupOldEntries } from './ig-schedule-store.js'
