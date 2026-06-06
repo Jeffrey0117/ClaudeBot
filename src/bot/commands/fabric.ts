@@ -7,8 +7,7 @@ import { unlinkSync } from 'node:fs'
 import { findProject } from '../../config/projects.js'
 import { getPairingByLabel } from '../../remote/pairing-store.js'
 import { remoteToolCall } from '../../remote/relay-client.js'
-import { loadPipeConfig } from '../../utils/pipe-executor.js'
-import { uploadToPokkit } from '../../utils/upload-executor.js'
+import { loadPokkitConfig, uploadToPokkit } from '../../utils/upload-executor.js'
 
 /**
  * /fabric <project> <machine> [startCmd] — dev-fabric Slice 1.
@@ -62,11 +61,10 @@ export async function fabricCommand(ctx: BotContext): Promise<void> {
       '--exclude=.git', '--exclude=node_modules', '.',
     ], { windowsHide: true, timeout: 120_000 })
 
-    // 2. Upload to pokkit → download URL
+    // 2. Upload to pokkit → download URL (1d expiry — transfer artifact only)
     await ctx.reply('☁️ 上傳 pokkit…')
-    const config = loadPipeConfig()
-    if (!config) { await ctx.reply('❌ 未設定 CloudPipe/pokkit（CLOUDPIPE_URL）'); return }
-    const url = await uploadToPokkit(tarPath, config)
+    if (!loadPokkitConfig()) { await ctx.reply('❌ 未設定 pokkit（.env 加 POKKIT_API_KEY）'); return }
+    const url = await uploadToPokkit(tarPath, { expiresIn: '1d' })
 
     // 3. B: download + extract + install (cmd.exe-native)
     await ctx.reply(`📥 ${machineLabel} 下載 + 安裝中…`)

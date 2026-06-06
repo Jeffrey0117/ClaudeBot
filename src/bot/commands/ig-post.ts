@@ -17,8 +17,7 @@ import { randomBytes } from 'node:crypto'
 import { runIgCdpPost } from '../vision/ig-cdp-flow.js'
 import { getPairing } from '../../remote/pairing-store.js'
 import { remoteToolCall } from '../../remote/relay-client.js'
-import { loadPipeConfig } from '../../utils/pipe-executor.js'
-import { uploadToPokkit } from '../../utils/upload-executor.js'
+import { loadPokkitConfig, uploadToPokkit } from '../../utils/upload-executor.js'
 import {
   addEntry,
   listSchedule,
@@ -123,12 +122,12 @@ async function runRemoteIgPost(
       await remoteToolCall(code, 'remote_push_file', { path: remotePath, base64 }, REMOTE_PUSH_TIMEOUT_MS)
       raw = await remoteToolCall(code, 'remote_ig_post', { path: remotePath, caption }, REMOTE_IG_TIMEOUT_MS)
     } else {
-      // Pokkit route: agent pulls from URL (no relay size pressure)
-      const config = loadPipeConfig()
-      if (!config) {
-        return fail('upload_pokkit', `檔案 ${(stats.size / 1024 / 1024).toFixed(1)}MB 超過 relay 上限 20MB，且 CloudPipe/pokkit 未設定`)
+      // Pokkit route: agent pulls from URL (no relay size pressure).
+      // 1d auto-expiry — the file only exists to make the transfer.
+      if (!loadPokkitConfig()) {
+        return fail('upload_pokkit', `檔案 ${(stats.size / 1024 / 1024).toFixed(1)}MB 超過 relay 上限 20MB，且 POKKIT_API_KEY 未設定`)
       }
-      const url = await uploadToPokkit(fullPath, config)
+      const url = await uploadToPokkit(fullPath, { expiresIn: '1d' })
       raw = await remoteToolCall(code, 'remote_ig_post', { url, filename: fileName, caption }, REMOTE_IG_TIMEOUT_MS)
     }
 
