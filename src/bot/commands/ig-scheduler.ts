@@ -25,7 +25,7 @@ async function executeDuePost(entry: {
   updateEntry(entry.id, { status: 'posting' })
 
   try {
-    const result = await runIgPostScript(entry.filename, entry.caption)
+    const result = await runIgPostScript(entry.filename, entry.caption, entry.chatId)
     updateEntry(entry.id, { status: result.success ? 'done' : 'failed', result })
 
     if (sendFn) {

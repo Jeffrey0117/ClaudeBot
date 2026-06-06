@@ -104,7 +104,8 @@ export async function uploadToPokkit(filePath: string, config: PipeConfig): Prom
   form.append('file', new Blob([readFileSync(filePath)]), basename(filePath))
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 30_000)
+  // 120s — pokkit also carries large videos (IG remote route), not just docs
+  const timeout = setTimeout(() => controller.abort(), 120_000)
 
   try {
     const res = await fetch(`${config.baseUrl}/api/pokkit/upload`, {

@@ -11,10 +11,14 @@
  */
 
 import type { BotContext } from '../../types/context.js'
-import { join, resolve, relative } from 'node:path'
-import { stat, readdir, writeFile, mkdir } from 'node:fs/promises'
+import { join, resolve, relative, basename } from 'node:path'
+import { stat, readdir, writeFile, mkdir, readFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { runIgCdpPost } from '../vision/ig-cdp-flow.js'
+import { getPairing } from '../../remote/pairing-store.js'
+import { remoteToolCall } from '../../remote/relay-client.js'
+import { loadPipeConfig } from '../../utils/pipe-executor.js'
+import { uploadToPokkit } from '../../utils/upload-executor.js'
 import {
   addEntry,
   listSchedule,
@@ -58,15 +62,85 @@ export async function saveIgTemplate(name: string, buffer: Buffer): Promise<void
 
 /**
  * Post to IG via the CDP-controlled Chrome (DOM-based, resolution-independent).
- * Replaces the old pyautogui ig-post-flow.py engine — same PostResult contract,
- * so ig-scheduler keeps working unchanged. Exported for use by ig-scheduler.
+ *
+ * Routing — the CDP Chrome may live on a DIFFERENT machine than the bot:
+ *   paired (chatId given)  → transfer media to the agent machine, then run
+ *                            the CDP flow THERE via remote_ig_post
+ *   not paired             → run the CDP flow on this machine
+ *
+ * Same PostResult contract as the old pyautogui engine, so ig-scheduler
+ * keeps working unchanged. Exported for use by ig-scheduler.
  */
-export async function runIgPostScript(filename: string, caption: string): Promise<PostResult> {
+export async function runIgPostScript(
+  filename: string,
+  caption: string,
+  chatId?: number,
+): Promise<PostResult> {
   const fullPath = safeVideoPath(filename)
   if (!fullPath) {
     return { success: false, duration_s: 0, error: '無效的檔案路徑' }
   }
+
+  const pairing = chatId !== undefined ? getPairing(chatId, undefined) : null
+  if (pairing?.connected) {
+    return runRemoteIgPost(pairing.code, fullPath, caption)
+  }
   return runIgCdpPost(fullPath, caption)
+}
+
+/** Transfer limit for the relay (remote_push_file caps at 20MB). */
+const RELAY_PUSH_LIMIT = 20 * 1024 * 1024
+const REMOTE_PUSH_TIMEOUT_MS = 180_000
+const REMOTE_IG_TIMEOUT_MS = 360_000 // CDP flow on the agent can take minutes
+
+/**
+ * Remote route: media lives on THIS machine, CDP Chrome on the agent machine.
+ *   ≤20MB → push file through the relay → agent posts from local path
+ *   >20MB → upload to pokkit → agent downloads from URL and posts
+ */
+async function runRemoteIgPost(
+  code: string,
+  fullPath: string,
+  caption: string,
+): Promise<PostResult> {
+  const started = Date.now()
+  const fail = (step: string, error: string): PostResult => ({
+    success: false,
+    duration_s: (Date.now() - started) / 1000,
+    error,
+    step,
+  })
+
+  const fileName = basename(fullPath)
+  try {
+    const stats = await stat(fullPath)
+
+    let raw: string
+    if (stats.size <= RELAY_PUSH_LIMIT) {
+      // Relay push: lands under the agent's baseDir at ig-videos/<name>
+      const base64 = (await readFile(fullPath)).toString('base64')
+      const remotePath = `ig-videos/${fileName}`
+      await remoteToolCall(code, 'remote_push_file', { path: remotePath, base64 }, REMOTE_PUSH_TIMEOUT_MS)
+      raw = await remoteToolCall(code, 'remote_ig_post', { path: remotePath, caption }, REMOTE_IG_TIMEOUT_MS)
+    } else {
+      // Pokkit route: agent pulls from URL (no relay size pressure)
+      const config = loadPipeConfig()
+      if (!config) {
+        return fail('upload_pokkit', `檔案 ${(stats.size / 1024 / 1024).toFixed(1)}MB 超過 relay 上限 20MB，且 CloudPipe/pokkit 未設定`)
+      }
+      const url = await uploadToPokkit(fullPath, config)
+      raw = await remoteToolCall(code, 'remote_ig_post', { url, filename: fileName, caption }, REMOTE_IG_TIMEOUT_MS)
+    }
+
+    try {
+      return JSON.parse(raw) as PostResult
+    } catch {
+      return fail('remote_ig_post', `agent 回傳非 JSON: ${raw.slice(0, 200)}`)
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return fail('remote_transfer', msg)
+  }
 }
 
 // --- Helpers ---
@@ -197,7 +271,7 @@ async function runIgPost(ctx: BotContext, filename: string, caption: string): Pr
   )
 
   try {
-    const result = await runIgPostScript(filename, caption)
+    const result = await runIgPostScript(filename, caption, chatId)
 
     const statusText = result.success
       ? `✅ IG 發文成功！\n📁 ${filename}\n⏱ ${formatDuration(result.duration_s)}`

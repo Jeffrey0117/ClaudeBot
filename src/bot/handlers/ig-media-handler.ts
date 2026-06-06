@@ -102,7 +102,7 @@ async function saveIncomingIgMedia(
     `📸 IG 發文中...\n📁 ${savedName}\n✏️ ${igCaption.slice(0, 60)}${igCaption.length > 60 ? '...' : ''}`,
   )
   try {
-    const result = await runIgPostScript(savedName, igCaption)
+    const result = await runIgPostScript(savedName, igCaption, chatId)
     const statusText = result.success
       ? `✅ IG 發文成功！\n📁 ${savedName}\n⏱ ${result.duration_s.toFixed(1)}s`
       : `❌ IG 發文失敗\n📁 ${savedName}\n💥 ${result.error ?? 'Unknown error'}${result.step ? `\n📍 步驟: ${result.step}` : ''}`
