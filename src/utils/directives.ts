@@ -17,7 +17,7 @@
  */
 
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, relative, isAbsolute } from 'node:path'
 import { Input, Markup } from 'telegraf'
 import type { Telegraf } from 'telegraf'
 import type { BotContext } from '../types/context.js'
@@ -212,6 +212,19 @@ async function executeFile(
 ): Promise<void> {
   // Resolve relative paths against project dir
   const filePath = projectPath ? resolve(projectPath, d.path) : d.path
+
+  // Path-traversal guard: a resolved @file path must stay INSIDE the project
+  // dir. Without this, `@file(../../.env)` or an absolute path could exfiltrate
+  // secrets (.env with BOT_TOKEN/API keys, SSH private keys) straight to chat.
+  if (projectPath) {
+    const root = resolve(projectPath)
+    const rel = relative(root, filePath)
+    if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+      console.error(`[directive] @file blocked path traversal: ${d.path}`)
+      telegram.sendMessage(chatId, `⚠️ 拒絕存取專案目錄外的檔案: \`${d.path}\``, { parse_mode: 'Markdown' }).catch(() => {})
+      return
+    }
+  }
 
   if (!existsSync(filePath)) {
     telegram.sendMessage(chatId, `⚠️ 檔案不存在: \`${d.path}\``, { parse_mode: 'Markdown' }).catch(() => {})

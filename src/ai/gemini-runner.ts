@@ -36,7 +36,13 @@ function resolveGeminiCli(): { cmd: string; prefix: readonly string[]; shell: bo
       }
     }
   } catch { /* fallback below */ }
-  return { cmd: 'gemini', prefix: [], shell: true }
+  // SECURITY: never fall back to shell:true. With shell:true the `--prompt`
+  // argv is concatenated into a cmd.exe command line, so user/model text
+  // containing `&&`, `|`, `$(...)` etc. executes as a command (RCE). With
+  // shell:false the prompt is passed as a literal argument and cannot inject.
+  // If the npm .cmd shim can't be resolved to its cli.js, spawning bare
+  // 'gemini' with shell:false simply ENOENTs with a clear error — safe.
+  return { cmd: 'gemini', prefix: [], shell: false }
 }
 
 const geminiCli = resolveGeminiCli()
