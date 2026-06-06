@@ -1,5 +1,6 @@
 import type { Telegraf } from 'telegraf'
 import type { BotContext } from '../types/context.js'
+import { splitText } from '../utils/text-splitter.js'
 
 /**
  * Strip non-display content from streaming text before showing in Telegram.
@@ -175,36 +176,58 @@ export async function finalizeDraft(
   const state = activeDrafts.get(chatId)
   if (!state) return
 
+  // Split to Telegram's 4096 limit. The draft is ONE message, so it can only
+  // hold the first chunk; the rest go out as new messages. Without this a long
+  // final reply (e.g. /deep) blew past 4096 and every edit/send below failed
+  // into a swallowed .catch → the reply silently vanished.
+  const chunks = splitText(finalText, 4096)
+  const first = chunks[0] ?? finalText
+  const rest = chunks.slice(1)
+
   try {
-    // Edit the draft message with final clean content
-    await telegram.editMessageText(
-      chatId, state.messageId, undefined,
-      finalText,
-      { parse_mode: 'Markdown' },
-    )
-  } catch (err) {
-    // "message is not modified" = draft already has correct text → success
-    if (isNotModifiedError(err)) {
-      // Draft already shows the right content — nothing to do
-    } else {
-      // Fallback: edit without Markdown
-      try {
-        await telegram.editMessageText(chatId, state.messageId, undefined, finalText)
-      } catch (err2) {
-        if (isNotModifiedError(err2)) {
-          // Already correct — success
-        } else {
-          // Edit truly failed — delete dirty draft and send new message
-          // Use await (not .catch) so we only send new if delete succeeds
-          try {
-            await telegram.deleteMessage(chatId, state.messageId)
-          } catch {
-            // Delete failed — draft message still exists, do NOT send another
-            // (would cause duplicate). Leave the draft as-is.
-            return
+    // Edit the draft message with the first chunk
+    try {
+      await telegram.editMessageText(
+        chatId, state.messageId, undefined,
+        first,
+        { parse_mode: 'Markdown' },
+      )
+    } catch (err) {
+      // "message is not modified" = draft already has correct text → success
+      if (isNotModifiedError(err)) {
+        // Draft already shows the right content — nothing to do
+      } else {
+        // Fallback: edit without Markdown
+        try {
+          await telegram.editMessageText(chatId, state.messageId, undefined, first)
+        } catch (err2) {
+          if (isNotModifiedError(err2)) {
+            // Already correct — success
+          } else {
+            // Edit truly failed — delete dirty draft, then resend the first
+            // chunk. Only resend if the delete succeeded, else we'd duplicate
+            // (the dirty draft would remain AND a new copy appear).
+            let deleted = false
+            try {
+              await telegram.deleteMessage(chatId, state.messageId)
+              deleted = true
+            } catch {
+              // Couldn't delete — leave the dirty draft, skip resending `first`.
+            }
+            if (deleted) {
+              await telegram.sendMessage(chatId, first).catch(() => {})
+            }
           }
-          await telegram.sendMessage(chatId, finalText).catch(() => {})
         }
+      }
+    }
+
+    // Deliver any remaining chunks as fresh messages.
+    for (const chunk of rest) {
+      try {
+        await telegram.sendMessage(chatId, chunk, { parse_mode: 'Markdown' })
+      } catch {
+        await telegram.sendMessage(chatId, chunk).catch(() => {})
       }
     }
   } finally {

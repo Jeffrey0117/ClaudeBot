@@ -208,6 +208,23 @@ async function checkTunnelHealth(): Promise<void> {
   }
 }
 
+/** Alert the admin (via the main bot token) that the relay tunnel is fully down. */
+function notifyTunnelGaveUp(): void {
+  const token = env.BOT_TOKEN
+  const chatId = env.ADMIN_CHAT_ID
+  if (!token || !chatId) return
+  const base = env.TELEGRAM_API_BASE || 'https://api.telegram.org'
+  fetch(`${base}/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: `⚠️ Relay tunnel 在 ${MAX_RECONNECT_ATTEMPTS} 次重試後放棄 — 遠端配對與 Electron 客戶端目前全部失聯。請檢查網路 / cloudflared,再重啟 bot。`,
+    }),
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => {})
+}
+
 function scheduleReconnect(): void {
   if (shuttingDown || tunnelPort === 0) return
   // Clear any existing reconnect timer before scheduling new one
@@ -219,6 +236,9 @@ function scheduleReconnect(): void {
     console.error(`[tunnel] Gave up after ${MAX_RECONNECT_ATTEMPTS} reconnect attempts`)
     publicUrl = ''
     clearSharedUrl()
+    // Don't fail silently: clearing the URL means every remote pairing + Electron
+    // client is now cut off. Tell the operator so it isn't an invisible outage.
+    notifyTunnelGaveUp()
     return
   }
 
