@@ -202,7 +202,7 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
 
     if (env.AUTO_COMMIT) {
       try {
-        const commitResult = autoCommitAndPush(ctx.item.project.path, ctx.item.prompt)
+        const commitResult = await autoCommitAndPush(ctx.item.project.path, ctx.item.prompt)
         if (commitResult && !ctx.isDashboard) {
           const pushStatus = commitResult.pushed
             ? 'pushed \u2713'

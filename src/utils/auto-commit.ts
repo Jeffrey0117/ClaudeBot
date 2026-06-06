@@ -1,5 +1,11 @@
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { isWorktree, mainRepoPath, mergeToMain } from '../git/worktree.js'
+
+// Async git so a slow `git push` (network, up to 30s) never blocks the single
+// bot event loop. A blocked loop froze the heartbeat and could trip the
+// watchdog into a false SIGTERM mid-turn.
+const execFileAsync = promisify(execFile)
 
 export interface AutoCommitResult {
   readonly committed: boolean
@@ -9,39 +15,29 @@ export interface AutoCommitResult {
   readonly pushError?: string
 }
 
-function isGitRepo(cwd: string): boolean {
+async function isGitRepo(cwd: string): Promise<boolean> {
   try {
-    const out = execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
+    const { stdout } = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
       cwd,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     })
-    return out.trim() === 'true'
+    return stdout.trim() === 'true'
   } catch {
     return false
   }
 }
 
-function getChangedFiles(cwd: string): string[] {
-  const status = execFileSync('git', ['status', '--porcelain'], {
-    cwd,
-    encoding: 'utf-8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  }).trim()
+async function getChangedFiles(cwd: string): Promise<string[]> {
+  const { stdout } = await execFileAsync('git', ['status', '--porcelain'], { cwd, windowsHide: true })
+  const status = stdout.trim()
   if (!status) return []
   return status.split('\n').filter(Boolean)
 }
 
-function hasRemote(cwd: string): boolean {
+async function hasRemote(cwd: string): Promise<boolean> {
   try {
-    const out = execFileSync('git', ['remote'], {
-      cwd,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-    }).trim()
-    return out.length > 0
+    const { stdout } = await execFileAsync('git', ['remote'], { cwd, windowsHide: true })
+    return stdout.trim().length > 0
   } catch {
     return false
   }
@@ -53,47 +49,36 @@ function buildCommitMessage(_userPrompt: string): string {
   return `bot: auto-sync ${ts}`
 }
 
-export function autoCommitAndPush(
+export async function autoCommitAndPush(
   projectPath: string,
   userPrompt: string,
-): AutoCommitResult | null {
-  if (!isGitRepo(projectPath)) return null
+): Promise<AutoCommitResult | null> {
+  if (!(await isGitRepo(projectPath))) return null
 
-  const changed = getChangedFiles(projectPath)
+  const changed = await getChangedFiles(projectPath)
   if (changed.length === 0) return null
 
   const commitMessage = buildCommitMessage(userPrompt)
 
-  // Use 'git add -u' (tracked files only) + 'git add .' (respects .gitignore)
-  // instead of 'git add -A' to avoid staging secrets or junk files
-  execFileSync('git', ['add', '.'], {
-    cwd: projectPath,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  })
-
-  execFileSync('git', ['commit', '-m', commitMessage], {
-    cwd: projectPath,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  })
+  // 'git add .' respects .gitignore (avoids staging secrets/junk).
+  await execFileAsync('git', ['add', '.'], { cwd: projectPath, windowsHide: true })
+  await execFileAsync('git', ['commit', '-m', commitMessage], { cwd: projectPath, windowsHide: true })
 
   let pushed = false
   let pushError: string | undefined
 
-  if (hasRemote(projectPath)) {
+  if (await hasRemote(projectPath)) {
     let branch = ''
     try {
-      branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-        cwd: projectPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim()
+      const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+        cwd: projectPath, windowsHide: true,
+      })
+      branch = stdout.trim()
     } catch { /* ignore */ }
 
     if (branch === 'master' || branch === 'main') {
       try {
-        execFileSync('git', ['push'], {
-          cwd: projectPath,
-          stdio: ['pipe', 'pipe', 'pipe'],
-          timeout: 30_000,
-        })
+        await execFileAsync('git', ['push'], { cwd: projectPath, timeout: 30_000, windowsHide: true })
         pushed = true
       } catch (err) {
         pushError = err instanceof Error ? err.message : String(err)
@@ -109,8 +94,8 @@ export function autoCommitAndPush(
         const merge = mergeToMain(mainDir, branch)
         if (merge.success) {
           try {
-            execFileSync('git', ['push', 'origin', 'master'], {
-              cwd: mainDir, stdio: ['pipe', 'pipe', 'pipe'], timeout: 30_000,
+            await execFileAsync('git', ['push', 'origin', 'master'], {
+              cwd: mainDir, timeout: 30_000, windowsHide: true,
             })
             pushed = true
           } catch (err) {

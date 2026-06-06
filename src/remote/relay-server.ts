@@ -225,7 +225,7 @@ function handleAgentMessage(_ws: WebSocket, code: string, msg: RelayInbound, raw
 let nextBotRequestId = 900_000
 
 /** Pending bot-initiated tool call resolvers: requestId → resolve */
-const botPendingCalls = new Map<number, { resolve: (result: string) => void; timer: ReturnType<typeof setTimeout> }>()
+const botPendingCalls = new Map<number, { code: string; resolve: (result: string) => void; timer: ReturnType<typeof setTimeout> }>()
 
 /**
  * Call a tool on a remote agent directly from the bot (not via MCP proxy).
@@ -250,7 +250,7 @@ function callAgentToolOnce(
       reject(new Error('Agent tool call timeout'))
     }, timeoutMs)
 
-    botPendingCalls.set(id, { resolve, timer })
+    botPendingCalls.set(id, { code, resolve, timer })
 
     send(agent.ws, { type: 'tool_call', id, tool, args })
   })
@@ -538,8 +538,11 @@ export function startRelayServer(port: number): void {
             requestOrigins.delete(assignedCode)
           }
 
-          // Reject all pending bot-initiated calls for this agent
+          // Reject only THIS agent's pending bot-initiated calls. Previously
+          // this rejected EVERY pending call, so one agent dropping aborted
+          // other connected agents' in-flight /projects, /chat, etc.
           for (const [id, pending] of botPendingCalls) {
+            if (pending.code !== assignedCode) continue
             clearTimeout(pending.timer)
             pending.resolve('Error: Agent disconnected')
             botPendingCalls.delete(id)
