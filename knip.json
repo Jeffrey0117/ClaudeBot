@@ -1,0 +1,23 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/launcher.ts",
+    "src/index.ts",
+    "src/setup.ts",
+    "src/dashboard/start.ts",
+    "src/remote/agent.ts",
+    "src/remote/electron/main.ts",
+    "src/mcp/*.ts",
+    "src/plugins/**/index.ts",
+    "scripts/*.cjs"
+  ],
+  "project": ["src/**/*.ts"],
+  "ignore": [
+    "src/dashboard/web/**",
+    "**/*.d.ts"
+  ],
+  "ignoreBinaries": [
+    "cloudflared", "ffmpeg", "esbuild", "where", "tar", "reg", "py",
+    "powercfg", "powershell", "agent-browser", "rg"
+  ]
+}
