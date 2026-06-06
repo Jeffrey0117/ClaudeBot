@@ -196,7 +196,9 @@ export async function igCommand(ctx: BotContext): Promise<void> {
       '`/ig add <datetime> <filename> <caption>`\n' +
       '`/ig list` — 查看排程\n' +
       '`/ig cancel <id>` — 取消排程\n' +
-      '`/ig history` — 最近發文紀錄',
+      '`/ig history` — 最近發文紀錄\n\n' +
+      '*檔案:*\n' +
+      '`/ig ls [子資料夾]` — 列出 Videos 裡的影片',
       { parse_mode: 'Markdown' },
     )
     return
@@ -234,6 +236,12 @@ export async function igCommand(ctx: BotContext): Promise<void> {
   // --- /ig history ---
   if (args === 'history') {
     await handleHistory(ctx)
+    return
+  }
+
+  // --- /ig ls [subdir] ---
+  if (args === 'ls' || args.startsWith('ls ')) {
+    await handleListVideos(ctx, args === 'ls' ? '' : args.slice(3).trim())
     return
   }
 
@@ -418,6 +426,68 @@ async function handleHistory(ctx: BotContext): Promise<void> {
     lines.push(`${icon} ${entry.datetime.replace('T', ' ')} — ${entry.filename}${duration}${error}`)
   }
 
+  await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' })
+}
+
+// --- List videos in IG_VIDEOS_DIR ---
+
+const MEDIA_EXTS = new Set(['.mp4', '.mov', '.m4v', '.webm', '.jpg', '.jpeg', '.png'])
+const LS_LIMIT = 20
+
+async function handleListVideos(ctx: BotContext, subdir: string): Promise<void> {
+  const dirPath = subdir ? safeVideoPath(subdir) : IG_VIDEOS_DIR
+  if (!dirPath) {
+    await ctx.reply('❌ 無效的資料夾路徑')
+    return
+  }
+
+  let entries
+  try {
+    entries = await readdir(dirPath, { withFileTypes: true })
+  } catch {
+    await ctx.reply(`❌ 找不到資料夾: ${subdir || IG_VIDEOS_DIR}`)
+    return
+  }
+
+  const folders = entries.filter((e) => e.isDirectory()).map((e) => e.name)
+  const mediaFiles = entries.filter(
+    (e) => e.isFile() && MEDIA_EXTS.has(e.name.slice(e.name.lastIndexOf('.')).toLowerCase()),
+  )
+
+  // Newest first — the file you just produced is the one you want to post
+  const withTimes = await Promise.all(
+    mediaFiles.map(async (e) => {
+      const s = await stat(join(dirPath, e.name)).catch(() => null)
+      return { name: e.name, size: s?.size ?? 0, mtime: s?.mtimeMs ?? 0 }
+    }),
+  )
+  const sorted = [...withTimes].sort((a, b) => b.mtime - a.mtime)
+  const shown = sorted.slice(0, LS_LIMIT)
+
+  const prefix = subdir ? `${subdir.replace(/\\/g, '/')}/` : ''
+  const lines = [`📁 *${subdir || 'Videos'}*`, '']
+
+  if (folders.length > 0) {
+    lines.push(...folders.map((f) => `📂 \`/ig ls ${prefix}${f}\``), '')
+  }
+
+  if (shown.length === 0) {
+    lines.push('(沒有影片/圖片)')
+  } else {
+    for (const f of shown) {
+      const mb = (f.size / 1024 / 1024).toFixed(1)
+      lines.push(`🎬 ${f.name} (${mb}MB)`)
+      const quoted = f.name.includes(' ') || prefix.includes(' ')
+        ? `"${prefix}${f.name}"`
+        : `${prefix}${f.name}`
+      lines.push(`   \`/ig post ${quoted} \``)
+    }
+    if (sorted.length > LS_LIMIT) {
+      lines.push('', `(還有 ${sorted.length - LS_LIMIT} 個，只顯示最新 ${LS_LIMIT})`)
+    }
+  }
+
+  lines.push('', '點指令複製 → 補上文案送出')
   await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' })
 }
 
