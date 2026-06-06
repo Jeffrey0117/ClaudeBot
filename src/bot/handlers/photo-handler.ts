@@ -8,6 +8,7 @@ import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
 import { remoteToolCall } from '../../remote/relay-client.js'
 import { addBvFile } from '../vision/bv-file-store.js'
 import { saveIgTemplate } from '../commands/ig-post.js'
+import { tryHandleVideoDocument } from './ig-media-handler.js'
 
 const IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
@@ -106,6 +107,15 @@ export async function documentHandler(ctx: BotContext): Promise<void> {
   // Non-image file + active pairing → push to remote
   if (!isImage) {
     const pairing = getPairing(chatId, threadId)
+
+    // Video file with /ig caption (or no pairing) → IG media flow.
+    // Paired users sending videos WITHOUT /ig keep the push-to-remote path.
+    const isVideo = mimeType?.startsWith('video/') ?? false
+    if (isVideo && (/^\/ig\s/i.test(caption) || !pairing?.connected)) {
+      await tryHandleVideoDocument(ctx)
+      return
+    }
+
     if (pairing?.connected) {
       await pushToRemote(ctx, pairing.code, fileId, fileName ?? 'file', caption)
       return

@@ -26,7 +26,7 @@ import {
 // --- Constants ---
 
 const TEMPLATES_DIR = join(process.cwd(), 'data', 'ig-templates')
-const VIDEOS_DIR = process.env.IG_VIDEOS_DIR ?? 'C:\\Users\\jeffb\\Videos'
+export const IG_VIDEOS_DIR = process.env.IG_VIDEOS_DIR ?? 'C:\\Users\\jeffb\\Videos'
 
 // --- Types ---
 
@@ -39,10 +39,10 @@ interface PostResult {
 
 // --- Path safety ---
 
-/** Validate filename stays within VIDEOS_DIR (prevent path traversal). */
+/** Validate filename stays within IG_VIDEOS_DIR (prevent path traversal). */
 function safeVideoPath(filename: string): string | null {
-  const resolved = resolve(VIDEOS_DIR, filename)
-  const rel = relative(VIDEOS_DIR, resolved)
+  const resolved = resolve(IG_VIDEOS_DIR, filename)
+  const rel = relative(IG_VIDEOS_DIR, resolved)
   if (rel.startsWith('..') || rel.includes('..')) return null
   return resolved
 }
@@ -188,7 +188,7 @@ async function runIgPost(ctx: BotContext, filename: string, caption: string): Pr
   try {
     await stat(fullPath)
   } catch {
-    await ctx.reply(`❌ 找不到檔案: ${filename}\n📁 目錄: ${VIDEOS_DIR}`)
+    await ctx.reply(`❌ 找不到檔案: ${filename}\n📁 目錄: ${IG_VIDEOS_DIR}`)
     return
   }
 
@@ -260,7 +260,7 @@ async function handleAddSchedule(ctx: BotContext, input: string): Promise<void> 
   try {
     await stat(fullPath)
   } catch {
-    await ctx.reply(`❌ 找不到檔案: ${parsed.filename}\n📁 目錄: ${VIDEOS_DIR}`)
+    await ctx.reply(`❌ 找不到檔案: ${parsed.filename}\n📁 目錄: ${IG_VIDEOS_DIR}`)
     return
   }
 
