@@ -27,9 +27,10 @@ describe('channel enable store (default-on for local)', () => {
     expect(isChannelEnabled('/proj/a')).toBe(true)
   })
 
-  it('remote projects are never channel-enabled', () => {
+  it('remote projects are disabled when CHANNEL_REMOTE is unset (default)', () => {
+    // CHANNEL_REMOTE is not set in the test env — remote must stay off
     expect(isChannelEnabled('remote:mybox')).toBe(false)
-    setChannelEnabled('remote:mybox', true) // even if forced on, remote stays off
+    setChannelEnabled('remote:mybox', true) // store override cannot override the env gate
     expect(isChannelEnabled('remote:mybox')).toBe(false)
   })
 })

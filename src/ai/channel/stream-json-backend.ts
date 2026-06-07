@@ -30,8 +30,10 @@ export class LocalStreamJsonBackend implements SessionBackend {
   private onEvent: ((e: SessionEvent) => void) | null = null
   private accumulated = ''
   private resolveTurn: (() => void) | null = null
+  private cfg: SessionLaunchConfig | null = null
 
   async start(cfg: SessionLaunchConfig): Promise<void> {
+    this.cfg = cfg
     const args = [
       ...cli.prefix,
       '-p', '--input-format', 'stream-json', '--output-format', 'stream-json',
@@ -87,6 +89,10 @@ export class LocalStreamJsonBackend implements SessionBackend {
     this.proc = null
     try { p?.stdin?.end() } catch { /* ignore */ }
     try { p?.kill('SIGTERM') } catch { /* ignore */ }
+    // Run cleanup exactly once (null it before calling so a second stop() is a no-op).
+    const cleanupFn = this.cfg?.cleanup
+    this.cfg = null
+    try { cleanupFn?.() } catch { /* ignore */ }
   }
 
   isBusy(): boolean { return this.busy }

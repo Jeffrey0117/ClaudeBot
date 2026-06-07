@@ -121,6 +121,9 @@ const envSchema = z.object({
   /** Shared token for the Tampermonkey browser-bridge (/us/poll + /us/result).
    *  Empty disables the bridge endpoints. */
   USERSCRIPT_TOKEN: z.string().default(''),
+  /** Set to "1" to allow channel routing for remote (paired) sessions.
+   *  OFF by default — remote sessions fall back to the classic -p path. */
+  CHANNEL_REMOTE: z.string().optional(),
   /** channel→chatId routing for CloudPipe events.
    *  Format: "alerts:12345,deploys:67890". Unknown/absent channel falls back
    *  to ADMIN_CHAT_ID. */

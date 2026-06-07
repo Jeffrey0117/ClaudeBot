@@ -8,6 +8,8 @@ export interface SessionLaunchConfig {
   readonly mcpConfigPaths: readonly string[]
   readonly disallowedTools?: readonly string[]
   readonly maxTurns?: number
+  /** Called when the session backend stops (cleans generated MCP config, etc.). */
+  readonly cleanup?: () => void
 }
 
 /** Streamed back from the backend during a turn. */

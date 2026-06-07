@@ -1,9 +1,8 @@
 import type { AIRunner, AIRunOptions } from '../types.js'
-import type { SessionLaunchConfig, SessionEvent } from './types.js'
+import type { SessionEvent } from './types.js'
 import { ChannelSessionManager } from './session-manager.js'
 import { LocalStreamJsonBackend } from './stream-json-backend.js'
-import { computeFingerprint } from './fingerprint.js'
-import { getSystemPrompt } from '../../utils/system-prompt.js'
+import { resolveChannelLaunch } from './remote-launch.js'
 
 // One manager process-wide; backend factory is the Phase 1 stream-json backend.
 let manager = new ChannelSessionManager(() => new LocalStreamJsonBackend())
@@ -29,15 +28,12 @@ export const channelRunner: AIRunner = {
   backend: 'channel',
 
   run(opts: AIRunOptions): void {
-    const cfg: SessionLaunchConfig = {
-      cwd: opts.projectPath,
+    const { cfg, fingerprint } = resolveChannelLaunch({
+      projectPath: opts.projectPath,
       model: opts.model,
-      systemPrompt: getSystemPrompt(),
-      mcpConfigPaths: [],
+      chatId: opts.chatId,
+      threadId: opts.threadId,
       maxTurns: opts.maxTurns,
-    }
-    const fingerprint = computeFingerprint({
-      model: opts.model, pairingCode: null, isAdmin: false, browser: false, systemPromptVersion: 1,
     })
     let accumulated = ''
     const onEvent = (e: SessionEvent): void => {

@@ -128,7 +128,7 @@ export function getElapsedMs(projectPath: string): number {
  * Build remote tool documentation for system prompt.
  * Moved from user message to system prompt to save ~2K tokens per turn.
  */
-function buildRemoteSystemBlock(
+export function buildRemoteSystemBlock(
   isAdmin: boolean,
   remoteBaseDir: string | undefined,
   hasBrowser: boolean,
