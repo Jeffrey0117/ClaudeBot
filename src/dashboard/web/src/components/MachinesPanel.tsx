@@ -201,7 +201,7 @@ export function MachinesPanel() {
   // We only watch machines after a music dispatch so we never spin up Chrome on
   // an idle machine; a machine drops out after 3 consecutive inactive polls.
   const [nowPlaying, setNowPlaying] = useState<Record<string, NowPlayingData>>({})
-  const watchRef = useRef<Map<string, { label: string; misses: number }>>(new Map())
+  const watchRef = useRef<Map<string, { label: string; misses: number; seenActive: boolean }>>(new Map())
 
   useEffect(() => {
     const drop = (code: string) => {
@@ -216,12 +216,16 @@ export function MachinesPanel() {
           .then((d) => {
             if (d.active) {
               info.misses = 0
+              info.seenActive = true
               setNowPlaying((prev) => ({ ...prev, [code]: d }))
-            } else if (++info.misses >= 3) {
-              drop(code)
+            } else {
+              // Generous grace BEFORE the first play (search→load→buffer can take
+              // 20–30s); once we've seen it playing, drop quickly after it stops.
+              const limit = info.seenActive ? 3 : 12
+              if (++info.misses >= limit) drop(code)
             }
           })
-          .catch(() => { if (++info.misses >= 3) drop(code) })
+          .catch(() => { const limit = info.seenActive ? 3 : 12; if (++info.misses >= limit) drop(code) })
       }
     }, 3000)
     return () => clearInterval(id)
@@ -268,7 +272,7 @@ export function MachinesPanel() {
     // If this dispatch is a "play music" request, start watching those machines'
     // now-playing so the vinyl card appears (only here → never polls idle ones).
     if (MUSIC_RE.test(prompt)) {
-      for (const row of targets) watchRef.current.set(row.code, { label: row.label, misses: 0 })
+      for (const row of targets) watchRef.current.set(row.code, { label: row.label, misses: 0, seenActive: false })
     }
     // Clear immediately (optimistic) — don't wait for slow/timing-out dispatches.
     setTask('')
@@ -345,9 +349,15 @@ export function MachinesPanel() {
         </div>
       )}
 
-      {/* Now playing — vinyl cards for machines currently playing music */}
+      {/* Now playing — vinyl cards pinned to the top so they stay visible while
+          scrolling the machine list */}
       {Object.keys(nowPlaying).length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 5,
+          display: 'flex', flexDirection: 'column', gap: '12px',
+          paddingTop: '4px', paddingBottom: '16px', marginBottom: '14px',
+          background: 'linear-gradient(var(--bg-primary) 82%, transparent)',
+        }}>
           {Object.entries(nowPlaying).map(([code, d]) => (
             <NowPlaying
               key={code}
@@ -505,7 +515,7 @@ export function MachinesPanel() {
               onMouseDown={(e) => { if (canDispatch) e.currentTarget.style.transform = 'scale(0.97)' }}
               onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
             >
-              {sending ? '派發中…' : `派發 → ${effectiveTargets.length || ''}`}
+              {sending ? '派發中…' : '派發'}
             </button>
           </div>
           <div style={{ marginTop: '7px', fontSize: '11px', color: 'var(--text-muted)' }}>
