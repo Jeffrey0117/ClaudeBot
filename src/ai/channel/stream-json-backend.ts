@@ -56,6 +56,7 @@ export class LocalStreamJsonBackend implements SessionBackend {
 
   send(text: string, onEvent: (e: SessionEvent) => void): Promise<void> {
     if (!this.proc) return Promise.reject(new Error('session not started'))
+    if (this.busy) return Promise.reject(new Error('turn already in flight'))
     this.onEvent = onEvent
     this.accumulated = ''
     this.busy = true
@@ -74,9 +75,12 @@ export class LocalStreamJsonBackend implements SessionBackend {
 
   async stop(): Promise<void> {
     this.failTurn('session stopped')
-    try { this.proc?.stdin?.end() } catch { /* ignore */ }
-    try { this.proc?.kill('SIGTERM') } catch { /* ignore */ }
+    // Null proc BEFORE killing so a stale 'close' event (which fires async after
+    // kill) sees no proc and failTurn() no-ops on an already-reset instance.
+    const p = this.proc
     this.proc = null
+    try { p?.stdin?.end() } catch { /* ignore */ }
+    try { p?.kill('SIGTERM') } catch { /* ignore */ }
   }
 
   isBusy(): boolean { return this.busy }
@@ -98,6 +102,10 @@ export class LocalStreamJsonBackend implements SessionBackend {
     if (!this.onEvent) return
     switch (event.type) {
       case 'assistant': {
+        // Sole text source: we do NOT pass --include-partial-messages, so the
+        // CLI emits a complete `assistant` snapshot per turn and NO
+        // content_block_delta events. Emitting text here only (and never from a
+        // delta branch) guarantees no double emission.
         this.accumulated = ''
         const msg = (event as StreamAssistantMessage).message
         for (const block of msg?.content ?? []) {
@@ -107,14 +115,6 @@ export class LocalStreamJsonBackend implements SessionBackend {
           } else if (block.type === 'tool_use' && block.name) {
             this.onEvent({ kind: 'tool-use', toolName: block.name })
           }
-        }
-        break
-      }
-      case 'content_block_delta': {
-        const d = (event as { delta?: { type?: string; text?: string } }).delta
-        if (d?.type === 'text_delta' && d.text) {
-          this.accumulated += d.text
-          this.onEvent({ kind: 'text-delta', text: d.text })
         }
         break
       }
