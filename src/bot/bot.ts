@@ -60,6 +60,7 @@ import { igCommand } from './commands/ig-post.js'
 import { setIgSchedulerSendFn, startIgScheduler } from './commands/ig-scheduler.js'
 import { lastCommand } from './commands/last.js'
 import { licenseCommand } from './commands/license.js'
+import { channelCommand } from './commands/channel.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
@@ -160,6 +161,7 @@ export const CORE_COMMANDS = [
   { command: 'bv', description: '網頁視覺分析 (Gemini)' },
   { command: 'last', description: '重送最近的訊息 (/last2=上上條)' },
   { command: 'help', description: '顯示說明' },
+  { command: 'channel', description: '切換 channel session 模式 (on/off/status)' },
 ] as const
 
 export function wireReminderSendFn(bot: Telegraf<BotContext>): void {
@@ -290,6 +292,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['last4', lastCommand],
     ['last5', lastCommand],
     ['license', licenseCommand],
+    ['channel', channelCommand],
   ]
   for (const [name, handler] of coreEntries) {
     bot.command(name, handler)
