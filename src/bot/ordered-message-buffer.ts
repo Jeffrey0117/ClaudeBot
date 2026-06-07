@@ -16,6 +16,7 @@ import { enqueue, isProcessing, getQueueLength } from '../claude/queue.js'
 import { recordActivity } from '../plugins/stats/activity-logger.js'
 import { getPairing, remoteProjectPath } from '../remote/pairing-store.js'
 import { getPluginModule } from '../plugins/loader.js'
+import { isChannelOptIn } from '../ai/channel/opt-in-store.js'
 
 // Allot rejection notification callback (wired from bot.ts)
 type NotifyFn = (chatId: number, text: string) => void
@@ -158,13 +159,18 @@ function flushEntries(entries: readonly BufferEntry[]): void {
     promptLength: combined.length,
   })
 
-  const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
+  // Channel opt-in projects always route to the channel backend; preserve user's model choice.
+  const aiSel = isChannelOptIn(project.path)
+    ? { backend: 'channel' as const, model: state.ai.model }
+    : state.ai
+
+  const sessionId = getAISessionId(resolveBackend(aiSel.backend), project.path)
   enqueue({
     chatId,
     threadId,
     prompt: combined,
     project,
-    ai: state.ai,
+    ai: aiSel,
     sessionId,
     imagePaths: [],
   })

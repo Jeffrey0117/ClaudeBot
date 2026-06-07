@@ -6,6 +6,8 @@ import { resolveBackend, formatAILabel } from '../../ai/types.js'
 import { getAISessionId } from '../../ai/session-store.js'
 import { enqueue, isProcessing } from '../../claude/queue.js'
 import { cancelAnyRunning } from '../../ai/registry.js'
+import { isChannelOptIn } from '../../ai/channel/opt-in-store.js'
+import { isChannelRunning, channelInterrupt } from '../../ai/channel/channel-runner.js'
 import { transcribeVoiceFile } from './voice-handler.js'
 import { extractReplyQuote } from './reply-quote.js'
 import { scanProjects, resolveWorktreePath } from '../../config/projects.js'
@@ -347,6 +349,14 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
       })
       return
     }
+  }
+
+  // Channel opt-in + a turn already in flight → interrupt it so the new message
+  // runs as the next turn on the warm session (context preserved).
+  // DO NOT return — let the message continue to normal enqueue below.
+  if (isChannelOptIn(project.path) && isChannelRunning(project.path)) {
+    channelInterrupt(project.path)
+    ctx.reply('🔀 已中斷當前回合，接上你的補充').catch(() => {})
   }
 
   // Normal message → add to ordered buffer
