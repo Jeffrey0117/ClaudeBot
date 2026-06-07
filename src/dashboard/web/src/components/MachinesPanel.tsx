@@ -8,6 +8,14 @@ import { NowPlaying, type NowPlayingData } from './NowPlaying'
 /** A dispatched task that looks like "play music" → watch its now-playing. */
 const MUSIC_RE = /播|放|聽|歌|音[樂乐]|副歌|play|music|song|youtube|youtu\.be|spotify/i
 
+/** Build a first-run provision command for a fresh machine from a repo URL:
+ *  ensure pm2 → clone → install → start under pm2. Editable before dispatch. */
+function buildDeployCommand(repoUrl: string): string {
+  const url = repoUrl.trim()
+  const name = (url.replace(/\.git$/, '').split('/').filter(Boolean).pop() || 'app').replace(/[^\w.-]/g, '')
+  return `npm i -g pm2 && git clone ${url} && cd ${name} && npm install && pm2 start npm --name ${name} -- start`
+}
+
 interface DispatchTemplate {
   readonly id: string
   readonly name: string
@@ -196,6 +204,7 @@ export function MachinesPanel() {
   const startDispatch = useDispatchStore((s) => s.start)
   const clearDispatch = useDispatchStore((s) => s.clear)
   const [templates, setTemplates] = useState<DispatchTemplate[]>(loadTemplates)
+  const [repoUrl, setRepoUrl] = useState('')
 
   // Now-playing: poll the CDP media state of machines we've sent music to.
   // We only watch machines after a music dispatch so we never spin up Chrome on
@@ -420,6 +429,32 @@ export function MachinesPanel() {
           borderTop: '1px solid var(--border)',
           padding: '16px 0 22px',
         }}>
+          {/* Quick deploy: paste a repo → fill an editable provision command */}
+          <div style={{ display: 'flex', gap: '7px', marginBottom: '10px', alignItems: 'center' }}>
+            <input
+              value={repoUrl}
+              onChange={(e) => setRepoUrl(e.target.value)}
+              placeholder="🚀 貼 GitHub repo URL → 產生部署指令(clone+install+pm2)…"
+              onKeyDown={(e) => { if (e.key === 'Enter' && repoUrl.trim()) { e.preventDefault(); setTask(buildDeployCommand(repoUrl)) } }}
+              style={{
+                flex: 1, background: 'var(--bg-card)', border: '1px solid var(--border)',
+                borderRadius: '999px', padding: '7px 14px', fontSize: '12.5px',
+                color: 'var(--text-primary)', outline: 'none',
+              }}
+            />
+            <button
+              onClick={() => { if (repoUrl.trim()) setTask(buildDeployCommand(repoUrl)) }}
+              disabled={!repoUrl.trim()}
+              style={{
+                background: repoUrl.trim() ? 'var(--accent)' : 'var(--bg-hover)',
+                color: repoUrl.trim() ? '#fff' : 'var(--text-muted)',
+                border: 'none', borderRadius: '999px', padding: '7px 14px',
+                fontSize: '12.5px', fontWeight: 600, whiteSpace: 'nowrap',
+                cursor: repoUrl.trim() ? 'pointer' : 'not-allowed',
+              }}
+            >產生部署指令</button>
+          </div>
+
           {/* Dispatch templates — click to fill, save current as a new one */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px', marginBottom: '10px', alignItems: 'center' }}>
             {templates.map((tpl) => (
