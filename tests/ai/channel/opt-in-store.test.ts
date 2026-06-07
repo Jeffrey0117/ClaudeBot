@@ -1,24 +1,35 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { rmSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { setChannelOptIn, isChannelOptIn, __resetForTest } from '../../../src/ai/channel/opt-in-store.js'
+import { setChannelEnabled, isChannelEnabled, __resetForTest } from '../../../src/ai/channel/opt-in-store.js'
 
 const DATA = resolve('data/channel-opt-in.json')
 
-describe('channel opt-in store', () => {
+describe('channel enable store (default-on for local)', () => {
   beforeEach(() => {
     try { rmSync(DATA) } catch { /* missing is fine */ }
     __resetForTest()
   })
-  it('defaults to false', () => { expect(isChannelOptIn('/proj/a')).toBe(false) })
-  it('persists an opt-in per project path', () => {
-    setChannelOptIn('/proj/a', true)
-    expect(isChannelOptIn('/proj/a')).toBe(true)
-    expect(isChannelOptIn('/proj/b')).toBe(false)
+
+  it('defaults to ON for a local project', () => {
+    expect(isChannelEnabled('/proj/a')).toBe(true)
   })
-  it('can opt back out', () => {
-    setChannelOptIn('/proj/a', true)
-    setChannelOptIn('/proj/a', false)
-    expect(isChannelOptIn('/proj/a')).toBe(false)
+
+  it('an explicit off disables a specific local project', () => {
+    setChannelEnabled('/proj/a', false)
+    expect(isChannelEnabled('/proj/a')).toBe(false)
+    expect(isChannelEnabled('/proj/b')).toBe(true)
+  })
+
+  it('re-enabling clears the override (back to default-on)', () => {
+    setChannelEnabled('/proj/a', false)
+    setChannelEnabled('/proj/a', true)
+    expect(isChannelEnabled('/proj/a')).toBe(true)
+  })
+
+  it('remote projects are never channel-enabled', () => {
+    expect(isChannelEnabled('remote:mybox')).toBe(false)
+    setChannelEnabled('remote:mybox', true) // even if forced on, remote stays off
+    expect(isChannelEnabled('remote:mybox')).toBe(false)
   })
 })
