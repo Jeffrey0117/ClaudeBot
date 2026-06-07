@@ -156,12 +156,15 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
       const chatProject = chatPairing?.connected
         ? { name: 'remote', path: remoteProjectPath(chatPairing.label) }
         : { name: 'general', path: process.cwd() }
-      const sessionId = getAISessionId(resolveBackend(state.ai.backend), chatProject.path)
+      const aiSel = isChannelEnabled(chatProject.path)
+        ? { backend: 'channel' as const, model: state.ai.model }
+        : state.ai
+      const sessionId = getAISessionId(resolveBackend(aiSel.backend), chatProject.path)
       enqueue({
         chatId,
         prompt: replyQuote + chatPrompt,
         project: chatProject,
-        ai: state.ai,
+        ai: aiSel,
         sessionId,
         imagePaths: [],
       })
@@ -281,12 +284,15 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
     }
     clearBuffer(chatId, threadId)
     cancelAnyRunning(project.path)
-    const sessionId = getAISessionId(resolveBackend(state.ai.backend), project.path)
+    const aiSel = isChannelEnabled(project.path)
+      ? { backend: 'channel' as const, model: state.ai.model }
+      : state.ai
+    const sessionId = getAISessionId(resolveBackend(aiSel.backend), project.path)
     enqueue({
       chatId,
       prompt: replyQuote + steerText,
       project,
-      ai: state.ai,
+      ai: aiSel,
       sessionId,
       imagePaths: [],
     })
@@ -310,12 +316,15 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
         promptLength: (replyQuote + text).length,
       })
 
-      const sessionId = getAISessionId(resolveBackend(state.ai.backend), detected.path)
+      const aiSel = isChannelEnabled(detected.path)
+        ? { backend: 'channel' as const, model: state.ai.model }
+        : state.ai
+      const sessionId = getAISessionId(resolveBackend(aiSel.backend), detected.path)
       enqueue({
         chatId,
         prompt: replyQuote + text,
         project: detected,
-        ai: state.ai,
+        ai: aiSel,
         sessionId,
         imagePaths: [],
       })
