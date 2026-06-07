@@ -4,6 +4,7 @@ import { useDispatchStore, type DispatchTask } from '../stores/dispatch-store'
 import { apiFetch, apiPost } from '../hooks/useApi'
 import type { ActiveRunnerInfo, DashboardCommand } from '../types'
 import { NowPlaying, type NowPlayingData } from './NowPlaying'
+import { FileBrowser } from './FileBrowser'
 
 /** A dispatched task that looks like "play music" → watch its now-playing. */
 const MUSIC_RE = /播|放|聽|歌|音[樂乐]|副歌|play|music|song|youtube|youtu\.be|spotify/i
@@ -209,6 +210,7 @@ export function MachinesPanel() {
   const [hubProjects, setHubProjects] = useState<string[]>([])
   const [hubProject, setHubProject] = useState('')
   const [hubBusy, setHubBusy] = useState(false)
+  const [browseOpen, setBrowseOpen] = useState(false)
 
   useEffect(() => {
     apiFetch<{ projects: { name: string }[] }>('/api/projects')
@@ -365,15 +367,27 @@ export function MachinesPanel() {
       flexDirection: 'column',
     }}>
       {/* Header */}
-      <div style={{ marginBottom: '26px' }}>
-        <h1 style={{ fontSize: '30px', fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1.1 }}>
-          派發中心
-        </h1>
-        <p style={{ marginTop: '6px', fontSize: '14px', color: 'var(--text-secondary)' }}>
-          {rows.length === 0
-            ? '尚無已配對的機器'
-            : `${onlineCount} 台在線${selectedRows.length > 0 ? ` · 已選 ${selectedRows.length} 台` : ''}`}
-        </p>
+      <div style={{ marginBottom: '26px', display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+        <div style={{ flex: 1 }}>
+          <h1 style={{ fontSize: '30px', fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+            派發中心
+          </h1>
+          <p style={{ marginTop: '6px', fontSize: '14px', color: 'var(--text-secondary)' }}>
+            {rows.length === 0
+              ? '尚無已配對的機器'
+              : `${onlineCount} 台在線${selectedRows.length > 0 ? ` · 已選 ${selectedRows.length} 台` : ''}`}
+          </p>
+        </div>
+        {onlineCount > 0 && (
+          <button
+            onClick={() => setBrowseOpen(true)}
+            style={{
+              flexShrink: 0, marginTop: '4px', background: 'var(--bg-card)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius)', padding: '9px 14px', fontSize: '13px', fontWeight: 600,
+              color: 'var(--text-primary)', cursor: 'pointer', boxShadow: 'var(--shadow)',
+            }}
+          >📁 機器檔案</button>
+        )}
       </div>
 
       {/* Dispatch status */}
@@ -620,6 +634,13 @@ export function MachinesPanel() {
             Enter 送出 · ⌘/Ctrl+Enter 或 Shift+Enter 換行 · 任務會丟給每台勾選的機器各自執行
           </div>
         </div>
+      )}
+
+      {browseOpen && (
+        <FileBrowser
+          machines={rows.filter((r) => r.online).map((r) => ({ code: r.code, label: r.label }))}
+          onClose={() => setBrowseOpen(false)}
+        />
       )}
     </div>
   )

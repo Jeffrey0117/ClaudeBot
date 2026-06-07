@@ -273,6 +273,36 @@ async function handleApi(req: IncomingMessage, res: ServerResponse): Promise<voi
     return
   }
 
+  // GET /api/files/list?code=X&path=... — structured dir listing from a machine
+  if (path === '/api/files/list' && req.method === 'GET') {
+    const code = url.searchParams.get('code') ?? ''
+    const p = url.searchParams.get('path') ?? ''
+    if (!code) { sendJson(res, { error: 'no code' }, 400); return }
+    try {
+      const { callAgentTool } = await import('../remote/relay-server.js')
+      const raw = await callAgentTool(code, 'remote_browse', { path: p }, 15_000)
+      sendJson(res, JSON.parse(raw))
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) })
+    }
+    return
+  }
+
+  // GET /api/files/get?code=X&path=... — fetch one file (base64) for download
+  if (path === '/api/files/get' && req.method === 'GET') {
+    const code = url.searchParams.get('code') ?? ''
+    const p = url.searchParams.get('path') ?? ''
+    if (!code || !p) { sendJson(res, { error: 'missing code/path' }, 400); return }
+    try {
+      const { callAgentTool } = await import('../remote/relay-server.js')
+      const raw = await callAgentTool(code, 'remote_fetch_file', { path: p }, 30_000)
+      sendJson(res, JSON.parse(raw))
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) })
+    }
+    return
+  }
+
   // GET /api/nowplaying?code=XXX — live media state from a machine's CDP Chrome
   if (path === '/api/nowplaying' && req.method === 'GET') {
     const code = url.searchParams.get('code') ?? ''

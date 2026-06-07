@@ -97,6 +97,31 @@ export async function handleListDirectory(args: Record<string, unknown>, validat
   return lines.join('\n') || '(empty directory)'
 }
 
+/**
+ * Structured directory listing for the dashboard file browser. Returns absolute
+ * paths (cwd/parent/entries[].path) so navigation + fetch use one consistent
+ * scheme — handleFetchFile treats relative paths as home-relative, so we always
+ * pass it absolute paths from here. Empty path = the agent's baseDir.
+ */
+export async function handleBrowse(
+  args: Record<string, unknown>,
+  validatePath: (p: string) => string,
+  baseDir: string,
+): Promise<string> {
+  const rel = String(args.path ?? '')
+  const dirPath = rel ? validatePath(rel) : resolve(baseDir)
+  const dirents = await readdir(dirPath, { withFileTypes: true })
+  const entries = await Promise.all(dirents.map(async (e) => {
+    const full = join(dirPath, e.name)
+    let size = 0
+    let mtime = 0
+    try { const s = await stat(full); size = s.size; mtime = s.mtimeMs } catch { /* unreadable */ }
+    return { name: e.name, dir: e.isDirectory(), size, mtime, path: full }
+  }))
+  entries.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : (a.dir ? -1 : 1)))
+  return JSON.stringify({ cwd: dirPath, parent: dirname(dirPath), entries })
+}
+
 function matchGlob(name: string, pattern: string): boolean {
   if (pattern === '*') return true
   if (pattern.startsWith('*.')) return name.endsWith(pattern.slice(1))
