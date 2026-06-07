@@ -5,7 +5,7 @@ import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
 import { env } from '../../config/env.js'
 import { cancelActiveAgent } from '../vision/web-agent-store.js'
 import { isChannelOptIn } from '../../ai/channel/opt-in-store.js'
-import { channelInterrupt } from '../../ai/channel/channel-runner.js'
+import { channelInterrupt, isChannelRunning } from '../../ai/channel/channel-runner.js'
 
 export async function cancelCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -27,7 +27,8 @@ export async function cancelCommand(ctx: BotContext): Promise<void> {
 
   // Channel opt-in: interrupt the current turn but keep the session alive.
   // Return early so the kill-path below is skipped.
-  if (project && isChannelOptIn(project.path) && channelInterrupt(project.path)) {
+  if (project && isChannelOptIn(project.path) && isChannelRunning(project.path)) {
+    channelInterrupt(project.path)
     await ctx.reply('🛑 已中斷當前回合（session 還在，直接打下一個任務即可）')
     return
   }

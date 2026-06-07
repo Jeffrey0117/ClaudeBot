@@ -50,6 +50,12 @@ export class LocalStreamJsonBackend implements SessionBackend {
       windowsHide: true,
     })
     this.proc.stdout?.on('data', (c: Buffer) => { this.onStdout(c) })
+    // Surface CLI startup/runtime errors (bad key, missing auth) that arrive on
+    // stderr before any stream-json result — otherwise they'd be swallowed.
+    this.proc.stderr?.on('data', (c: Buffer) => {
+      const msg = c.toString().trim()
+      if (msg) console.error('[channel-backend]', msg)
+    })
     this.proc.on('close', () => { this.failTurn('channel session process closed'); this.proc = null })
     this.proc.on('error', (e) => { this.failTurn(`channel session spawn error: ${e.message}`) })
   }

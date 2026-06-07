@@ -80,6 +80,10 @@ export class ChannelSessionManager {
         oldestKey = k
       }
     }
+    // If all sessions are busy, oldestKey stays null and we cannot evict — the
+    // caller proceeds and the pool temporarily exceeds MAX_SESSIONS by one.
+    // Acceptable in Phase 1 (local-only; 6 concurrently-busy projects is
+    // effectively unreachable). Revisit when remote/on-agent sessions land.
     if (oldestKey) await this.stop(oldestKey)
   }
 
