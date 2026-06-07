@@ -1,3 +1,5 @@
+import { useState, useEffect, type MouseEvent } from 'react'
+
 export interface NowPlayingData {
   readonly active: boolean
   readonly playing?: boolean
@@ -5,7 +7,10 @@ export interface NowPlayingData {
   readonly channel?: string
   readonly current?: number
   readonly duration?: number
+  readonly volume?: number
 }
+
+export type NpAction = 'toggle' | 'seek' | 'volume'
 
 function fmt(s: number): string {
   if (!isFinite(s) || s < 0) s = 0
@@ -13,13 +18,36 @@ function fmt(s: number): string {
 }
 
 // Lo-fi pixel "now playing" widget — spinning vinyl + scrolling title +
-// progress, fed by live CDP data from the machine's Chrome.
-export function NowPlaying({ data, machineLabel }: { data: NowPlayingData; machineLabel: string }) {
-  const playing = data.playing !== false
-  const cur = data.current ?? 0
+// interactive seek/volume/play, fed by live CDP data from the machine's Chrome.
+export function NowPlaying({
+  data, machineLabel, onControl,
+}: {
+  data: NowPlayingData
+  machineLabel: string
+  onControl: (action: NpAction, value?: number) => void
+}) {
+  // Optimistic overrides so clicks feel instant; cleared when fresh poll lands.
+  const [optCur, setOptCur] = useState<number | null>(null)
+  const [optVol, setOptVol] = useState<number | null>(null)
+  const [optPlaying, setOptPlaying] = useState<boolean | null>(null)
+  useEffect(() => { setOptCur(null); setOptPlaying(null) }, [data.current, data.playing])
+  useEffect(() => { setOptVol(null) }, [data.volume])
+
   const dur = data.duration ?? 0
+  const cur = optCur ?? data.current ?? 0
+  const playing = optPlaying ?? (data.playing !== false)
+  const vol = optVol ?? data.volume ?? 100
   const pct = dur > 0 ? Math.min(100, (cur / dur) * 100) : 0
   const paused = !playing
+
+  const seek = (e: MouseEvent<HTMLDivElement>) => {
+    if (dur <= 0) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+    const target = Math.floor(frac * dur)
+    setOptCur(target)
+    onControl('seek', target)
+  }
 
   return (
     <div className={`np-card${paused ? ' np-paused' : ''}`}>
@@ -55,8 +83,28 @@ export function NowPlaying({ data, machineLabel }: { data: NowPlayingData; machi
         <div className="np-channel">
           ♪ {data.channel ? data.channel + ' · ' : ''}派發中心 {machineLabel}
         </div>
-        <div className="np-bar"><div className="np-fill" style={{ width: `${pct}%` }} /></div>
+
+        <div className="np-bar" onClick={seek} title="點一下跳到該位置">
+          <div className="np-fill" style={{ width: `${pct}%` }}>
+            <span className="np-knob" />
+          </div>
+        </div>
         <div className="np-times"><span>{fmt(cur)}</span><span>{fmt(dur)}</span></div>
+
+        <div className="np-controls">
+          <button
+            className="np-btn"
+            onClick={() => { setOptPlaying(!playing); onControl('toggle') }}
+            title={playing ? '暫停' : '播放'}
+          >{playing ? '❚❚' : '▶'}</button>
+          <span className="np-vol-ico">{vol === 0 ? '🔇' : '🔊'}</span>
+          <input
+            className="np-vol"
+            type="range" min={0} max={100} value={vol}
+            onChange={(e) => { const x = Number(e.target.value); setOptVol(x); onControl('volume', x / 100) }}
+            title={`音量 ${vol}%`}
+          />
+        </div>
       </div>
     </div>
   )
@@ -102,8 +150,18 @@ const NP_CSS = `
 .np-paused .np-title{animation-play-state:paused;}
 @keyframes npMarquee{to{transform:translateX(-100%);}}
 .np-channel{font-size:18px;color:#6a6e7e;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.np-bar{margin-top:14px;height:7px;border-radius:6px;background:#23252f;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.6);}
-.np-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,#ee7b6a,#ffb59f);
-  box-shadow:0 0 12px rgba(238,123,106,.6);transition:width .8s linear;}
+.np-bar{position:relative;margin-top:14px;height:10px;border-radius:6px;background:#23252f;
+  cursor:pointer;box-shadow:inset 0 1px 2px rgba(0,0,0,.6);}
+.np-fill{position:relative;height:100%;border-radius:6px;background:linear-gradient(90deg,#ee7b6a,#ffb59f);
+  box-shadow:0 0 12px rgba(238,123,106,.6);transition:width .35s linear;}
+.np-knob{position:absolute;right:-5px;top:50%;width:12px;height:12px;margin-top:-6px;border-radius:50%;
+  background:#ffd9cf;border:2px solid #ee7b6a;opacity:0;transition:opacity .15s;}
+.np-bar:hover .np-knob{opacity:1;}
 .np-times{display:flex;justify-content:space-between;font-size:16px;color:#6a6e7e;margin-top:4px;}
+.np-controls{display:flex;align-items:center;gap:10px;margin-top:10px;}
+.np-btn{font-family:'VT323',monospace;font-size:16px;line-height:1;color:#f3ead6;background:#23252f;
+  border:2px solid #333645;border-radius:8px;width:38px;height:30px;cursor:pointer;}
+.np-btn:hover{border-color:#ee7b6a;color:#ee7b6a;}
+.np-vol-ico{font-size:14px;}
+.np-vol{flex:1;max-width:160px;accent-color:#ee7b6a;height:4px;cursor:pointer;}
 `

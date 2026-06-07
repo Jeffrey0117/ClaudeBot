@@ -58,7 +58,28 @@ const NOWPLAYING_JS =
   "var pick=function(s){var e=document.querySelector(s);return e&&e.textContent?e.textContent.trim():'';};" +
   "var t=pick('.ytp-title-link')||pick('ytd-watch-metadata h1')||pick('h1.ytd-watch-metadata')||(document.title||'').replace(/ - YouTube$/,'').trim();" +
   "var ch=pick('ytd-channel-name#channel-name a')||pick('#owner #channel-name a')||pick('ytd-video-owner-renderer a');" +
-  "return {active:true,playing:!v.paused,title:(t||'').slice(0,140),channel:(ch||'').slice(0,80),current:Math.floor(v.currentTime||0),duration:Math.floor(v.duration||0)};})()"
+  "return {active:true,playing:!v.paused,title:(t||'').slice(0,140),channel:(ch||'').slice(0,80),current:Math.floor(v.currentTime||0),duration:Math.floor(v.duration||0),volume:Math.round((v.muted?0:(v.volume||0))*100)};})()"
+
+/** Build the CDP JS for a now-playing control action. Numeric values are
+ *  clamped + coerced (never string-interpolated unsanitised) so a bad value
+ *  can't inject. Returns null for an unknown action. */
+function buildControlJs(action: string, value: number): string | null {
+  const v = "var v=document.querySelector('video');if(!v)return false;"
+  switch (action) {
+    case 'toggle': return `(function(){${v}if(v.paused)v.play();else v.pause();return !v.paused;})()`
+    case 'play': return `(function(){${v}v.play();return true;})()`
+    case 'pause': return `(function(){${v}v.pause();return false;})()`
+    case 'seek': {
+      const sec = Math.max(0, Math.floor(isFinite(value) ? value : 0))
+      return `(function(){${v}v.currentTime=${sec};v.play();return true;})()`
+    }
+    case 'volume': {
+      const vol = Math.min(1, Math.max(0, isFinite(value) ? value : 0))
+      return `(function(){${v}v.muted=false;v.volume=${vol};return v.volume;})()`
+    }
+    default: return null
+  }
+}
 
 // Injected by startDashboardServer so the CloudPipe webhook can reach Telegram
 // without this module importing the bot instance.
@@ -254,6 +275,22 @@ async function handleApi(req: IncomingMessage, res: ServerResponse): Promise<voi
       if (data && data.active) { sendJson(res, data); return }
     } catch { /* not connected / no CDP / non-JSON error → inactive */ }
     sendJson(res, { active: false })
+    return
+  }
+
+  // POST /api/nowplaying/control — seek / play / pause / volume on a machine's Chrome
+  if (path === '/api/nowplaying/control' && req.method === 'POST') {
+    try {
+      const body = JSON.parse(await readBody(req)) as { code?: string; action?: string; value?: number }
+      const code = String(body.code ?? '')
+      const js = buildControlJs(String(body.action ?? ''), Number(body.value))
+      if (!code || !js) { sendJson(res, { ok: false }, 400); return }
+      const { callAgentTool } = await import('../remote/relay-server.js')
+      await callAgentTool(code, 'remote_browser_eval', { js }, 8_000)
+      sendJson(res, { ok: true })
+    } catch {
+      sendJson(res, { ok: false })
+    }
     return
   }
 

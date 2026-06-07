@@ -353,6 +353,9 @@ export function MachinesPanel() {
               key={code}
               data={d}
               machineLabel={rows.find((r) => r.code === code)?.label ?? watchRef.current.get(code)?.label ?? ''}
+              onControl={(action, value) => {
+                apiPost('/api/nowplaying/control', { code, action, value }).catch(() => {})
+              }}
             />
           ))}
         </div>
@@ -447,7 +450,21 @@ export function MachinesPanel() {
                 : '要這些機器做什麼?(例:git clone <repo> && npm i && npm start)'}
               rows={2}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); dispatch() }
+                if (e.key !== 'Enter') return
+                if (e.shiftKey) return // Shift+Enter → default newline
+                if (e.ctrlKey || e.metaKey) {
+                  // Ctrl/⌘+Enter → insert a newline (default does nothing in a textarea)
+                  e.preventDefault()
+                  const ta = e.currentTarget
+                  const start = ta.selectionStart, end = ta.selectionEnd
+                  const next = task.slice(0, start) + '\n' + task.slice(end)
+                  setTask(next)
+                  requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 1 })
+                  return
+                }
+                // plain Enter → send
+                e.preventDefault()
+                dispatch()
               }}
               style={{
                 flex: 1,
@@ -492,7 +509,7 @@ export function MachinesPanel() {
             </button>
           </div>
           <div style={{ marginTop: '7px', fontSize: '11px', color: 'var(--text-muted)' }}>
-            ⌘/Ctrl + Enter 送出 · 任務會丟給每台勾選的機器各自執行
+            Enter 送出 · ⌘/Ctrl+Enter 或 Shift+Enter 換行 · 任務會丟給每台勾選的機器各自執行
           </div>
         </div>
       )}
