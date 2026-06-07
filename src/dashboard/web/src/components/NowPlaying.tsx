@@ -1,7 +1,8 @@
-import { useState, useEffect, type MouseEvent } from 'react'
+import { useState, useEffect, useRef, type MouseEvent } from 'react'
 
 export interface NowPlayingData {
   readonly active: boolean
+  readonly ready?: boolean
   readonly playing?: boolean
   readonly title?: string
   readonly channel?: string
@@ -26,13 +27,23 @@ export function NowPlaying({
   machineLabel: string
   onControl: (action: NpAction, value?: number) => void
 }) {
-  // Optimistic overrides so clicks feel instant; cleared when fresh poll lands.
+  // Optimistic overrides so clicks feel instant. They're held for a short window
+  // after the user acts (refs below) so a stale poll can't snap the UI back —
+  // e.g. volume jumping to an old value before the change reflects.
   const [optCur, setOptCur] = useState<number | null>(null)
   const [optVol, setOptVol] = useState<number | null>(null)
   const [optPlaying, setOptPlaying] = useState<boolean | null>(null)
-  useEffect(() => { setOptCur(null); setOptPlaying(null) }, [data.current, data.playing])
-  useEffect(() => { setOptVol(null) }, [data.volume])
+  const volTouched = useRef(0)
+  const transTouched = useRef(0)
 
+  useEffect(() => {
+    if (Date.now() - transTouched.current > 2500) { setOptCur(null); setOptPlaying(null) }
+  }, [data.current, data.playing])
+  useEffect(() => {
+    if (Date.now() - volTouched.current > 4000) setOptVol(null)
+  }, [data.volume])
+
+  const loading = !data.title || data.ready === false
   const dur = data.duration ?? 0
   const cur = optCur ?? data.current ?? 0
   const playing = optPlaying ?? (data.playing !== false)
@@ -41,12 +52,25 @@ export function NowPlaying({
   const paused = !playing
 
   const seek = (e: MouseEvent<HTMLDivElement>) => {
-    if (dur <= 0) return
+    if (loading || dur <= 0) return
     const rect = e.currentTarget.getBoundingClientRect()
     const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
     const target = Math.floor(frac * dur)
+    transTouched.current = Date.now()
     setOptCur(target)
     onControl('seek', target)
+  }
+
+  const toggle = () => {
+    transTouched.current = Date.now()
+    setOptPlaying(!playing)
+    onControl('toggle')
+  }
+
+  const changeVol = (x: number) => {
+    volTouched.current = Date.now()
+    setOptVol(x)
+    onControl('volume', x / 100)
   }
 
   return (
@@ -78,30 +102,32 @@ export function NowPlaying({
       </div>
 
       <div className="np-info">
-        <div className="np-tag"><span className="np-rec" /> Now Playing</div>
-        <div className="np-title-wrap"><span className="np-title">{data.title || '(讀取中…)'}</span></div>
+        <div className="np-tag"><span className="np-rec" /> {loading ? 'Loading…' : 'Now Playing'}</div>
+        <div className="np-title-wrap"><span className="np-title">{data.title || '緩衝中…'}</span></div>
         <div className="np-channel">
           ♪ {data.channel ? data.channel + ' · ' : ''}派發中心 {machineLabel}
         </div>
 
-        <div className="np-bar" onClick={seek} title="點一下跳到該位置">
-          <div className="np-fill" style={{ width: `${pct}%` }}>
-            <span className="np-knob" />
-          </div>
-        </div>
-        <div className="np-times"><span>{fmt(cur)}</span><span>{fmt(dur)}</span></div>
+        {loading ? (
+          <>
+            <div className="np-bar np-loading"><div className="np-fill" /></div>
+            <div className="np-times"><span>緩衝中…</span><span>—:—</span></div>
+          </>
+        ) : (
+          <>
+            <div className="np-bar" onClick={seek} title="點一下跳到該位置">
+              <div className="np-fill" style={{ width: `${pct}%` }}><span className="np-knob" /></div>
+            </div>
+            <div className="np-times"><span>{fmt(cur)}</span><span>{fmt(dur)}</span></div>
+          </>
+        )}
 
-        <div className="np-controls">
-          <button
-            className="np-btn"
-            onClick={() => { setOptPlaying(!playing); onControl('toggle') }}
-            title={playing ? '暫停' : '播放'}
-          >{playing ? '❚❚' : '▶'}</button>
+        <div className="np-controls" style={{ opacity: loading ? 0.45 : 1, pointerEvents: loading ? 'none' : 'auto' }}>
+          <button className="np-btn" onClick={toggle} title={playing ? '暫停' : '播放'}>{playing ? '❚❚' : '▶'}</button>
           <span className="np-vol-ico">{vol === 0 ? '🔇' : '🔊'}</span>
           <input
-            className="np-vol"
-            type="range" min={0} max={100} value={vol}
-            onChange={(e) => { const x = Number(e.target.value); setOptVol(x); onControl('volume', x / 100) }}
+            className="np-vol" type="range" min={0} max={100} value={vol}
+            onChange={(e) => changeVol(Number(e.target.value))}
             title={`音量 ${vol}%`}
           />
         </div>
@@ -157,6 +183,11 @@ const NP_CSS = `
 .np-knob{position:absolute;right:-5px;top:50%;width:12px;height:12px;margin-top:-6px;border-radius:50%;
   background:#ffd9cf;border:2px solid #ee7b6a;opacity:0;transition:opacity .15s;}
 .np-bar:hover .np-knob{opacity:1;}
+.np-bar.np-loading{cursor:default;}
+.np-bar.np-loading .np-fill{width:100%;box-shadow:none;
+  background:linear-gradient(90deg,#23252f 0%,#3a3d4a 50%,#23252f 100%);background-size:200% 100%;
+  animation:npShimmer 1.1s linear infinite;}
+@keyframes npShimmer{to{background-position:-200% 0;}}
 .np-times{display:flex;justify-content:space-between;font-size:16px;color:#6a6e7e;margin-top:4px;}
 .np-controls{display:flex;align-items:center;gap:10px;margin-top:10px;}
 .np-btn{font-family:'VT323',monospace;font-size:16px;line-height:1;color:#f3ead6;background:#23252f;

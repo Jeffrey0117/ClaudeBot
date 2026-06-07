@@ -55,27 +55,34 @@ function presentedToken(req: IncomingMessage, url: URL): string {
 const NOWPLAYING_JS =
   "(function(){var v=document.querySelector('video');" +
   "if(!v||!isFinite(v.duration)||v.duration<=0){return {active:false};}" +
+  "var p=document.querySelector('#movie_player');" +
   "var pick=function(s){var e=document.querySelector(s);return e&&e.textContent?e.textContent.trim():'';};" +
   "var t=pick('.ytp-title-link')||pick('ytd-watch-metadata h1')||pick('h1.ytd-watch-metadata')||(document.title||'').replace(/ - YouTube$/,'').trim();" +
   "var ch=pick('ytd-channel-name#channel-name a')||pick('#owner #channel-name a')||pick('ytd-video-owner-renderer a');" +
-  "return {active:true,playing:!v.paused,title:(t||'').slice(0,140),channel:(ch||'').slice(0,80),current:Math.floor(v.currentTime||0),duration:Math.floor(v.duration||0),volume:Math.round((v.muted?0:(v.volume||0))*100)};})()"
+  // Read volume via the YT player API when present — video.volume is unreliable
+  // on YouTube (the player re-applies its own state).
+  "var vol=(p&&p.getVolume)?((p.isMuted&&p.isMuted())?0:Math.round(p.getVolume())):Math.round((v.muted?0:(v.volume||0))*100);" +
+  "return {active:true,ready:v.readyState>=3,playing:!v.paused,title:(t||'').slice(0,140),channel:(ch||'').slice(0,80),current:Math.floor(v.currentTime||0),duration:Math.floor(v.duration||0),volume:vol};})()"
 
 /** Build the CDP JS for a now-playing control action. Numeric values are
  *  clamped + coerced (never string-interpolated unsanitised) so a bad value
- *  can't inject. Returns null for an unknown action. */
+ *  can't inject. Prefers the YouTube player API (#movie_player) — setting
+ *  video.volume directly gets reverted by YouTube — and falls back to the raw
+ *  <video> element on non-YT pages. Returns null for an unknown action. */
 function buildControlJs(action: string, value: number): string | null {
-  const v = "var v=document.querySelector('video');if(!v)return false;"
+  const head = "var v=document.querySelector('video');if(!v)return false;var p=document.querySelector('#movie_player');"
   switch (action) {
-    case 'toggle': return `(function(){${v}if(v.paused)v.play();else v.pause();return !v.paused;})()`
-    case 'play': return `(function(){${v}v.play();return true;})()`
-    case 'pause': return `(function(){${v}v.pause();return false;})()`
+    case 'toggle': return `(function(){${head}if(v.paused){if(p&&p.playVideo)p.playVideo();else v.play();return true;}else{if(p&&p.pauseVideo)p.pauseVideo();else v.pause();return false;}})()`
+    case 'play': return `(function(){${head}if(p&&p.playVideo)p.playVideo();else v.play();return true;})()`
+    case 'pause': return `(function(){${head}if(p&&p.pauseVideo)p.pauseVideo();else v.pause();return false;})()`
     case 'seek': {
       const sec = Math.max(0, Math.floor(isFinite(value) ? value : 0))
-      return `(function(){${v}v.currentTime=${sec};v.play();return true;})()`
+      return `(function(){${head}if(p&&p.seekTo)p.seekTo(${sec},true);else v.currentTime=${sec};if(p&&p.playVideo)p.playVideo();else v.play();return true;})()`
     }
     case 'volume': {
-      const vol = Math.min(1, Math.max(0, isFinite(value) ? value : 0))
-      return `(function(){${v}v.muted=false;v.volume=${vol};return v.volume;})()`
+      const f = Math.min(1, Math.max(0, isFinite(value) ? value : 0))
+      const pctV = Math.round(f * 100)
+      return `(function(){${head}if(p&&p.setVolume){if(p.unMute)p.unMute();p.setVolume(${pctV});}else{v.muted=false;v.volume=${f};}return ${pctV};})()`
     }
     default: return null
   }
