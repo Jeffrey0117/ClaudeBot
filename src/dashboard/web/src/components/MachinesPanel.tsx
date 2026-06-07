@@ -205,6 +205,16 @@ export function MachinesPanel() {
   const clearDispatch = useDispatchStore((s) => s.clear)
   const [templates, setTemplates] = useState<DispatchTemplate[]>(loadTemplates)
   const [repoUrl, setRepoUrl] = useState('')
+  // Hub file relay: push a LOCAL project on A to a machine (no clone on its side)
+  const [hubProjects, setHubProjects] = useState<string[]>([])
+  const [hubProject, setHubProject] = useState('')
+  const [hubBusy, setHubBusy] = useState(false)
+
+  useEffect(() => {
+    apiFetch<{ projects: { name: string }[] }>('/api/projects')
+      .then((r) => setHubProjects(r.projects.map((p) => p.name)))
+      .catch(() => {})
+  }, [])
 
   // Now-playing: poll the CDP media state of machines we've sent music to.
   // We only watch machines after a music dispatch so we never spin up Chrome on
@@ -301,6 +311,32 @@ export function MachinesPanel() {
       /* silent */
     } finally {
       setSending(false)
+    }
+  }
+
+  // Push a local project on A to the selected machines over the relay (no clone
+  // on their side), then pre-fill the install+run command for review → 派發.
+  const deployFromHub = async () => {
+    const targets = effectiveTargets
+    if (!hubProject || targets.length === 0 || hubBusy) return
+    setHubBusy(true)
+    try {
+      const results = await Promise.all(
+        targets.map((row) =>
+          apiPost<{ ok: boolean; name?: string; error?: string }>(
+            '/api/deploy-from-hub', { code: row.code, project: hubProject },
+          ).catch(() => ({ ok: false as const })),
+        ),
+      )
+      const ok = results.find((r) => r.ok && r.name) as { name: string } | undefined
+      if (ok) {
+        setTask(`cd ${ok.name} && npm install && pm2 start npm --name ${ok.name} -- start`)
+      } else {
+        const err = (results.find((r) => !r.ok) as { error?: string } | undefined)?.error
+        alert(`從 A 傳送失敗:${err ?? '未知錯誤'}`)
+      }
+    } finally {
+      setHubBusy(false)
     }
   }
 
@@ -453,6 +489,33 @@ export function MachinesPanel() {
                 cursor: repoUrl.trim() ? 'pointer' : 'not-allowed',
               }}
             >產生部署指令</button>
+          </div>
+
+          {/* Hub relay deploy: push a local project on A → no clone on the target */}
+          <div style={{ display: 'flex', gap: '7px', marginBottom: '10px', alignItems: 'center' }}>
+            <select
+              value={hubProject}
+              onChange={(e) => setHubProject(e.target.value)}
+              style={{
+                flex: 1, background: 'var(--bg-card)', border: '1px solid var(--border)',
+                borderRadius: '999px', padding: '7px 14px', fontSize: '12.5px',
+                color: 'var(--text-primary)', outline: 'none',
+              }}
+            >
+              <option value="">📦 從 A 傳本地專案到選取機器(免 clone)…</option>
+              {hubProjects.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <button
+              onClick={deployFromHub}
+              disabled={!hubProject || effectiveTargets.length === 0 || hubBusy}
+              style={{
+                background: (hubProject && effectiveTargets.length > 0 && !hubBusy) ? 'var(--accent)' : 'var(--bg-hover)',
+                color: (hubProject && effectiveTargets.length > 0 && !hubBusy) ? '#fff' : 'var(--text-muted)',
+                border: 'none', borderRadius: '999px', padding: '7px 14px',
+                fontSize: '12.5px', fontWeight: 600, whiteSpace: 'nowrap',
+                cursor: (hubProject && effectiveTargets.length > 0 && !hubBusy) ? 'pointer' : 'not-allowed',
+              }}
+            >{hubBusy ? '傳送中…' : '📦 傳到選取機器'}</button>
           </div>
 
           {/* Dispatch templates — click to fill, save current as a new one */}

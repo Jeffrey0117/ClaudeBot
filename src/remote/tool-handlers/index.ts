@@ -5,7 +5,7 @@
  */
 
 import { createPathValidator } from './path-validator.js'
-import { handleReadFile, handleWriteFile, handleListDirectory, handleSearchFiles, handleFetchFile, handlePushFile, handleListProjects, handleDelete, handleMoveFile, handleFetchArchive } from './file-tools.js'
+import { handleReadFile, handleWriteFile, handleListDirectory, handleSearchFiles, handleFetchFile, handlePushFile, handleListProjects, handleDelete, handleMoveFile, handleFetchArchive, handleWriteArchive } from './file-tools.js'
 import { handleExecuteCommand, handleGrep, handleSystemInfo, handleProjectOverview, handleClipboard, handleNotify } from './exec-tools.js'
 import { handleBrowserOpen, handleBrowserSnapshot, handleBrowserClick, handleBrowserFill, handleBrowserPress, handleBrowserScreenshot, handleBrowserBack, handleBrowserGetUrl, handleBrowserConnect, handleSpawnDetached, handleBrowserEval } from './browser-tools.js'
 import { handleIgPost } from './ig-tools.js'
@@ -43,6 +43,7 @@ export function createToolDispatcher(baseDir: string): ToolDispatcher {
         case 'remote_delete': return handleDelete(args, validatePath, baseDir)
         case 'remote_move_file': return handleMoveFile(args, validatePath, baseDir)
         case 'remote_fetch_archive': return handleFetchArchive(args, validatePath)
+        case 'remote_write_archive': return handleWriteArchive(args, validatePath, baseDir)
         case 'remote_clipboard': return handleClipboard(args)
         case 'remote_notify': return handleNotify(args)
         case 'ab_open': return handleBrowserOpen(args)

@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { readdir, readFile, writeFile, mkdir, stat } from 'node:fs/promises'
+import { readdir, readFile, writeFile, mkdir, stat, rm } from 'node:fs/promises'
 import { join, extname } from 'node:path'
+import { tmpdir } from 'node:os'
+import { execFile } from 'node:child_process'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { z } from 'zod'
 import { scanProjects } from '../config/projects.js'
@@ -282,6 +284,47 @@ async function handleApi(req: IncomingMessage, res: ServerResponse): Promise<voi
       if (data && data.active) { sendJson(res, data); return }
     } catch { /* not connected / no CDP / non-JSON error → inactive */ }
     sendJson(res, { active: false })
+    return
+  }
+
+  // POST /api/deploy-from-hub { code, project } — pack a LOCAL project on the hub
+  // (A) and push it to the machine over the relay. No per-machine git clone or
+  // credentials; the hub is the source + cache. The caller then dispatches
+  // `npm install && pm2 start` into the extracted dir.
+  if (path === '/api/deploy-from-hub' && req.method === 'POST') {
+    let tmp = ''
+    try {
+      const body = JSON.parse(await readBody(req)) as { code?: string; project?: string }
+      const code = String(body.code ?? '')
+      const projName = String(body.project ?? '')
+      if (!code || !projName) { sendJson(res, { ok: false, error: 'missing code/project' }, 400); return }
+      const { findProject } = await import('../config/projects.js')
+      const proj = findProject(projName)
+      if (!proj) { sendJson(res, { ok: false, error: 'project not found on hub' }, 404); return }
+
+      // Pack source only (skip heavy/derived dirs) → tar.gz
+      tmp = join(tmpdir(), `cb-hub-${Date.now()}.tgz`)
+      const packTmp = tmp
+      await new Promise<void>((resolve2, reject2) => {
+        execFile('tar', ['-czf', packTmp, '-C', proj.path,
+          '--exclude=node_modules', '--exclude=.git', '--exclude=dist', '--exclude=.next', '.'],
+          { timeout: 120_000, windowsHide: true },
+          (err) => err ? reject2(err) : resolve2())
+      })
+      const buf = await readFile(tmp)
+      if (buf.length > 20 * 1024 * 1024) {
+        sendJson(res, { ok: false, error: `source too large (${Math.round(buf.length / 1e6)}MB) — eager relay caps at 20MB` }, 413)
+        return
+      }
+      const name = proj.name.replace(/[^\w.-]/g, '') || 'app'
+      const { callAgentTool } = await import('../remote/relay-server.js')
+      const raw = await callAgentTool(code, 'remote_write_archive', { archive: buf.toString('base64'), name }, 120_000)
+      sendJson(res, { ok: true, name, bytes: buf.length, agent: raw })
+    } catch (err) {
+      sendJson(res, { ok: false, error: err instanceof Error ? err.message : String(err) })
+    } finally {
+      if (tmp) await rm(tmp, { force: true }).catch(() => {})
+    }
     return
   }
 

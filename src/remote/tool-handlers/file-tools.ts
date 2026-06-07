@@ -316,3 +316,40 @@ export async function handleFetchArchive(
     await rm(tmpPath, { force: true }).catch(() => {})
   }
 }
+
+// --- Hub file relay: receive a project archive pushed FROM the hub (no clone) ---
+
+/**
+ * Extract a base64 .tar.gz (pushed by the hub over the relay) into baseDir/<name>.
+ * This is how a fresh machine receives a project WITHOUT cloning from origin —
+ * the hub holds/caches the source and streams it here; we only land the bytes
+ * and extract. (node_modules isn't sent; the caller runs `npm install` after.)
+ */
+export async function handleWriteArchive(
+  args: Record<string, unknown>,
+  validatePath: (p: string) => string,
+  _baseDir: string,
+): Promise<string> {
+  const b64 = String(args.archive ?? '')
+  if (!b64) throw new Error('No archive provided')
+  const name = String(args.name ?? 'app').replace(/[^\w.-]/g, '') || 'app'
+  const buf = Buffer.from(b64, 'base64')
+  if (buf.length > MAX_TRANSFER_SIZE) {
+    throw new Error(`Archive too large: ${formatFileSize(buf.length)} (max ${formatFileSize(MAX_TRANSFER_SIZE)})`)
+  }
+
+  const destDir = validatePath(name) // keeps it inside baseDir
+  await mkdir(destDir, { recursive: true })
+  const tmpPath = join(tmpdir(), `cb-deploy-${Date.now()}.tgz`)
+  await writeFile(tmpPath, buf)
+  try {
+    await new Promise<void>((res, rej) => {
+      execFile('tar', ['-xzf', tmpPath, '-C', destDir], { timeout: 120_000, windowsHide: true }, (err) => {
+        if (err) rej(new Error(`extract failed: ${err.message}`)); else res()
+      })
+    })
+  } finally {
+    await rm(tmpPath, { force: true }).catch(() => {})
+  }
+  return JSON.stringify({ ok: true, dir: destDir, bytes: buf.length })
+}
