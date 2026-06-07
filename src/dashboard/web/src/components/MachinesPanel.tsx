@@ -1,8 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useDashboardStore } from '../stores/dashboard-store'
 import { useDispatchStore, type DispatchTask } from '../stores/dispatch-store'
-import { apiPost } from '../hooks/useApi'
+import { apiFetch, apiPost } from '../hooks/useApi'
 import type { ActiveRunnerInfo, DashboardCommand } from '../types'
+import { NowPlaying, type NowPlayingData } from './NowPlaying'
+
+/** A dispatched task that looks like "play music" → watch its now-playing. */
+const MUSIC_RE = /播|放|聽|歌|音[樂乐]|副歌|play|music|song|youtube|youtu\.be|spotify/i
 
 interface DispatchTemplate {
   readonly id: string
@@ -193,6 +197,36 @@ export function MachinesPanel() {
   const clearDispatch = useDispatchStore((s) => s.clear)
   const [templates, setTemplates] = useState<DispatchTemplate[]>(loadTemplates)
 
+  // Now-playing: poll the CDP media state of machines we've sent music to.
+  // We only watch machines after a music dispatch so we never spin up Chrome on
+  // an idle machine; a machine drops out after 3 consecutive inactive polls.
+  const [nowPlaying, setNowPlaying] = useState<Record<string, NowPlayingData>>({})
+  const watchRef = useRef<Map<string, { label: string; misses: number }>>(new Map())
+
+  useEffect(() => {
+    const drop = (code: string) => {
+      watchRef.current.delete(code)
+      setNowPlaying((prev) => { const n = { ...prev }; delete n[code]; return n })
+    }
+    const id = setInterval(() => {
+      const entries = [...watchRef.current.entries()]
+      if (entries.length === 0) return
+      for (const [code, info] of entries) {
+        apiFetch<NowPlayingData>(`/api/nowplaying?code=${encodeURIComponent(code)}`)
+          .then((d) => {
+            if (d.active) {
+              info.misses = 0
+              setNowPlaying((prev) => ({ ...prev, [code]: d }))
+            } else if (++info.misses >= 3) {
+              drop(code)
+            }
+          })
+          .catch(() => { if (++info.misses >= 3) drop(code) })
+      }
+    }, 3000)
+    return () => clearInterval(id)
+  }, [])
+
   const rows: MachineRow[] = bots.flatMap((bot) =>
     bot.machines.map((m) => ({
       botId: bot.botId,
@@ -231,6 +265,11 @@ export function MachinesPanel() {
     const targets = effectiveTargets
     if (!prompt || targets.length === 0 || sending) return
     setSending(true)
+    // If this dispatch is a "play music" request, start watching those machines'
+    // now-playing so the vinyl card appears (only here → never polls idle ones).
+    if (MUSIC_RE.test(prompt)) {
+      for (const row of targets) watchRef.current.set(row.code, { label: row.label, misses: 0 })
+    }
     // Clear immediately (optimistic) — don't wait for slow/timing-out dispatches.
     setTask('')
     setSelected(new Set())
@@ -303,6 +342,19 @@ export function MachinesPanel() {
               .sort((a, b) => b.startedAt - a.startedAt)
               .map((t) => <DispatchRow key={t.commandId} task={t} />)}
           </div>
+        </div>
+      )}
+
+      {/* Now playing — vinyl cards for machines currently playing music */}
+      {Object.keys(nowPlaying).length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
+          {Object.entries(nowPlaying).map(([code, d]) => (
+            <NowPlaying
+              key={code}
+              data={d}
+              machineLabel={rows.find((r) => r.code === code)?.label ?? watchRef.current.get(code)?.label ?? ''}
+            />
+          ))}
         </div>
       )}
 

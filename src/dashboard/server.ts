@@ -48,6 +48,18 @@ function presentedToken(req: IncomingMessage, url: URL): string {
   return url.searchParams.get('token') ?? ''
 }
 
+// Read live media state from a machine's CDP Chrome. Returns an OBJECT (not a
+// string) so handleBrowserEval serialises it cleanly → one JSON.parse server
+// side. Pure read — never launches anything. Only the dashboard polls this, and
+// only for machines it knows are playing (so it never spins up Chrome on idle).
+const NOWPLAYING_JS =
+  "(function(){var v=document.querySelector('video');" +
+  "if(!v||!isFinite(v.duration)||v.duration<=0){return {active:false};}" +
+  "var pick=function(s){var e=document.querySelector(s);return e&&e.textContent?e.textContent.trim():'';};" +
+  "var t=pick('.ytp-title-link')||pick('ytd-watch-metadata h1')||pick('h1.ytd-watch-metadata')||(document.title||'').replace(/ - YouTube$/,'').trim();" +
+  "var ch=pick('ytd-channel-name#channel-name a')||pick('#owner #channel-name a')||pick('ytd-video-owner-renderer a');" +
+  "return {active:true,playing:!v.paused,title:(t||'').slice(0,140),channel:(ch||'').slice(0,80),current:Math.floor(v.currentTime||0),duration:Math.floor(v.duration||0)};})()"
+
 // Injected by startDashboardServer so the CloudPipe webhook can reach Telegram
 // without this module importing the bot instance.
 let pushToChat: PushToChat | null = null
@@ -228,6 +240,20 @@ async function handleApi(req: IncomingMessage, res: ServerResponse): Promise<voi
       })
     )
     sendJson(res, { projects: projectsWithLock })
+    return
+  }
+
+  // GET /api/nowplaying?code=XXX — live media state from a machine's CDP Chrome
+  if (path === '/api/nowplaying' && req.method === 'GET') {
+    const code = url.searchParams.get('code') ?? ''
+    if (!code) { sendJson(res, { active: false }); return }
+    try {
+      const { callAgentTool } = await import('../remote/relay-server.js')
+      const raw = await callAgentTool(code, 'remote_browser_eval', { js: NOWPLAYING_JS }, 8_000)
+      const data = JSON.parse(raw) as { active?: boolean }
+      if (data && data.active) { sendJson(res, data); return }
+    } catch { /* not connected / no CDP / non-JSON error → inactive */ }
+    sendJson(res, { active: false })
     return
   }
 
