@@ -2,6 +2,7 @@ import type { AIRunner, AIBackend } from './types.js'
 import { claudeAdapter } from './claude-adapter.js'
 import { geminiRunner } from './gemini-runner.js'
 import { codexRunner } from './codex-runner.js'
+import { channelRunner } from './channel/channel-runner.js'
 
 const runners = new Map<AIBackend, AIRunner>()
 
@@ -49,3 +50,4 @@ export function getAnyElapsedMs(projectPath: string): number {
 registerRunner(claudeAdapter)
 registerRunner(geminiRunner)
 registerRunner(codexRunner)
+registerRunner(channelRunner)
