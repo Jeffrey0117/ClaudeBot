@@ -9,7 +9,7 @@ import { writeFile, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { CdpClient, listTargets, findOrOpenPage } from './cdp-client.js'
-import { isCdpAvailable, ensureChromeCdp } from './chrome-cdp.js'
+import { isCdpAvailable, ensureChromeCdp, CDP_PORT } from './chrome-cdp.js'
 import { buildGmShim, buildDownloadShim } from './gm-shim.js'
 
 const BINDING = '__cbGM'
@@ -312,5 +312,8 @@ export async function runUserscript(
     return { files, logs }
   } finally {
     client.close()
+    // Close the tab we drove, so the IG video doesn't keep playing/loading in
+    // the CDP Chrome after the download.
+    try { await fetch(`http://localhost:${CDP_PORT}/json/close/${target.id}`) } catch { /* tab may already be gone */ }
   }
 }
