@@ -79,7 +79,6 @@ export async function runUserscript(
   try {
     await client.send('Page.enable')
     await client.send('Runtime.enable')
-    await client.send('Runtime.addBinding', { name: BINDING })
 
     const bindingHandler = (p: unknown): void => {
       const e = p as { name?: string; payload?: string }
@@ -103,6 +102,11 @@ export async function runUserscript(
 
     await client.send('Page.navigate', { url: opts.url })
     await wait(2000) // settle (document-end style injection)
+
+    // Add the binding AFTER navigation so __cbGM exists in the new page's
+    // execution context (a binding added pre-navigate may not survive the
+    // context swap). The bindingCalled listener was registered above.
+    await client.send('Runtime.addBinding', { name: BINDING })
 
     const shim = buildGmShim(BINDING)
     const injected = await client.send<EvalResult>('Runtime.evaluate', {
