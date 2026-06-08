@@ -12,6 +12,7 @@
 
 import { WebSocket } from 'ws'
 import { CDP_PORT } from './chrome-cdp.js'
+import { CdpEventRouter, type CdpEventHandler } from './cdp-events.js'
 
 export interface CdpTarget {
   readonly id: string
@@ -67,6 +68,7 @@ export class CdpClient {
     number,
     { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
   >()
+  private readonly events = new CdpEventRouter()
 
   private constructor(private readonly ws: WebSocket) {}
 
@@ -99,7 +101,12 @@ export class CdpClient {
     } catch {
       return
     }
-    if (msg.id === undefined) return // event, not a command response
+    if (msg.id === undefined) {
+      // Event (no id): route to subscribers instead of dropping it.
+      const ev = msg as { method?: string; params?: unknown }
+      if (ev.method) this.events.dispatch(ev.method, ev.params)
+      return
+    }
     const entry = this.pending.get(msg.id)
     if (!entry) return
     this.pending.delete(msg.id)
@@ -134,6 +141,16 @@ export class CdpClient {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
       this.ws.send(JSON.stringify({ id, method, params: params ?? {} }))
     })
+  }
+
+  /** Subscribe to a CDP event (e.g. 'Network.responseReceived'). */
+  on(method: string, handler: CdpEventHandler): void {
+    this.events.on(method, handler)
+  }
+
+  /** Unsubscribe a previously-registered event handler. */
+  off(method: string, handler: CdpEventHandler): void {
+    this.events.off(method, handler)
   }
 
   close(): void {
