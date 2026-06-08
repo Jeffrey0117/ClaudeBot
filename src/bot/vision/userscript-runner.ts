@@ -55,7 +55,21 @@ async function serviceXhr(
   logs: string[],
 ): Promise<void> {
   try {
-    const headers: Record<string, string> = { ...(req.headers ?? {}) }
+    // For instagram.com requests, add the browser headers IG's API requires
+    // (Referer/Origin/UA/CSRF/AppID) — Node fetch doesn't add them and IG 400s
+    // without them. Script-set headers still win (spread after defaults).
+    const isIg = /instagram\.com/.test(String(req.url))
+    const defaults: Record<string, string> = {}
+    if (isIg) {
+      defaults.Referer = 'https://www.instagram.com/'
+      defaults.Origin = 'https://www.instagram.com'
+      defaults['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+      defaults['X-Requested-With'] = 'XMLHttpRequest'
+      defaults['X-IG-App-ID'] = '936619743392459'
+      const csrf = /csrftoken=([^;]+)/.exec(cookieHeader)
+      if (csrf) defaults['X-CSRFToken'] = csrf[1]
+    }
+    const headers: Record<string, string> = { ...defaults, ...(req.headers ?? {}) }
     if (cookieHeader && !Object.keys(headers).some((h) => h.toLowerCase() === 'cookie')) headers.Cookie = cookieHeader
     const res = await fetch(String(req.url), { method: req.method ?? 'GET', headers, body: req.data ?? undefined })
     logs.push(`xhr ${res.status}: ${String(req.url).slice(0, 70)}`)
