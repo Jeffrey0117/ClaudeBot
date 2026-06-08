@@ -4,7 +4,16 @@ import { env } from '../../config/env.js'
 import { callAgentTool } from '../../remote/relay-server.js'
 import { getScript, addScript } from '../vision/userscript-store.js'
 import { parseUserscriptMeta } from '../vision/userscript-meta.js'
-import { runUserscript, type RunResult } from '../vision/userscript-runner.js'
+import { runUserscript, type RunResult, type RunDest } from '../vision/userscript-runner.js'
+
+/** Parse an optional destination suffix: 'tg' | 'b' | 'b:<path>' | 'local'. */
+export function parseDest(token: string | undefined): RunDest {
+  const t = (token ?? '').trim()
+  if (!t || t.toLowerCase() === 'tg') return { kind: 'tg' }
+  if (t.toLowerCase() === 'b' || t.toLowerCase() === 'local') return { kind: 'local' }
+  if (/^b:/i.test(t)) return { kind: 'local', dir: t.slice(2).trim() }
+  return { kind: 'tg' }
+}
 
 interface IgScriptCfg {
   readonly name: string
@@ -67,8 +76,8 @@ async function ensureIgScript(kind: 'post' | 'reel'): Promise<PreparedScript> {
   return { code: s.code, trigger: cfg.trigger, requires: s.requires, resources: s.resources }
 }
 
-/** Download an IG post/reel and send the media file(s) to the chat. */
-export async function downloadIg(ctx: BotContext, rawUrl: string): Promise<void> {
+/** Download an IG post/reel; deliver to the chosen destination (TG / local). */
+export async function downloadIg(ctx: BotContext, rawUrl: string, dest: RunDest = { kind: 'tg' }): Promise<void> {
   const det = detectIgUrl(rawUrl)
   if (!det) {
     await ctx.reply('只支援 IG 貼文(/p/)或 reel(/reel/)連結。')
@@ -78,7 +87,8 @@ export async function downloadIg(ctx: BotContext, rawUrl: string): Promise<void>
   if (!chatId) return
   const threadId = ctx.message?.message_thread_id
 
-  await ctx.reply(`📥 下載 IG ${det.kind === 'reel' ? 'Reel' : '貼文'} …`)
+  const destLabel = dest.kind === 'local' ? `（存${dest.dir ? ' ' + dest.dir : '本機'}）` : ''
+  await ctx.reply(`📥 下載 IG ${det.kind === 'reel' ? 'Reel' : '貼文'} ${destLabel}…`)
   try {
     const prep = await ensureIgScript(det.kind)
     const pairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId) : null
@@ -87,7 +97,7 @@ export async function downloadIg(ctx: BotContext, rawUrl: string): Promise<void>
       const out = await callAgentTool(
         pairing.code,
         'remote_userscript_run',
-        { code: prep.code, url: det.url, trigger: prep.trigger, seconds: 25, requires: prep.requires, resources: prep.resources },
+        { code: prep.code, url: det.url, trigger: prep.trigger, seconds: 25, requires: prep.requires, resources: prep.resources, dest },
         60_000,
       )
       try {
@@ -97,15 +107,21 @@ export async function downloadIg(ctx: BotContext, rawUrl: string): Promise<void>
         return
       }
     } else {
-      result = await runUserscript(prep.code, { url: det.url, trigger: prep.trigger, seconds: 25, requires: prep.requires, resources: prep.resources })
+      result = await runUserscript(prep.code, { url: det.url, trigger: prep.trigger, seconds: 25, requires: prep.requires, resources: prep.resources, dest })
     }
 
     if (result.files.length === 0) {
       await ctx.reply(`沒抓到檔。\n${result.logs.slice(-6).join('\n').slice(0, 800)}`)
       return
     }
+    const saved = result.files.filter((f) => f.savedPath)
+    if (saved.length > 0) {
+      const where = pairing?.connected ? 'B' : '本機'
+      await ctx.reply(`📁 已存到${where}（${saved.length} 個）:\n${saved.map((f) => f.savedPath).join('\n')}`)
+      return
+    }
     for (const f of result.files) {
-      await ctx.replyWithDocument({ source: Buffer.from(f.base64, 'base64'), filename: f.name })
+      if (f.base64) await ctx.replyWithDocument({ source: Buffer.from(f.base64, 'base64'), filename: f.name })
     }
   } catch (e) {
     await ctx.reply(`❌ 下載失敗: ${e instanceof Error ? e.message : String(e)}`)
@@ -116,8 +132,10 @@ export async function igdlCommand(ctx: BotContext): Promise<void> {
   const text = (ctx.message && 'text' in ctx.message ? ctx.message.text : '')
     .replace(/^\/igdl(@\S+)?\s*/i, '').trim()
   if (!text) {
-    await ctx.reply('用法: /igdl <IG 貼文或 reel 連結>\n(或直接把 IG 連結丟給我就會自動下載)')
+    await ctx.reply('用法: /igdl <IG 連結> [去處]\n去處: 預設傳 TG｜b 存 B 本機｜b:<資料夾> 指定路徑\n(或直接把 IG 連結丟給我就會自動傳 TG)')
     return
   }
-  await downloadIg(ctx, text)
+  const url = text.split(/\s+/)[0]
+  const destToken = text.slice(text.indexOf(url) + url.length).trim()
+  await downloadIg(ctx, url, parseDest(destToken))
 }

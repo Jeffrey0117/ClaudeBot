@@ -103,8 +103,11 @@ export async function handleUserscriptRun(args: Record<string, unknown>): Promis
   const seconds = Number(args.seconds ?? 8)
   const requires = Array.isArray(args.requires) ? (args.requires as string[]) : undefined
   const resources = Array.isArray(args.resources) ? (args.resources as Array<{ name: string; url: string }>) : undefined
+  const dest = (args.dest && typeof args.dest === 'object')
+    ? (args.dest as { kind: 'tg' } | { kind: 'local'; dir?: string })
+    : undefined
   if (!(await isCdpAvailable())) { await ensureChromeCdp().catch(() => {}) }
-  const result = await runUserscript(code, { url, trigger, seconds, requires, resources })
+  const result = await runUserscript(code, { url, trigger, seconds, requires, resources, dest })
   return JSON.stringify(result)
 }
 

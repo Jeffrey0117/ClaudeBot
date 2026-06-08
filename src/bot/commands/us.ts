@@ -119,7 +119,7 @@ export async function usCommand(ctx: BotContext): Promise<void> {
         result = await runUserscript(script.code, { url, trigger: trigger ?? script.trigger, seconds: 25, requires: script.requires, resources: script.resources })
       }
       for (const f of result.files) {
-        await ctx.replyWithDocument({ source: Buffer.from(f.base64, 'base64'), filename: f.name })
+        if (f.base64) await ctx.replyWithDocument({ source: Buffer.from(f.base64, 'base64'), filename: f.name })
       }
       const tail = result.logs.slice(-8).join('\n').slice(0, 1500)
       await ctx.reply(`✅ ${name} 跑完，${result.files.length} 個檔。\n${tail}`)

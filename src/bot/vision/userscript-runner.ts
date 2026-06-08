@@ -5,6 +5,9 @@
  * (no CORS), and returns them as base64 blobs.
  */
 
+import { writeFile, mkdir } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import path from 'node:path'
 import { CdpClient, listTargets, findOrOpenPage } from './cdp-client.js'
 import { isCdpAvailable, ensureChromeCdp } from './chrome-cdp.js'
 import { buildGmShim, buildDownloadShim } from './gm-shim.js'
@@ -14,13 +17,19 @@ const MAX_FILE_BYTES = 20 * 1024 * 1024
 
 export interface RunFile {
   readonly name: string
-  readonly base64: string
+  /** base64 bytes (TG destination) — absent when the file was saved locally. */
+  readonly base64?: string
+  /** absolute path on the machine that ran the script (local destination). */
+  readonly savedPath?: string
 }
 
 export interface RunResult {
   readonly files: RunFile[]
   readonly logs: string[]
 }
+
+/** Where captured files go. 'tg' → return base64; 'local' → write to disk here. */
+export type RunDest = { readonly kind: 'tg' } | { readonly kind: 'local'; readonly dir?: string }
 
 /**
  * Shape of the value resolved by CdpClient.send<EvalResult>('Runtime.evaluate').
@@ -96,7 +105,7 @@ async function serviceXhr(
  */
 export async function runUserscript(
   code: string,
-  opts: { url: string; trigger?: string; seconds?: number; requires?: readonly string[]; resources?: ReadonlyArray<{ name: string; url: string }> },
+  opts: { url: string; trigger?: string; seconds?: number; requires?: readonly string[]; resources?: ReadonlyArray<{ name: string; url: string }>; dest?: RunDest },
 ): Promise<RunResult> {
   const secs = Math.min(30, Math.max(3, Math.floor(opts.seconds ?? 8)))
   const logs: string[] = []
@@ -276,6 +285,30 @@ export async function runUserscript(
     }
 
     files.push(...fileDatas)
+
+    // Local destination: write the bytes to disk HERE (on the machine running
+    // the script — the agent when paired) and return paths, not base64. Avoids
+    // pushing the file through the relay back to the bot.
+    if (opts.dest?.kind === 'local') {
+      const dir = opts.dest.dir || path.join(homedir(), 'Downloads', 'ClaudeBot')
+      await mkdir(dir, { recursive: true })
+      const saved: RunFile[] = []
+      const used = new Set<string>()
+      for (const f of files) {
+        if (!f.base64) continue
+        let name = f.name || 'download'
+        while (used.has(name.toLowerCase())) {
+          const dot = name.lastIndexOf('.')
+          name = dot > 0 ? `${name.slice(0, dot)}_${Date.now() % 1000}${name.slice(dot)}` : `${name}_${Date.now() % 1000}`
+        }
+        used.add(name.toLowerCase())
+        const full = path.join(dir, name)
+        await writeFile(full, Buffer.from(f.base64, 'base64'))
+        saved.push({ name, savedPath: full })
+      }
+      return { files: saved, logs }
+    }
+
     return { files, logs }
   } finally {
     client.close()
