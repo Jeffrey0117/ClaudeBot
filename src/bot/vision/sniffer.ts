@@ -30,6 +30,27 @@ export function truncate(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max)} …(截斷)`
 }
 
+// Analytics / tracking / error-reporting endpoints — never the site's own data
+// API, so they're dropped from results (matched as substrings of the URL).
+const TRACKING_PATTERNS = [
+  'google-analytics.com', 'analytics.google.com', 'googletagmanager.com',
+  'doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'adservice.google',
+  '/g/collect', '/gtag/', '/gtm.js',
+  'connect.facebook.net', 'facebook.com/tr',
+  'cloudflareinsights.com', '/cdn-cgi/rum', '/cdn-cgi/beacon', '/cdn-cgi/challenge',
+  'hotjar.', 'mixpanel.com', 'segment.io', 'segment.com', 'amplitude.com',
+  'sentry.io', 'datadoghq.com', 'browser-intake-datadoghq', 'bugsnag.com',
+  'fullstory.com', 'clarity.ms', 'nr-data.net', 'newrelic.com',
+  'intercom.io', 'intercomcdn', 'crisp.chat',
+  'scorecardresearch.com', 'quantserve.com',
+]
+
+/** True if the URL is a known analytics/tracking/telemetry beacon (noise). */
+export function isTrackingNoise(url: string): boolean {
+  const u = url.toLowerCase()
+  return TRACKING_PATTERNS.some((p) => u.includes(p))
+}
+
 /** Keep the last entry for each method+url pair, preserving first-seen order. */
 export function dedupeByMethodUrl(calls: readonly SniffedCall[]): SniffedCall[] {
   const byKey = new Map<string, SniffedCall>()
@@ -90,7 +111,12 @@ export async function sniff(url: string, seconds: number): Promise<SniffResult> 
     client.on('Network.responseReceived', (p) => {
       const e = p as { requestId?: string; type?: string; response?: { url: string; status: number; mimeType: string } }
       if (!e.requestId || !e.response) return
-      if (!shouldKeep(e.type ?? '', e.response.mimeType ?? '')) {
+      // Drop non-JSON, analytics/tracking beacons, and 204 No-Content (never data).
+      if (
+        !shouldKeep(e.type ?? '', e.response.mimeType ?? '') ||
+        isTrackingNoise(e.response.url) ||
+        e.response.status === 204
+      ) {
         dropped++
         return
       }

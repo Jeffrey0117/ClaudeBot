@@ -1,5 +1,18 @@
 import { describe, it, expect } from 'vitest'
-import { shouldKeep, truncate, dedupeByMethodUrl, type SniffedCall } from '../../../src/bot/vision/sniffer.js'
+import { shouldKeep, truncate, dedupeByMethodUrl, isTrackingNoise, type SniffedCall } from '../../../src/bot/vision/sniffer.js'
+
+describe('isTrackingNoise', () => {
+  it('drops common analytics/tracking beacons', () => {
+    expect(isTrackingNoise('https://www.google-analytics.com/g/collect?v=2')).toBe(true)
+    expect(isTrackingNoise('https://codelove.tw/cdn-cgi/rum?')).toBe(true)
+    expect(isTrackingNoise('https://stats.g.doubleclick.net/x')).toBe(true)
+    expect(isTrackingNoise('https://o123.ingest.sentry.io/api/1/envelope/')).toBe(true)
+  })
+  it('keeps real API endpoints', () => {
+    expect(isTrackingNoise('https://api.site.com/v2/products')).toBe(false)
+    expect(isTrackingNoise('https://codelove.tw/api/posts')).toBe(false)
+  })
+})
 
 describe('shouldKeep', () => {
   it('keeps XHR/Fetch JSON', () => {
