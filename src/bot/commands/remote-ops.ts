@@ -137,7 +137,7 @@ export async function selfupdateCommand(ctx: BotContext): Promise<void> {
     + "$cp=Join-Path $env:TEMP 'cbcs.cer';Invoke-WebRequest $cer -OutFile $cp;"
     + 'Import-Certificate -FilePath $cp -CertStoreLocation Cert:\\CurrentUser\\Root|Out-Null;'
     + 'Import-Certificate -FilePath $cp -CertStoreLocation Cert:\\CurrentUser\\TrustedPublisher|Out-Null;'
-    + "$xp=Join-Path $env:TEMP 'cbsetup.exe';Invoke-WebRequest $exe -OutFile $xp;Start-Process $xp;'OK 已信任憑證+啟動安裝程式'"
+    + "$xp=Join-Path $env:TEMP 'cbsetup.exe';Invoke-WebRequest $exe -OutFile $xp;Start-Process $xp;'OK: cert trusted + installer launched'"
     + '"'
 
   await ctx.reply('⬇️ 那台機器：信任憑證 + 抓最新簽章版 + 啟動安裝…（約 20-40 秒）')
