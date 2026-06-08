@@ -209,7 +209,7 @@ export async function runUserscript(
     // Diagnostic probe — what state is the page in after the run?
     try {
       const probe = await client.send<{ result?: { value?: string } }>('Runtime.evaluate', {
-        expression: `JSON.stringify({jq: typeof window.$, dwBtns: document.querySelectorAll('.IG_DW_MAIN').length, anyDl: document.querySelectorAll('a[download], .download-btn').length, mb: typeof window.Mediabunny, title: (document.title||'').slice(0,40)})`,
+        expression: `JSON.stringify({jq: typeof window.$, dwBtns: document.querySelectorAll('.IG_DW_MAIN').length, igEls: document.querySelectorAll('[class*="IG_"]').length, sample: [].slice.call(document.querySelectorAll('[class*="IG_"]'),0,4).map(function(e){return e.className}).join(' | ').slice(0,120), mb: typeof window.Mediabunny, title: (document.title||'').slice(0,30)})`,
         returnByValue: true,
       })
       logs.push('probe: ' + (probe.result?.value ?? '?'))
