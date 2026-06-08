@@ -8,6 +8,7 @@ import { enqueue, isProcessing } from '../../claude/queue.js'
 import { cancelAnyRunning } from '../../ai/registry.js'
 import { isChannelEnabled } from '../../ai/channel/opt-in-store.js'
 import { isChannelRunning, channelInterrupt } from '../../ai/channel/channel-runner.js'
+import { detectIgUrl, downloadIg } from '../commands/igdl.js'
 import { transcribeVoiceFile } from './voice-handler.js'
 import { extractReplyQuote } from './reply-quote.js'
 import { scanProjects, resolveWorktreePath } from '../../config/projects.js'
@@ -145,6 +146,13 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
   const messageId = ctx.message?.message_id ?? 0
   const threadId = ctx.message?.message_thread_id
   const state = getUserState(chatId, threadId)
+
+  // Bare IG link → auto-download (post/reel). Only when the message IS a pasted
+  // link (starts with http) so we don't hijack messages that mention a link.
+  if (/^https?:\/\//i.test(text.trim()) && detectIgUrl(text)) {
+    await downloadIg(ctx, text)
+    return
+  }
 
   // @chat one-shot: general chat without selecting a project — bypass buffer
   const chatMatch = text.match(/^@chat[\s(](.+?)[\s)]*$/s) ?? text.match(/^@chat\s+(.+)$/s)

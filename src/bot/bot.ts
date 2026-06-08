@@ -63,6 +63,7 @@ import { licenseCommand } from './commands/license.js'
 import { channelCommand } from './commands/channel.js'
 import { sniffCommand } from './commands/sniff.js'
 import { usCommand } from './commands/us.js'
+import { igdlCommand } from './commands/igdl.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
@@ -166,6 +167,7 @@ export const CORE_COMMANDS = [
   { command: 'channel', description: '切換 channel session 模式 (on/off/status)' },
   { command: 'sniff', description: '抓網頁背後的 JSON API' },
   { command: 'us', description: '跑油猴腳本（注入+下載）' },
+  { command: 'igdl', description: '下載 IG 貼文/Reel（貼連結即可）' },
 ] as const
 
 export function wireReminderSendFn(bot: Telegraf<BotContext>): void {
@@ -299,6 +301,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['channel', channelCommand],
     ['sniff', sniffCommand],
     ['us', usCommand],
+    ['igdl', igdlCommand],
   ]
   for (const [name, handler] of coreEntries) {
     bot.command(name, handler)
