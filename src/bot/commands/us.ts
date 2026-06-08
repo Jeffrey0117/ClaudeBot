@@ -100,7 +100,7 @@ export async function usCommand(ctx: BotContext): Promise<void> {
         const rawOut = await callAgentTool(
           pairing.code,
           'remote_userscript_run',
-          { code: script.code, url, trigger: trigger ?? script.trigger, seconds: 10 },
+          { code: script.code, url, trigger: trigger ?? script.trigger, seconds: 10, requires: script.requires, resources: script.resources },
           60_000,
         )
         try {
@@ -116,7 +116,7 @@ export async function usCommand(ctx: BotContext): Promise<void> {
           return
         }
       } else {
-        result = await runUserscript(script.code, { url, trigger: trigger ?? script.trigger, seconds: 10 })
+        result = await runUserscript(script.code, { url, trigger: trigger ?? script.trigger, seconds: 10, requires: script.requires, resources: script.resources })
       }
       for (const f of result.files) {
         await ctx.replyWithDocument({ source: Buffer.from(f.base64, 'base64'), filename: f.name })

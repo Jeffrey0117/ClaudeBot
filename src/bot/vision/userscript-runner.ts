@@ -48,6 +48,31 @@ function basenameFromUrl(url: string): string {
   }
 }
 
+async function serviceXhr(
+  client: CdpClient,
+  req: { id?: number; url?: string; method?: string; headers?: Record<string, string>; data?: string | null; responseType?: string },
+  cookieHeader: string,
+  logs: string[],
+): Promise<void> {
+  try {
+    const headers: Record<string, string> = { ...(req.headers ?? {}) }
+    if (cookieHeader && !Object.keys(headers).some((h) => h.toLowerCase() === 'cookie')) headers.Cookie = cookieHeader
+    const res = await fetch(String(req.url), { method: req.method ?? 'GET', headers, body: req.data ?? undefined })
+    const wantBinary = req.responseType === 'blob' || req.responseType === 'arraybuffer'
+    let resp: Record<string, unknown>
+    if (wantBinary) {
+      const buf = Buffer.from(await res.arrayBuffer())
+      resp = { status: res.status, statusText: res.statusText, base64: buf.toString('base64'), finalUrl: res.url }
+    } else {
+      resp = { status: res.status, statusText: res.statusText, responseText: await res.text(), finalUrl: res.url }
+    }
+    await client.send('Runtime.evaluate', { expression: `window.__cbXhrResolve(${req.id}, ${JSON.stringify(resp)})`, awaitPromise: false })
+  } catch (err) {
+    logs.push(`xhr failed: ${req.url} (${err instanceof Error ? err.message : String(err)})`)
+    try { await client.send('Runtime.evaluate', { expression: `window.__cbXhrResolve(${req.id}, {error:${JSON.stringify(String(err))}})`, awaitPromise: false }) } catch { /* */ }
+  }
+}
+
 /**
  * Inject `code` (CSP-bypassed) into the CDP Chrome at `url`, run optional
  * `trigger`, and capture downloads the script requests via GM_download/xhr
@@ -56,7 +81,7 @@ function basenameFromUrl(url: string): string {
  */
 export async function runUserscript(
   code: string,
-  opts: { url: string; trigger?: string; seconds?: number },
+  opts: { url: string; trigger?: string; seconds?: number; requires?: readonly string[]; resources?: ReadonlyArray<{ name: string; url: string }> },
 ): Promise<RunResult> {
   const secs = Math.min(30, Math.max(3, Math.floor(opts.seconds ?? 8)))
   const logs: string[] = []
@@ -81,13 +106,44 @@ export async function runUserscript(
     await client.send('Page.enable')
     await client.send('Runtime.enable')
 
+    // Fetch @require and @resource on the Node side (no CORS, CSP-bypass)
+    let requireBlob = ''
+    for (const u of opts.requires ?? []) {
+      try {
+        const r = await fetch(u)
+        if (r.ok) requireBlob += `\n;${await r.text()}\n;`
+        else logs.push(`require ${r.status}: ${u}`)
+      } catch { logs.push(`require failed: ${u}`) }
+    }
+    const resObj: Record<string, string> = {}
+    for (const res of opts.resources ?? []) {
+      try {
+        const r = await fetch(res.url)
+        if (r.ok) resObj[res.name] = await r.text()
+        else logs.push(`resource ${r.status}: ${res.name}`)
+      } catch { logs.push(`resource failed: ${res.name}`) }
+    }
+
     await client.send('Page.navigate', { url: opts.url })
     await wait(2000) // settle (document-end style injection)
 
+    // Read cookies from the navigated page (for GM_xmlhttpRequest injection)
+    let cookieHeader = ''
+    try {
+      await client.send('Network.enable')
+      const ck = await client.send<{ cookies?: Array<{ name: string; value: string; domain: string }> }>('Network.getAllCookies')
+      cookieHeader = (ck.cookies ?? [])
+        .filter((c) => /instagram\.com$/.test(c.domain.replace(/^\./, '')))
+        .map((c) => `${c.name}=${c.value}`)
+        .join('; ')
+    } catch { /* no cookies */ }
+
     const shim = buildGmShim(BINDING)
     const dlShim = buildDownloadShim(BINDING)
+    const cjsShim = 'var module={exports:{}};var exports=module.exports;'
+    const resInit = `window.__cbRes=${JSON.stringify(resObj)};`
     const injected = await client.send<EvalResult>('Runtime.evaluate', {
-      expression: `${shim};${dlShim}\n;${code}`,
+      expression: `${cjsShim}${resInit}${requireBlob}${shim};${dlShim}\n;${code}`,
       awaitPromise: false,
       userGesture: true,
     })
@@ -116,30 +172,39 @@ export async function runUserscript(
       }
     }
 
-    await wait(secs * 1000)
+    // Polling loop — services GM_xmlhttpRequest live during the wait window
+    const processedXhr = new Set<number>()
+    const deadline = Date.now() + secs * 1000
+    while (Date.now() < deadline) {
+      await wait(250)
+      const poll = await client.send<{ result?: { value?: string } }>('Runtime.evaluate', {
+        expression: `JSON.stringify(window[${JSON.stringify(BINDING)}] || [])`,
+        returnByValue: true,
+      })
+      let arr: Array<{ kind?: string; id?: number; url?: string; method?: string; headers?: Record<string, string>; data?: string | null; responseType?: string }> = []
+      try { arr = JSON.parse(poll.result?.value ?? '[]') } catch { /* */ }
+      for (const msg of arr) {
+        if (msg.kind === 'xhr' && typeof msg.id === 'number' && !processedXhr.has(msg.id) && msg.url) {
+          processedXhr.add(msg.id)
+          void serviceXhr(client, msg, cookieHeader, logs)
+        }
+      }
+    }
 
-    // Read the capture array the shims pushed to (in the same default context —
-    // no CDP binding, so no context-matching footgun).
-    const dump = await client.send<{ result?: { value?: string } }>('Runtime.evaluate', {
+    // Final read — captures filedata / download entries accumulated during the run
+    const finalDump = await client.send<{ result?: { value?: string } }>('Runtime.evaluate', {
       expression: `JSON.stringify(window[${JSON.stringify(BINDING)}] || [])`,
       returnByValue: true,
     })
     let captured: Array<{ kind?: string; url?: string; name?: string; dataUrl?: string }> = []
-    try {
-      captured = JSON.parse(dump.result?.value ?? '[]') as typeof captured
-    } catch {
-      /* ignore */
-    }
+    try { captured = JSON.parse(finalDump.result?.value ?? '[]') } catch { /* */ }
     logs.push(`captured ${captured.length} item(s)`)
     for (const msg of captured) {
       if (msg.kind === 'filedata' && msg.dataUrl) {
         const m = /^data:[^;]*;base64,(.*)$/s.exec(msg.dataUrl)
-        if (m && m[1].length * 0.75 <= MAX_FILE_BYTES) {
-          fileDatas.push({ name: msg.name || 'download', base64: m[1] })
-        } else {
-          logs.push('filedata too big or not base64, skipped')
-        }
-      } else if ((msg.kind === 'download' || msg.kind === 'xhr') && msg.url) {
+        if (m && m[1].length * 0.75 <= MAX_FILE_BYTES) fileDatas.push({ name: msg.name || 'download', base64: m[1] })
+        else logs.push('filedata too big or not base64, skipped')
+      } else if (msg.kind === 'download' && msg.url) {
         downloadReqs.push({ url: msg.url, name: msg.name ?? basenameFromUrl(msg.url) })
       }
     }

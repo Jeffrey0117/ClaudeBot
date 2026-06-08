@@ -92,7 +92,7 @@ export async function handleBrowserSniff(args: Record<string, unknown>): Promise
 }
 
 
-/** Run a userscript in this machine's Chrome. args: { code, url, trigger?, seconds? } */
+/** Run a userscript in this machine's Chrome. args: { code, url, trigger?, seconds?, requires?, resources? } */
 export async function handleUserscriptRun(args: Record<string, unknown>): Promise<string> {
   const code = String(args.code ?? '')
   const url = String(args.url ?? '')
@@ -101,8 +101,10 @@ export async function handleUserscriptRun(args: Record<string, unknown>): Promis
   validateUrl(url)
   const trigger = args.trigger != null ? String(args.trigger) : undefined
   const seconds = Number(args.seconds ?? 8)
+  const requires = Array.isArray(args.requires) ? (args.requires as string[]) : undefined
+  const resources = Array.isArray(args.resources) ? (args.resources as Array<{ name: string; url: string }>) : undefined
   if (!(await isCdpAvailable())) { await ensureChromeCdp().catch(() => {}) }
-  const result = await runUserscript(code, { url, trigger, seconds })
+  const result = await runUserscript(code, { url, trigger, seconds, requires, resources })
   return JSON.stringify(result)
 }
 
