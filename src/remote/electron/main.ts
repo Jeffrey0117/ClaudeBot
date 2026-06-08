@@ -737,11 +737,12 @@ function createWindow(): void {
   // Right-click = paste directly into an editable field (no menu). On selected
   // text elsewhere, right-click copies. Matches the "right-click just pastes"
   // muscle memory — no extra menu click.
-  mainWindow.webContents.on('context-menu', (_event, params) => {
+  const wc = mainWindow.webContents
+  wc.on('context-menu', (_event, params) => {
     if (params.isEditable) {
-      mainWindow.webContents.paste()
+      wc.paste()
     } else if (params.selectionText.length > 0) {
-      mainWindow.webContents.copy()
+      wc.copy()
     }
   })
 
