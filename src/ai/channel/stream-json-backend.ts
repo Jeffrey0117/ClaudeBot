@@ -43,6 +43,7 @@ export class LocalStreamJsonBackend implements SessionBackend {
     if (cfg.maxTurns) args.push('--max-turns', String(cfg.maxTurns))
     if (cfg.mcpConfigPaths.length) args.push('--mcp-config', ...cfg.mcpConfigPaths)
     if (cfg.disallowedTools?.length) args.push('--disallowedTools', cfg.disallowedTools.join(','))
+    if (cfg.resumeSessionId) args.push('--resume', cfg.resumeSessionId)
     if (process.env.SKIP_PERMISSIONS) args.push('--dangerously-skip-permissions')
 
     this.proc = spawn(cli.cmd, args, {

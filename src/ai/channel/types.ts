@@ -8,6 +8,9 @@ export interface SessionLaunchConfig {
   readonly mcpConfigPaths: readonly string[]
   readonly disallowedTools?: readonly string[]
   readonly maxTurns?: number
+  /** If set, the session starts with `--resume <id>` so context survives a cold
+   *  start (after idle-sweep / bot restart). Ignored once a warm session exists. */
+  readonly resumeSessionId?: string
   /** Called when the session backend stops (cleans generated MCP config, etc.). */
   readonly cleanup?: () => void
 }
