@@ -35,6 +35,7 @@ export function truncate(s: string, max: number): string {
 const TRACKING_PATTERNS = [
   'google-analytics.com', 'analytics.google.com', 'googletagmanager.com',
   'doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'adservice.google',
+  'adtrafficquality.google', '/pagead/', '/getconfig/sodar',
   '/g/collect', '/gtag/', '/gtm.js',
   'connect.facebook.net', 'facebook.com/tr',
   'cloudflareinsights.com', '/cdn-cgi/rum', '/cdn-cgi/beacon', '/cdn-cgi/challenge',
