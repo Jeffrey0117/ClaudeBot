@@ -64,7 +64,7 @@ export async function usCommand(ctx: BotContext): Promise<void> {
     try {
       const code = await fetchCode(src)
       const meta = parseUserscriptMeta(code)
-      addScript({ name, code, match: [...meta.match], grants: [...meta.grants], addedAt: Date.now() })
+      addScript({ name, code, match: [...meta.match], grants: [...meta.grants], requires: [...meta.requires], resources: [...meta.resources], addedAt: Date.now() })
       const unguarded = meta.grants.filter((g) => !SHIMMED_GRANTS.includes(g))
       // No parse_mode: @match patterns contain '*' / '_' which break Markdown.
       await ctx.reply(

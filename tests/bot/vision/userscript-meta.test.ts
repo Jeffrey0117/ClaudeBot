@@ -19,7 +19,35 @@ describe('parseUserscriptMeta', () => {
     expect(m.grants).toEqual(['GM_download', 'GM_xmlhttpRequest'])
   })
   it('returns empties when there is no metadata block', () => {
-    expect(parseUserscriptMeta('console.log(1)')).toEqual({ name: undefined, match: [], grants: [] })
+    expect(parseUserscriptMeta('console.log(1)')).toEqual({ name: undefined, match: [], grants: [], requires: [], resources: [] })
+  })
+})
+
+describe('parseUserscriptMeta @require/@resource', () => {
+  const code = `// ==UserScript==
+// @name X
+// @require https://code.jquery.com/jquery-3.7.1.min.js
+// @require https://cdn.jsdelivr.net/npm/mediabunny/dist/x.cjs
+// @resource INTERNAL_CSS https://example.com/style.css
+// @resource LOCALE https://example.com/l.json
+// @grant GM_xmlhttpRequest
+// ==/UserScript==
+body`
+  it('extracts requires and resources', () => {
+    const m = parseUserscriptMeta(code)
+    expect(m.requires).toEqual([
+      'https://code.jquery.com/jquery-3.7.1.min.js',
+      'https://cdn.jsdelivr.net/npm/mediabunny/dist/x.cjs',
+    ])
+    expect(m.resources).toEqual([
+      { name: 'INTERNAL_CSS', url: 'https://example.com/style.css' },
+      { name: 'LOCALE', url: 'https://example.com/l.json' },
+    ])
+  })
+  it('empties when absent', () => {
+    const m = parseUserscriptMeta('// ==UserScript==\n// @name X\n// ==/UserScript==')
+    expect(m.requires).toEqual([])
+    expect(m.resources).toEqual([])
   })
 })
 

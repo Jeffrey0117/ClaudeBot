@@ -6,6 +6,8 @@ export interface StoredScript {
   readonly code: string
   readonly match: readonly string[]
   readonly grants: readonly string[]
+  readonly requires?: readonly string[]
+  readonly resources?: ReadonlyArray<{ readonly name: string; readonly url: string }>
   readonly trigger?: string
   readonly addedAt: number
 }
