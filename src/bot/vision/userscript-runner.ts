@@ -7,7 +7,7 @@
 
 import { CdpClient, listTargets, findOrOpenPage } from './cdp-client.js'
 import { isCdpAvailable, ensureChromeCdp } from './chrome-cdp.js'
-import { buildGmShim } from './gm-shim.js'
+import { buildGmShim, buildDownloadShim } from './gm-shim.js'
 
 const BINDING = '__cbGM'
 const MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -62,6 +62,7 @@ export async function runUserscript(
   const logs: string[] = []
   const files: RunFile[] = []
   const downloadReqs: Array<{ url: string; name: string }> = []
+  const fileDatas: RunFile[] = []
 
   if (!(await isCdpAvailable())) await ensureChromeCdp()
 
@@ -88,8 +89,17 @@ export async function runUserscript(
           kind?: string
           url?: string
           name?: string
+          dataUrl?: string
         }
-        if ((msg.kind === 'download' || msg.kind === 'xhr') && msg.url) {
+        if (msg.kind === 'filedata' && msg.dataUrl) {
+          const m = /^data:[^;]*;base64,(.*)$/s.exec(msg.dataUrl)
+          if (m && m[1].length * 0.75 <= MAX_FILE_BYTES) {
+            fileDatas.push({ name: msg.name || 'download', base64: m[1] })
+            logs.push(`capture file: ${msg.name || 'download'} (~${Math.round(m[1].length * 0.75)} B)`)
+          } else {
+            logs.push('filedata too big or not base64, skipped')
+          }
+        } else if ((msg.kind === 'download' || msg.kind === 'xhr') && msg.url) {
           downloadReqs.push({ url: msg.url, name: msg.name ?? basenameFromUrl(msg.url) })
           logs.push(`capture ${msg.kind}: ${msg.url}`)
         }
@@ -109,8 +119,9 @@ export async function runUserscript(
     await client.send('Runtime.addBinding', { name: BINDING })
 
     const shim = buildGmShim(BINDING)
+    const dlShim = buildDownloadShim(BINDING)
     const injected = await client.send<EvalResult>('Runtime.evaluate', {
-      expression: `${shim}\n;${code}`,
+      expression: `${shim};${dlShim}\n;${code}`,
       awaitPromise: false,
       userGesture: true,
     })
@@ -161,6 +172,7 @@ export async function runUserscript(
       }
     }
 
+    files.push(...fileDatas)
     return { files, logs }
   } finally {
     client.close()
