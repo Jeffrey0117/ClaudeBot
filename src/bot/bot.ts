@@ -62,6 +62,7 @@ import { lastCommand } from './commands/last.js'
 import { licenseCommand } from './commands/license.js'
 import { channelCommand } from './commands/channel.js'
 import { sniffCommand } from './commands/sniff.js'
+import { usCommand } from './commands/us.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
@@ -164,6 +165,7 @@ export const CORE_COMMANDS = [
   { command: 'help', description: '顯示說明' },
   { command: 'channel', description: '切換 channel session 模式 (on/off/status)' },
   { command: 'sniff', description: '抓網頁背後的 JSON API' },
+  { command: 'us', description: '跑油猴腳本（注入+下載）' },
 ] as const
 
 export function wireReminderSendFn(bot: Telegraf<BotContext>): void {
@@ -296,6 +298,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['license', licenseCommand],
     ['channel', channelCommand],
     ['sniff', sniffCommand],
+    ['us', usCommand],
   ]
   for (const [name, handler] of coreEntries) {
     bot.command(name, handler)

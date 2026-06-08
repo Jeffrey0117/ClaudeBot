@@ -14,6 +14,7 @@ import {
   ensureChromeCdp,
 } from '../../bot/vision/chrome-cdp.js'
 import { sniff } from '../../bot/vision/sniffer.js'
+import { runUserscript } from '../../bot/vision/userscript-runner.js'
 import { validateUrl } from '../../utils/validate-url.js'
 
 const AB_TIMEOUT_MS = 60_000 // 60s — heavy pages like Gmail need time to load
@@ -90,6 +91,20 @@ export async function handleBrowserSniff(args: Record<string, unknown>): Promise
   return JSON.stringify(result)
 }
 
+
+/** Run a userscript in this machine's Chrome. args: { code, url, trigger?, seconds? } */
+export async function handleUserscriptRun(args: Record<string, unknown>): Promise<string> {
+  const code = String(args.code ?? '')
+  const url = String(args.url ?? '')
+  if (!code) return 'No code provided'
+  if (!url) return 'No url provided'
+  validateUrl(url)
+  const trigger = args.trigger != null ? String(args.trigger) : undefined
+  const seconds = Number(args.seconds ?? 8)
+  if (!(await isCdpAvailable())) { await ensureChromeCdp().catch(() => {}) }
+  const result = await runUserscript(code, { url, trigger, seconds })
+  return JSON.stringify(result)
+}
 
 /** Raw agent-browser CLI exec. Prepends --cdp when Chrome CDP is available. */
 function runABRaw(...args: readonly string[]): Promise<string> {
