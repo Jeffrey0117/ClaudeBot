@@ -13,6 +13,7 @@ import {
   isCdpAvailable,
   ensureChromeCdp,
 } from '../../bot/vision/chrome-cdp.js'
+import { sniff } from '../../bot/vision/sniffer.js'
 
 const AB_TIMEOUT_MS = 60_000 // 60s — heavy pages like Gmail need time to load
 
@@ -68,6 +69,24 @@ export async function handleBrowserEval(args: Record<string, unknown>): Promise<
     })
     ws.on('error', () => { clearTimeout(timer); resolve('CDP ws error') })
   })
+}
+
+/**
+ * Capture a page's XHR/fetch JSON via CDP. Runs on this machine's Chrome.
+ * args: { url: string, seconds?: number }. Returns JSON-stringified SniffResult.
+ */
+export async function handleBrowserSniff(args: Record<string, unknown>): Promise<string> {
+  const url = String(args.url ?? '')
+  if (!url) return 'No url provided'
+  validateUrl(url) // throws on internal/private/non-http(s)
+
+  const seconds = Number(args.seconds ?? 8)
+
+  if (!(await isCdpAvailable())) {
+    await ensureChromeCdp().catch(() => {})
+  }
+  const result = await sniff(url, seconds)
+  return JSON.stringify(result)
 }
 
 const BLOCKED_URL_RE =

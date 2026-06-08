@@ -61,6 +61,7 @@ import { setIgSchedulerSendFn, startIgScheduler } from './commands/ig-scheduler.
 import { lastCommand } from './commands/last.js'
 import { licenseCommand } from './commands/license.js'
 import { channelCommand } from './commands/channel.js'
+import { sniffCommand } from './commands/sniff.js'
 import { messageHandler } from './handlers/message-handler.js'
 import { callbackHandler } from './handlers/callback-handler.js'
 import { photoHandler, documentHandler } from './handlers/photo-handler.js'
@@ -162,6 +163,7 @@ export const CORE_COMMANDS = [
   { command: 'last', description: '重送最近的訊息 (/last2=上上條)' },
   { command: 'help', description: '顯示說明' },
   { command: 'channel', description: '切換 channel session 模式 (on/off/status)' },
+  { command: 'sniff', description: '抓網頁背後的 JSON API' },
 ] as const
 
 export function wireReminderSendFn(bot: Telegraf<BotContext>): void {
@@ -293,6 +295,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['last5', lastCommand],
     ['license', licenseCommand],
     ['channel', channelCommand],
+    ['sniff', sniffCommand],
   ]
   for (const [name, handler] of coreEntries) {
     bot.command(name, handler)
