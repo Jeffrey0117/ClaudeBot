@@ -1,12 +1,13 @@
 /**
  * A JS prelude defining a minimal set of GM_* / GM.* APIs. Privileged ops
- * (download, xhr) call window.<bindingName>(json); a CDP Runtime.addBinding
- * routes that to the runner, which fetches on the Node side (no CORS).
+ * (download, xhr) push a record onto the global capture array (named by
+ * `arrayName`); the runner reads that array once at the end (no CDP binding —
+ * more robust than Runtime.addBinding, which has context-timing footguns).
  */
 export function buildGmShim(bindingName: string): string {
   const b = JSON.stringify(bindingName)
   return `;(function(){
-  var B = function(o){ try { window[${b}](JSON.stringify(o)); } catch(e){} };
+  var B = function(o){ try { (window[${b}] = window[${b}] || []).push(o); } catch(e){} };
   window.GM_info = { script: { name: 'cb', version: '1.0' }, scriptHandler: 'ClaudeBot' };
   window.unsafeWindow = window;
   window.GM_addStyle = function(css){ var s=document.createElement('style'); s.textContent=css; (document.head||document.documentElement).appendChild(s); return s; };
@@ -34,7 +35,7 @@ export function buildGmShim(bindingName: string): string {
 export function buildDownloadShim(bindingName: string): string {
   const b = JSON.stringify(bindingName)
   return `;(function(){
-  var B = function(o){ try { window[${b}](JSON.stringify(o)); } catch(e){} };
+  var B = function(o){ try { (window[${b}] = window[${b}] || []).push(o); } catch(e){} };
   function cap(href, name){
     if (!href) return;
     try {

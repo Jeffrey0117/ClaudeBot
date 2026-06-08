@@ -81,42 +81,8 @@ export async function runUserscript(
     await client.send('Page.enable')
     await client.send('Runtime.enable')
 
-    const bindingHandler = (p: unknown): void => {
-      const e = p as { name?: string; payload?: string }
-      if (e.name !== BINDING || !e.payload) return
-      try {
-        const msg = JSON.parse(e.payload) as {
-          kind?: string
-          url?: string
-          name?: string
-          dataUrl?: string
-        }
-        if (msg.kind === 'filedata' && msg.dataUrl) {
-          const m = /^data:[^;]*;base64,(.*)$/s.exec(msg.dataUrl)
-          if (m && m[1].length * 0.75 <= MAX_FILE_BYTES) {
-            fileDatas.push({ name: msg.name || 'download', base64: m[1] })
-            logs.push(`capture file: ${msg.name || 'download'} (~${Math.round(m[1].length * 0.75)} B)`)
-          } else {
-            logs.push('filedata too big or not base64, skipped')
-          }
-        } else if ((msg.kind === 'download' || msg.kind === 'xhr') && msg.url) {
-          downloadReqs.push({ url: msg.url, name: msg.name ?? basenameFromUrl(msg.url) })
-          logs.push(`capture ${msg.kind}: ${msg.url}`)
-        }
-      } catch {
-        /* ignore malformed payload */
-      }
-    }
-
-    client.on('Runtime.bindingCalled', bindingHandler)
-
     await client.send('Page.navigate', { url: opts.url })
     await wait(2000) // settle (document-end style injection)
-
-    // Add the binding AFTER navigation so __cbGM exists in the new page's
-    // execution context (a binding added pre-navigate may not survive the
-    // context swap). The bindingCalled listener was registered above.
-    await client.send('Runtime.addBinding', { name: BINDING })
 
     const shim = buildGmShim(BINDING)
     const dlShim = buildDownloadShim(BINDING)
@@ -151,6 +117,32 @@ export async function runUserscript(
     }
 
     await wait(secs * 1000)
+
+    // Read the capture array the shims pushed to (in the same default context —
+    // no CDP binding, so no context-matching footgun).
+    const dump = await client.send<{ result?: { value?: string } }>('Runtime.evaluate', {
+      expression: `JSON.stringify(window[${JSON.stringify(BINDING)}] || [])`,
+      returnByValue: true,
+    })
+    let captured: Array<{ kind?: string; url?: string; name?: string; dataUrl?: string }> = []
+    try {
+      captured = JSON.parse(dump.result?.value ?? '[]') as typeof captured
+    } catch {
+      /* ignore */
+    }
+    logs.push(`captured ${captured.length} item(s)`)
+    for (const msg of captured) {
+      if (msg.kind === 'filedata' && msg.dataUrl) {
+        const m = /^data:[^;]*;base64,(.*)$/s.exec(msg.dataUrl)
+        if (m && m[1].length * 0.75 <= MAX_FILE_BYTES) {
+          fileDatas.push({ name: msg.name || 'download', base64: m[1] })
+        } else {
+          logs.push('filedata too big or not base64, skipped')
+        }
+      } else if ((msg.kind === 'download' || msg.kind === 'xhr') && msg.url) {
+        downloadReqs.push({ url: msg.url, name: msg.name ?? basenameFromUrl(msg.url) })
+      }
+    }
 
     for (const req of downloadReqs.slice(0, 20)) {
       try {
