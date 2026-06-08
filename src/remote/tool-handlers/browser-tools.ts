@@ -14,6 +14,7 @@ import {
   ensureChromeCdp,
 } from '../../bot/vision/chrome-cdp.js'
 import { sniff } from '../../bot/vision/sniffer.js'
+import { validateUrl } from '../../utils/validate-url.js'
 
 const AB_TIMEOUT_MS = 60_000 // 60s — heavy pages like Gmail need time to load
 
@@ -89,25 +90,6 @@ export async function handleBrowserSniff(args: Record<string, unknown>): Promise
   return JSON.stringify(result)
 }
 
-const BLOCKED_URL_RE =
-  /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|\[::1\]|0\.0\.0\.0)/i
-
-function validateUrl(url: string): void {
-  try {
-    const parsed = new URL(url)
-    if (!['http:', 'https:'].includes(parsed.protocol)) {
-      throw new Error(`Unsupported protocol: ${parsed.protocol}`)
-    }
-    if (BLOCKED_URL_RE.test(url)) {
-      throw new Error('Access to internal/private URLs is not allowed')
-    }
-  } catch (error) {
-    if (error instanceof TypeError) {
-      throw new Error(`Invalid URL: ${url}`)
-    }
-    throw error
-  }
-}
 
 /** Raw agent-browser CLI exec. Prepends --cdp when Chrome CDP is available. */
 function runABRaw(...args: readonly string[]): Promise<string> {

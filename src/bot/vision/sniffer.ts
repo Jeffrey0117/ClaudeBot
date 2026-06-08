@@ -54,12 +54,15 @@ interface RespMeta {
 export async function sniff(url: string, seconds: number): Promise<SniffResult> {
   const secs = Math.min(20, Math.max(3, Math.floor(seconds || 8)))
 
-  // Pick a page target to drive (reuse one, else open about:blank). We do NOT
-  // navigate via findOrOpenPage — we must enable Network BEFORE navigating so
-  // load-time calls are captured.
+  // Pick a page target to drive. Prefer a BLANK/new-tab target so we never
+  // navigate the user's active page away (destructive); only open a fresh
+  // about:blank tab if none exists. We enable Network BEFORE navigating so
+  // load-time calls are captured (hence about:blank, not findOrOpenPage(url)).
   const targets = await listTargets()
-  const existing = targets.find((t) => t.type === 'page' && t.webSocketDebuggerUrl)
-  const target = existing ?? (await findOrOpenPage(/^about:blank$/, 'about:blank'))
+  const blank = targets.find(
+    (t) => t.type === 'page' && t.webSocketDebuggerUrl && /^(about:blank|chrome:\/\/newtab\/?)$/.test(t.url),
+  )
+  const target = blank ?? (await findOrOpenPage(/^about:blank$/, 'about:blank'))
   if (!target.webSocketDebuggerUrl) throw new Error('Chrome 沒有可用的分頁')
 
   const client = await CdpClient.connect(target.webSocketDebuggerUrl)

@@ -4,6 +4,7 @@ import { env } from '../../config/env.js'
 import { callAgentTool } from '../../remote/relay-server.js'
 import { sniff, type SniffResult } from '../vision/sniffer.js'
 import { splitText } from '../../utils/text-splitter.js'
+import { validateUrl } from '../../utils/validate-url.js'
 
 function formatSniff(r: SniffResult): string {
   if (r.calls.length === 0) {
@@ -31,14 +32,25 @@ export async function sniffCommand(ctx: BotContext): Promise<void> {
     await ctx.reply('用法: /sniff <url> [秒數]\n例: /sniff https://example.com 8')
     return
   }
+  // SSRF guard — applies to BOTH the local and remote paths (block internal/
+  // private hosts so /sniff can't be pointed at localhost / RFC1918 / metadata).
+  try {
+    validateUrl(url)
+  } catch {
+    await ctx.reply('❌ 不允許內部/私有網址')
+    return
+  }
 
-  await ctx.reply(`🔎 開始 sniff ${url}（約 ${Math.min(20, Math.max(3, seconds))}s）…`)
+  const secs = Math.min(20, Math.max(3, seconds))
+  await ctx.reply(`🔎 開始 sniff ${url}（約 ${secs}s）…`)
 
   try {
     const pairing = env.REMOTE_ENABLED ? getPairing(chatId, threadId) : null
     let result: SniffResult
     if (pairing?.connected) {
-      const raw = await callAgentTool(pairing.code, 'remote_browser_sniff', { url, seconds }, 45_000)
+      // Timeout scaled to the actual capture window + overhead (avoids a silent
+      // double-wait if a fixed timeout fires mid-capture and the relay retries).
+      const raw = await callAgentTool(pairing.code, 'remote_browser_sniff', { url, seconds }, secs * 1000 + 20_000)
       result = JSON.parse(raw) as SniffResult
     } else {
       result = await sniff(url, seconds)
