@@ -451,9 +451,18 @@ document.getElementById('btn-close').addEventListener('click', () => api.closeWi
 // Reconnect / switch server — fully disconnect and return to the connect panel
 // so the user can paste a new Server URL + code (e.g. after the tunnel URL
 // rotated). Chat history stays in memory.
+// Clear the on-screen message log (old errors/messages don't auto-expire).
+function clearMessages() {
+  messagesEl.innerHTML = ''
+  bubbles.clear()
+}
+
+document.getElementById('btn-clear').addEventListener('click', clearMessages)
+
 document.getElementById('btn-reconnect').addEventListener('click', async () => {
   try { if (api.chatDisconnect) await api.chatDisconnect() } catch {}
   try { await api.disconnect() } catch {}
+  clearMessages() // wipe stale messages (incl. old errors) on reconnect
   statusDot.className = 'status-dot disconnected'
   statusText.textContent = STATUS_LABELS.disconnected
   connectPanel.classList.remove('hidden')
