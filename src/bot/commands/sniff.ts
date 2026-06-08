@@ -51,7 +51,15 @@ export async function sniffCommand(ctx: BotContext): Promise<void> {
       // Timeout scaled to the actual capture window + overhead (avoids a silent
       // double-wait if a fixed timeout fires mid-capture and the relay retries).
       const raw = await callAgentTool(pairing.code, 'remote_browser_sniff', { url, seconds }, secs * 1000 + 20_000)
-      result = JSON.parse(raw) as SniffResult
+      try {
+        result = JSON.parse(raw) as SniffResult
+      } catch {
+        const hint = /unknown tool/i.test(raw)
+          ? '遠端 agent 是舊版（還沒有 sniff 工具）。請把遠端機器的 agent 更新到含 /sniff 的版本再試（或先 /unpair 在本機試）。'
+          : raw.slice(0, 300)
+        await ctx.reply(`❌ sniff 失敗（遠端回應）：${hint}`)
+        return
+      }
     } else {
       result = await sniff(url, seconds)
     }
