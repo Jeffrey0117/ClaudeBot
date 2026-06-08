@@ -1,4 +1,5 @@
 import { CdpClient, listTargets, findOrOpenPage } from './cdp-client.js'
+import { isCdpAvailable, ensureChromeCdp } from './chrome-cdp.js'
 
 export interface SniffedCall {
   readonly method: string
@@ -53,6 +54,12 @@ interface RespMeta {
  */
 export async function sniff(url: string, seconds: number): Promise<SniffResult> {
   const secs = Math.min(20, Math.max(3, Math.floor(seconds || 8)))
+
+  // Ensure Chrome is up with CDP before connecting (launches it if needed) —
+  // otherwise listTargets() to localhost:9222 fails with a bare "fetch failed".
+  if (!(await isCdpAvailable())) {
+    await ensureChromeCdp()
+  }
 
   // Pick a page target to drive. Prefer a BLANK/new-tab target so we never
   // navigate the user's active page away (destructive); only open a fresh
