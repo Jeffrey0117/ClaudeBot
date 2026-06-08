@@ -106,12 +106,13 @@ export async function runUserscript(
     await client.send('Page.enable')
     await client.send('Runtime.enable')
 
-    // Fetch @require and @resource on the Node side (no CORS, CSP-bypass)
-    let requireBlob = ''
+    // Fetch @require libs on the Node side (no CORS). Injected separately below
+    // so one bad lib doesn't abort the rest, and so UMD/CJS each get the right env.
+    const requireLibs: Array<{ url: string; code: string }> = []
     for (const u of opts.requires ?? []) {
       try {
         const r = await fetch(u)
-        if (r.ok) requireBlob += `\n;${await r.text()}\n;`
+        if (r.ok) requireLibs.push({ url: u, code: await r.text() })
         else logs.push(`require ${r.status}: ${u}`)
       } catch { logs.push(`require failed: ${u}`) }
     }
@@ -138,12 +139,25 @@ export async function runUserscript(
         .join('; ')
     } catch { /* no cookies */ }
 
+    // Inject each @require lib in isolation. UMD/global libs (jQuery) raw so they
+    // set window.$/window.jQuery; only CommonJS .cjs bundles (mediabunny) get a
+    // local module + are exposed to a global. A throwing lib only logs.
+    for (const lib of requireLibs) {
+      const isCjs = /\.cjs($|\?)/i.test(lib.url)
+      const expr = isCjs
+        ? `;(function(){var module={exports:{}};var exports=module.exports;try{\n${lib.code}\n}catch(e){}try{var E=module.exports;if(E){window.Mediabunny=window.Mediabunny||E;window.mediabunny=window.mediabunny||E;}}catch(e){}})();`
+        : lib.code
+      const rr = await client.send<EvalResult>('Runtime.evaluate', { expression: expr, awaitPromise: false })
+      if (rr.exceptionDetails) {
+        logs.push(`require error ${lib.url.split('/').pop()}: ${rr.exceptionDetails.exception?.description ?? rr.exceptionDetails.text ?? 'err'}`)
+      }
+    }
+
     const shim = buildGmShim(BINDING)
     const dlShim = buildDownloadShim(BINDING)
-    const cjsShim = 'var module={exports:{}};var exports=module.exports;'
     const resInit = `window.__cbRes=${JSON.stringify(resObj)};`
     const injected = await client.send<EvalResult>('Runtime.evaluate', {
-      expression: `${cjsShim}${resInit}${requireBlob}${shim};${dlShim}\n;${code}`,
+      expression: `${resInit}${shim};${dlShim}\n;${code}`,
       awaitPromise: false,
       userGesture: true,
     })
