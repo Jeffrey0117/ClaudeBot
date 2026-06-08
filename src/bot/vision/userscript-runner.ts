@@ -190,6 +190,8 @@ export async function runUserscript(
     // Polling loop — services GM_xmlhttpRequest live during the wait window
     const processedXhr = new Set<number>()
     const deadline = Date.now() + secs * 1000
+    let lastLen = -1
+    let stable = 0
     while (Date.now() < deadline) {
       await wait(250)
       const poll = await client.send<{ result?: { value?: string } }>('Runtime.evaluate', {
@@ -204,6 +206,12 @@ export async function runUserscript(
           void serviceXhr(client, msg, cookieHeader, logs)
         }
       }
+      // Early exit: once a file is captured and the array is quiet for ~1.5s,
+      // stop (keeps simple scripts fast even with a long max window).
+      const hasFile = arr.some((m) => m.kind === 'filedata' || m.kind === 'download')
+      if (arr.length === lastLen) stable++
+      else { stable = 0; lastLen = arr.length }
+      if (hasFile && stable >= 6) break
     }
 
     // Diagnostic probe — what state is the page in after the run?
