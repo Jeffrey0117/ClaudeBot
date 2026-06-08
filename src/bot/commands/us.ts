@@ -66,10 +66,10 @@ export async function usCommand(ctx: BotContext): Promise<void> {
       const meta = parseUserscriptMeta(code)
       addScript({ name, code, match: [...meta.match], grants: [...meta.grants], addedAt: Date.now() })
       const unguarded = meta.grants.filter((g) => !SHIMMED_GRANTS.includes(g))
+      // No parse_mode: @match patterns contain '*' / '_' which break Markdown.
       await ctx.reply(
-        `✅ 已存 *${name}*\n@match: ${meta.match.join(', ') || '(無)'}\n@grant: ${meta.grants.join(', ') || '(無)'}` +
+        `✅ 已存 ${name}\n@match: ${meta.match.join(', ') || '(無)'}\n@grant: ${meta.grants.join(', ') || '(無)'}` +
         (unguarded.length ? `\n⚠️ 沒墊到的 GM 函式(可能跑不動): ${unguarded.join(', ')}` : ''),
-        { parse_mode: 'Markdown' },
       )
     } catch (e) {
       await ctx.reply(`❌ add 失敗: ${e instanceof Error ? e.message : String(e)}`)
