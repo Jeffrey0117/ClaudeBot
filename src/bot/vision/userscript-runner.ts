@@ -58,6 +58,7 @@ async function serviceXhr(
     const headers: Record<string, string> = { ...(req.headers ?? {}) }
     if (cookieHeader && !Object.keys(headers).some((h) => h.toLowerCase() === 'cookie')) headers.Cookie = cookieHeader
     const res = await fetch(String(req.url), { method: req.method ?? 'GET', headers, body: req.data ?? undefined })
+    logs.push(`xhr ${res.status}: ${String(req.url).slice(0, 70)}`)
     const wantBinary = req.responseType === 'blob' || req.responseType === 'arraybuffer'
     let resp: Record<string, unknown>
     if (wantBinary) {
@@ -205,6 +206,15 @@ export async function runUserscript(
       }
     }
 
+    // Diagnostic probe — what state is the page in after the run?
+    try {
+      const probe = await client.send<{ result?: { value?: string } }>('Runtime.evaluate', {
+        expression: `JSON.stringify({jq: typeof window.$, dwBtns: document.querySelectorAll('.IG_DW_MAIN').length, anyDl: document.querySelectorAll('a[download], .download-btn').length, mb: typeof window.Mediabunny, title: (document.title||'').slice(0,40)})`,
+        returnByValue: true,
+      })
+      logs.push('probe: ' + (probe.result?.value ?? '?'))
+    } catch { /* */ }
+
     // Final read — captures filedata / download entries accumulated during the run
     const finalDump = await client.send<{ result?: { value?: string } }>('Runtime.evaluate', {
       expression: `JSON.stringify(window[${JSON.stringify(BINDING)}] || [])`,
@@ -212,7 +222,7 @@ export async function runUserscript(
     })
     let captured: Array<{ kind?: string; url?: string; name?: string; dataUrl?: string }> = []
     try { captured = JSON.parse(finalDump.result?.value ?? '[]') } catch { /* */ }
-    logs.push(`captured ${captured.length} item(s)`)
+    logs.push(`captured ${captured.length}: ${captured.map((c) => c.kind ?? '?').join(',')}`)
     for (const msg of captured) {
       if (msg.kind === 'filedata' && msg.dataUrl) {
         const m = /^data:[^;]*;base64,(.*)$/s.exec(msg.dataUrl)
