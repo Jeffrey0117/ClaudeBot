@@ -36,8 +36,10 @@ export function buildDownloadShim(bindingName: string): string {
   const b = JSON.stringify(bindingName)
   return `;(function(){
   var B = function(o){ try { (window[${b}] = window[${b}] || []).push(o); } catch(e){} };
+  var seen = {};
   function cap(href, name){
-    if (!href) return;
+    if (!href || seen[href]) return;
+    seen[href] = 1;
     try {
       fetch(href).then(function(r){ return r.blob(); }).then(function(blob){
         var fr = new FileReader();
