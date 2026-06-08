@@ -6,7 +6,7 @@
  * Communicates with the renderer via IPC for UI updates.
  */
 
-import { app, BrowserWindow, ipcMain, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { resolve } from 'node:path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -734,22 +734,14 @@ function createWindow(): void {
     callback(permission === 'media')
   })
 
-  // Right-click context menu — paste the pairing code (or anything) into inputs
+  // Right-click = paste directly into an editable field (no menu). On selected
+  // text elsewhere, right-click copies. Matches the "right-click just pastes"
+  // muscle memory — no extra menu click.
   mainWindow.webContents.on('context-menu', (_event, params) => {
-    const items: Electron.MenuItemConstructorOptions[] = []
     if (params.isEditable) {
-      items.push(
-        { role: 'cut', label: '剪下', enabled: params.selectionText.length > 0 },
-        { role: 'copy', label: '複製', enabled: params.selectionText.length > 0 },
-        { role: 'paste', label: '貼上' },
-        { type: 'separator' },
-        { role: 'selectAll', label: '全選' },
-      )
+      mainWindow.webContents.paste()
     } else if (params.selectionText.length > 0) {
-      items.push({ role: 'copy', label: '複製' })
-    }
-    if (items.length > 0) {
-      Menu.buildFromTemplate(items).popup()
+      mainWindow.webContents.copy()
     }
   })
 
