@@ -52,14 +52,19 @@ export function buildDownloadShim(bindingName: string): string {
   try {
     var _click = HTMLAnchorElement.prototype.click;
     HTMLAnchorElement.prototype.click = function(){
-      try { if (this.hasAttribute('download') && this.href) cap(this.href, this.getAttribute('download')); } catch(e){}
+      try {
+        if (this.hasAttribute('download') && this.href) {
+          cap(this.href, this.getAttribute('download'));
+          return; // suppress the native download (we captured it) — no Chrome dialog
+        }
+      } catch(e){}
       return _click.apply(this, arguments);
     };
   } catch(e){}
   document.addEventListener('click', function(e){
     try {
       var a = (e.target && e.target.closest) ? e.target.closest('a[download]') : null;
-      if (a && a.href) cap(a.href, a.getAttribute('download'));
+      if (a && a.href) { cap(a.href, a.getAttribute('download')); e.preventDefault(); }
     } catch(err){}
   }, true);
 })();`
