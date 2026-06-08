@@ -16,6 +16,20 @@ describe('buildGmShim', () => {
   })
 })
 
+describe('buildGmShim v2 (xhr bridge + resources)', () => {
+  it('exposes the xhr bridge, resolver, and resource getter', () => {
+    const s = buildGmShim('__cbCaptured')
+    expect(s).toContain('__cbXhrResolve')
+    expect(s).toContain('window.__cbXhr')
+    expect(s).toContain('GM_getResourceText')
+    expect(s).toContain('GM_notification')
+    expect(s).toContain("kind:'xhr'")
+  })
+  it('still valid JS', () => {
+    expect(() => new Function(buildGmShim('__cbCaptured'))).not.toThrow()
+  })
+})
+
 describe('buildDownloadShim', () => {
   it('hooks anchor downloads and reports via the binding', () => {
     const s = buildDownloadShim('__cbGM')

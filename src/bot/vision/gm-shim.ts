@@ -20,8 +20,26 @@ export function buildGmShim(bindingName: string): string {
   window.GM_registerMenuCommand = function(){ return 0; };
   window.GM_unregisterMenuCommand = function(){};
   window.GM_download = function(a, name){ var url=(a&&a.url)||a; var n=(a&&a.name)||name||''; B({kind:'download', url:String(url), name:String(n)}); };
-  window.GM_xmlhttpRequest = function(o){ o=o||{}; B({kind:'xhr', method:o.method||'GET', url:String(o.url||'')}); if(typeof o.onload==='function'){ try{ o.onload({status:200, responseText:'', response:null, readyState:4}); }catch(e){} } return { abort:function(){} }; };
-  window.GM = { info: window.GM_info, addStyle: window.GM_addStyle, setClipboard: window.GM_setClipboard, openInTab: window.GM_openInTab, download: window.GM_download, xmlHttpRequest: window.GM_xmlhttpRequest, setValue:function(k,v){window.GM_setValue(k,v);return Promise.resolve();}, getValue:function(k,d){return Promise.resolve(window.GM_getValue(k,d));}, deleteValue:function(k){window.GM_deleteValue(k);return Promise.resolve();} };
+  var _xid = 0; window.__cbXhr = window.__cbXhr || {};
+  window.GM_xmlhttpRequest = function(o){
+    o = o || {}; var id = ++_xid; window.__cbXhr[id] = o;
+    B({kind:'xhr', id:id, method:o.method||'GET', url:String(o.url||''), headers:o.headers||{}, data:(o.data!=null?String(o.data):null), responseType:o.responseType||'text'});
+    return { abort:function(){ delete window.__cbXhr[id]; } };
+  };
+  window.__cbXhrResolve = function(id, resp){
+    var o = window.__cbXhr[id]; if(!o) return; delete window.__cbXhr[id];
+    try {
+      if (resp && resp.error){ if(o.onerror) o.onerror({error:resp.error}); return; }
+      var r = { readyState:4, status:resp.status, statusText:resp.statusText||'', responseText:resp.responseText||'', responseHeaders:resp.responseHeaders||'', finalUrl:resp.finalUrl||o.url, response:null };
+      if (resp.base64 != null){ var bin=atob(resp.base64); var arr=new Uint8Array(bin.length); for(var i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i); r.response = (o.responseType==='blob')?new Blob([arr]):arr.buffer; }
+      else { r.response = resp.responseText||''; }
+      if (o.onload) o.onload(r);
+    } catch(e){ if(o.onerror) o.onerror({error:String(e)}); }
+  };
+  window.GM_getResourceText = function(n){ try{ return (window.__cbRes||{})[n]; }catch(e){ return undefined; } };
+  window.GM_getResourceURL = function(n){ return n; };
+  window.GM_notification = function(){};
+  window.GM = { info: window.GM_info, addStyle: window.GM_addStyle, setClipboard: window.GM_setClipboard, openInTab: window.GM_openInTab, download: window.GM_download, xmlHttpRequest: window.GM_xmlhttpRequest, setValue:function(k,v){window.GM_setValue(k,v);return Promise.resolve();}, getValue:function(k,d){return Promise.resolve(window.GM_getValue(k,d));}, deleteValue:function(k){window.GM_deleteValue(k);return Promise.resolve();}, getResourceText: window.GM_getResourceText, notification: window.GM_notification };
 })();`
 }
 
