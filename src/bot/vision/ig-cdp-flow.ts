@@ -432,12 +432,30 @@ interface EvalResponse {
   readonly result?: { readonly value?: unknown }
 }
 
+// Transient CDP errors (page mid-navigation / context swap) — worth retrying
+// rather than failing the whole post. NOT page exceptions (those are real bugs).
+const TRANSIENT_CDP_RE = /cannot find (default )?(execution )?context|context (was )?destroyed|find context with|target (navigated|closed|crashed)|no frame/i
+
 async function evalPhase(client: CdpClient, expression: string, timeoutMs: number): Promise<PhaseResult> {
-  const res = await client.send<EvalResponse>(
-    'Runtime.evaluate',
-    { expression, awaitPromise: true, returnByValue: true, userGesture: true },
-    timeoutMs,
-  )
+  let res: EvalResponse | undefined
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      res = await client.send<EvalResponse>(
+        'Runtime.evaluate',
+        { expression, awaitPromise: true, returnByValue: true, userGesture: true },
+        timeoutMs,
+      )
+      break
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (TRANSIENT_CDP_RE.test(msg) && attempt < 2) {
+        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)))
+        continue // page is settling — wait and retry the evaluate
+      }
+      throw err
+    }
+  }
+  if (!res) return { ok: false, step: 'eval', error: 'no eval response' }
   if (res.exceptionDetails) {
     const desc = res.exceptionDetails.exception?.description ?? res.exceptionDetails.text ?? 'page exception'
     return { ok: false, step: 'eval', error: desc.slice(0, 300) }
