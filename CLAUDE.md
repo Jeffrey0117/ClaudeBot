@@ -22,6 +22,7 @@ src/
   config/         ← env, projects scanner
   utils/          ← Directives, choice detector, pipe executor
   dashboard/      ← Web dashboard (heartbeat, runner tracker)
+  jarvis/         ← Voice UI: red-dot page (:3106), speech in/out via admin-chat session
   mcp/            ← MCP server integration
   types/          ← Shared TypeScript types
 ```
@@ -33,6 +34,7 @@ src/
 - **4-Layer Memory**: Bookmarks, Context Pins, AI Memory, Vault — see `src/bot/CLAUDE.md`
 - **Multi-bot + Worktree**: `WORKTREE_BRANCH=bot1` → git worktree isolation per bot instance
 - **Voice**: OGG → ffmpeg → Sherpa ASR → biaodian → optional Gemini refinement
+- **Jarvis (`src/jarvis/`)**: Fullscreen red-dot web page — browser STT (`webkitSpeechRecognition`) → enqueued as ADMIN_CHAT_ID message (shared Telegram session, voice-persona hint) → response via response-broker (`jarvis-` commandId) → browser TTS. Needs `JARVIS_TOKEN`; port `JARVIS_PORT` (3106)
 - **Stream**: `stream-json` parsed line-by-line. New `assistant` event resets accumulated (prevents thinking leak)
 - **Draft streaming**: Real-time message edits via `draft-sender.ts` (300ms throttle, strips [CTX] blocks)
 - **/deep mode**: Opus model + 2x MAX_TURNS + subagent analysis (`data/subagent-spec.md`)

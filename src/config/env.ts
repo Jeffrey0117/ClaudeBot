@@ -59,6 +59,8 @@ const envSchema = z.object({
   DASHBOARD_PORT: z.coerce.number().int().positive().default(3100),
   IG_WEB_PORT: z.coerce.number().int().positive().default(3105),
   IG_WEB_TOKEN: z.string().default(''),
+  JARVIS_PORT: z.coerce.number().int().positive().default(3106),
+  JARVIS_TOKEN: z.string().default(''),
   ANTHROPIC_ADMIN_KEY: z.string().default(''),
   GITHUB_TOKEN: z.string().default(''),
   SHERPA_SERVER_PATH: z.string().default(''),

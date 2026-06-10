@@ -82,6 +82,12 @@ async function main(): Promise<void> {
     startIgWebServer(env.IG_WEB_PORT, env.IG_WEB_TOKEN)
   }
 
+  // Jarvis voice UI (red-dot page; needs a token and an admin chat to talk to)
+  if (isMainBot && env.JARVIS_TOKEN && env.ADMIN_CHAT_ID) {
+    const { startJarvisServer } = await import('./jarvis/server.js')
+    startJarvisServer(env.JARVIS_PORT, env.JARVIS_TOKEN)
+  }
+
   const shutdown = (signal: string) => {
     console.log(`\n${signal} received. Shutting down...`)
     bot.stop(signal)
