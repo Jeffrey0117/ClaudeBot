@@ -21,6 +21,12 @@ describe('jarvisPage', () => {
     expect(html).toContain('zh-TW')
   })
 
+  it('records audio for Sherpa ASR and posts to /asr', () => {
+    expect(html).toContain('MediaRecorder')
+    expect(html).toContain("'/asr?token='")
+    expect(html).toContain("msg.type === 'hello'")
+  })
+
   it('reuses the page token for the WebSocket connection', () => {
     expect(html).toContain("get('token')")
     expect(html).toContain('/ws?token=')
@@ -33,5 +39,21 @@ describe('jarvisPage', () => {
   it('escapes server text before injecting into innerHTML', () => {
     expect(html).toContain('&amp;')
     expect(html).toContain('&lt;')
+  })
+
+  it('embeds syntactically valid JavaScript', () => {
+    const match = html.match(/<script>([\s\S]*?)<\/script>/)
+    expect(match).not.toBeNull()
+    // new Function parses without executing — catches template-literal
+    // escaping mistakes (regexes, backslashes) that would break the page
+    expect(() => new Function(match![1])).not.toThrow()
+  })
+
+  it('strips CTX blocks, directives, and code fences before speaking', () => {
+    const match = html.match(/<script>([\s\S]*?)<\/script>/)
+    const script = match![1]
+    expect(script).toContain('[CTX')
+    expect(script).toContain('fencePair')
+    expect(script).toMatch(/@\\w\+/)
   })
 })

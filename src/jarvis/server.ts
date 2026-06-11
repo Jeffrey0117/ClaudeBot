@@ -6,8 +6,11 @@
  * response is captured via the response-broker (dashboardCommandId) and
  * pushed back over the WebSocket for TTS.
  */
-import { createServer, type IncomingMessage } from 'node:http'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
+import { writeFile, unlink, mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { z } from 'zod'
 import { env } from '../config/env.js'
@@ -17,15 +20,17 @@ import { getAISessionId } from '../ai/session-store.js'
 import { isChannelEnabled } from '../ai/channel/opt-in-store.js'
 import { enqueue } from '../claude/queue.js'
 import { onResponseEvent } from '../dashboard/response-broker.js'
+import { isSherpaAvailable } from '../asr/sherpa-client.js'
 import { jarvisPage } from './page.js'
 import { isValidToken, tokenFromUrl } from './auth.js'
 
 const COMMAND_PREFIX = 'jarvis-'
 
 const VOICE_HINT =
-  '\n\n[語音模式] 這則訊息來自語音介面:請用口語化中文回答,1~3 句講完重點,' +
-  '不要列點、不要程式碼區塊。內容很長時先一句話講結論,細節照常輸出即可' +
-  '(完整文字會同步到 Telegram)。'
+  '\n\n[語音模式] 這則訊息來自語音介面,使用者用說的跟你互動。' +
+  '要求做的動作(開網頁、跑指令、改檔案等)就真的執行,不要只口頭答應;' +
+  '回答用口語化中文,1~3 句講完重點,不要列點、不要程式碼區塊。' +
+  '內容很長時先一句話講結論,細節照常輸出即可(完整文字會同步到 Telegram)。'
 
 const askSchema = z.object({
   type: z.literal('ask'),
@@ -103,6 +108,57 @@ function dropConnection(ws: WebSocket): void {
   }
 }
 
+const ASR_MAX_BYTES = 20 * 1024 * 1024
+const ASR_TEMP_DIR = join(tmpdir(), 'claudebot-voice')
+
+function readBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    req.on('data', (c: Buffer) => {
+      size += c.length
+      if (size > maxBytes) { req.destroy(); reject(new Error('Body too large')); return }
+      chunks.push(c)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+}
+
+/** POST /asr — recorded audio blob in, Sherpa-transcribed text out. */
+async function handleAsr(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const json = (code: number, body: Record<string, unknown>) => {
+    res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(JSON.stringify(body))
+  }
+  if (!isSherpaAvailable()) {
+    json(503, { ok: false, error: 'Sherpa ASR 未啟動' })
+    return
+  }
+  const audioPath = join(ASR_TEMP_DIR, `jarvis-${randomUUID()}.webm`)
+  try {
+    const body = await readBody(req, ASR_MAX_BYTES)
+    if (body.length < 200) {
+      json(400, { ok: false, error: '音檔太短' })
+      return
+    }
+    await mkdir(ASR_TEMP_DIR, { recursive: true })
+    await writeFile(audioPath, body)
+    const { transcribeLocalAudio } = await import('../bot/handlers/voice-handler.js')
+    const result = await transcribeLocalAudio(audioPath)
+    if (!result.text) {
+      json(422, { ok: false, error: result.error ?? '辨識失敗' })
+      return
+    }
+    json(200, { ok: true, text: result.text })
+  } catch (error) {
+    console.error('[jarvis] ASR failed:', error)
+    json(500, { ok: false, error: '辨識處理出錯' })
+  } finally {
+    await unlink(audioPath).catch(() => {})
+  }
+}
+
 export function startJarvisServer(port: number, token: string): void {
   const httpServer = createServer((req, res) => {
     const path = (req.url ?? '/').split('?')[0]
@@ -116,6 +172,19 @@ export function startJarvisServer(port: number, token: string): void {
       res.end(jarvisPage())
       return
     }
+    if (path === '/asr' && req.method === 'POST') {
+      if (!isAuthorized(req, token)) {
+        res.writeHead(401)
+        res.end()
+        return
+      }
+      handleAsr(req, res).catch((err) => {
+        console.error('[jarvis] ASR handler crashed:', err)
+        res.writeHead(500)
+        res.end()
+      })
+      return
+    }
     res.writeHead(404)
     res.end()
   })
@@ -127,6 +196,9 @@ export function startJarvisServer(port: number, token: string): void {
       ws.close(4001, 'Unauthorized')
       return
     }
+
+    // Capability handshake — the page picks Sherpa or Web Speech based on this
+    send(ws, { type: 'hello', asr: isSherpaAvailable() })
 
     ws.on('message', (raw) => {
       try {

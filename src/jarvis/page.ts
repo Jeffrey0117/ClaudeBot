@@ -2,9 +2,13 @@
  * Jarvis voice UI — single embedded page, zero frontend dependencies.
  *
  * State machine: idle → listening → thinking → speaking → idle.
- * Speech in via webkitSpeechRecognition (Chrome/Edge built-in, zh-TW),
- * speech out via speechSynthesis. Token is read from the page URL and
- * reused for the WebSocket connection.
+ *
+ * Speech in: MediaRecorder → POST /asr (Sherpa, project hotwords) when the
+ * server advertises ASR in its hello message; Web Speech API runs alongside
+ * for live interim captions and is the fallback transcriber.
+ *
+ * Speech out: sentence-level streaming — complete sentences from response
+ * chunks are spoken as they arrive instead of waiting for the full answer.
  */
 export function jarvisPage(): string {
   return `<!doctype html>
@@ -111,7 +115,7 @@ export function jarvisPage(): string {
   const dot = document.getElementById('dot')
   const statusEl = document.getElementById('status')
   const textEl = document.getElementById('text')
-  const TTS_MAX = 400
+  const TTS_MAX = 400 // cap on total spoken chars per answer
 
   const STATUS = {
     idle: '點一下紅點開始說話',
@@ -129,11 +133,110 @@ export function jarvisPage(): string {
 
   function showText(html) { textEl.innerHTML = html; textEl.scrollTop = textEl.scrollHeight }
   const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
-  const stripCtx = (s) => s.replace(/\\[CTX\\][\\s\\S]*?\\[\\/CTX\\]/g, '').trim()
+
+  // Strip things that must never be spoken or shown: CTX digests (including a
+  // trailing half-streamed one), @directives, fenced code blocks (an unclosed
+  // fence cuts the text — we hold until it closes).
+  const FENCE = String.fromCharCode(96, 96, 96)
+  const fencePair = new RegExp(FENCE + '[\\\\s\\\\S]*?' + FENCE, 'g')
+  function sanitize(s) {
+    let t = s.replace(/\\[CTX\\][\\s\\S]*?\\[\\/CTX\\]/g, '')
+    const ctxStart = t.indexOf('[CTX')
+    if (ctxStart >= 0) t = t.slice(0, ctxStart)
+    t = t.replace(fencePair, '')
+    const fence = t.indexOf(FENCE)
+    if (fence >= 0) t = t.slice(0, fence)
+    return t.replace(/@\\w+\\([^)]*\\)/g, '')
+  }
+
+  // --- Streaming TTS: speak complete sentences as chunks arrive ---
+  let zhVoice = null
+  function pickVoice() {
+    const voices = speechSynthesis.getVoices()
+    zhVoice = voices.find((v) => /zh[-_]TW/i.test(v.lang))
+      || voices.find((v) => /^zh/i.test(v.lang))
+      || null
+  }
+  pickVoice()
+  speechSynthesis.onvoiceschanged = pickVoice
+
+  let sp = null // per-answer speech state
+  function resetSpeech() {
+    speechSynthesis.cancel()
+    sp = { cursor: 0, lastClean: '', total: 0, pending: 0, muted: false, capped: false, answered: false }
+  }
+
+  function utter(t) {
+    const u = new SpeechSynthesisUtterance(t)
+    if (zhVoice) u.voice = zhVoice
+    u.lang = 'zh-TW'
+    u.rate = 1.05
+    sp.pending++
+    u.onend = u.onerror = () => { sp.pending--; maybeDone() }
+    if (state === 'thinking') setState('speaking')
+    speechSynthesis.speak(u)
+  }
+
+  function enqueueSpeech(text) {
+    if (!sp || sp.muted) return
+    const t = text.trim()
+    if (t.length < 2) return
+    if (sp.total >= TTS_MAX) {
+      if (!sp.capped) { sp.capped = true; utter('後面還很長,細節我發到 Telegram 了') }
+      return
+    }
+    sp.total += t.length
+    utter(t)
+  }
+
+  function maybeDone() {
+    if (sp && sp.answered && sp.pending <= 0 && state === 'speaking') setState('idle')
+  }
+
+  // Last index just past a sentence boundary, or 0 if none yet
+  function boundaryEnd(buf) {
+    const re = /[。!?！？;；…]\\s*|\\n+/g
+    let end = 0, m
+    while ((m = re.exec(buf))) end = m.index + m[0].length
+    return end
+  }
+
+  function onChunk(raw) {
+    if (!sp) return
+    const clean = sanitize(raw)
+    if (clean.length < sp.cursor) sp.cursor = 0 // new assistant segment — stream reset
+    sp.lastClean = clean
+    const buf = clean.slice(sp.cursor)
+    const cut = boundaryEnd(buf)
+    if (cut > 0) {
+      enqueueSpeech(buf.slice(0, cut))
+      sp.cursor += cut
+    }
+    if (state === 'thinking' || state === 'speaking') {
+      showText('<span class="interim">' + esc(clean) + '</span>')
+    }
+  }
+
+  function onAnswer(raw) {
+    if (!sp) return
+    sp.answered = true
+    const clean = sanitize(raw)
+    showText(esc(clean))
+    if (sp.muted) { setState('idle'); return }
+    if (sp.total === 0) {
+      // No chunks streamed (or nothing speakable) — speak the final answer
+      enqueueSpeech(clean.slice(0, TTS_MAX))
+    } else {
+      // Flush the unspoken tail of the last streamed segment
+      enqueueSpeech(sp.lastClean.slice(sp.cursor))
+    }
+    if (sp.pending <= 0) setState('idle')
+  }
 
   // --- WebSocket ---
   let ws = null
   let wsReady = false
+  let asrAvailable = false
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     ws = new WebSocket(proto + '://' + location.host + '/ws?token=' + encodeURIComponent(token))
@@ -142,12 +245,12 @@ export function jarvisPage(): string {
     ws.onmessage = (e) => {
       let msg
       try { msg = JSON.parse(e.data) } catch { return }
-      if (msg.type === 'chunk' && state === 'thinking') {
-        showText('<span class="interim">' + esc(stripCtx(msg.text)) + '</span>')
+      if (msg.type === 'hello') {
+        asrAvailable = !!msg.asr
+      } else if (msg.type === 'chunk') {
+        onChunk(msg.text)
       } else if (msg.type === 'answer') {
-        const clean = stripCtx(msg.text)
-        showText(esc(clean))
-        speak(clean)
+        onAnswer(msg.text)
       } else if (msg.type === 'error') {
         showText('<span class="interim">⚠ ' + esc(msg.text) + '</span>')
         setState('idle')
@@ -156,56 +259,135 @@ export function jarvisPage(): string {
   }
   connect()
 
-  // --- Speech recognition ---
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-  let recog = null
-  let finalText = ''
-
-  function startListening() {
-    if (!SR) { showText('<span class="interim">⚠ 這個瀏覽器不支援語音辨識,請用 Chrome/Edge</span>'); return }
-    if (!wsReady) { statusEl.textContent = '還沒連上 bot,稍等……'; return }
-    finalText = ''
-    recog = new SR()
-    recog.lang = 'zh-TW'
-    recog.interimResults = true
-    recog.continuous = true
-    recog.onresult = (e) => {
-      let interim = ''
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript
-        if (e.results[i].isFinal) finalText += t
-        else interim += t
-      }
-      showText(esc(finalText) + '<span class="interim">' + esc(interim) + '</span>')
-    }
-    recog.onerror = () => { if (state === 'listening') backToIdle('沒聽清楚,再點一次') }
-    recog.onend = () => { if (state === 'listening') sendOrIdle() }
-    recog.start()
-    startMicMeter()
-    setState('listening')
-  }
-
-  function sendOrIdle() {
-    stopMicMeter()
-    const text = finalText.trim()
-    if (!text) { backToIdle('沒聽到內容,再點一次'); return }
+  function sendAsk(text) {
+    resetSpeech()
+    showText(esc(text))
     ws.send(JSON.stringify({ type: 'ask', text }))
     setState('thinking')
   }
 
+  // --- Speech capture: MediaRecorder → /asr (Sherpa), Web Speech as captions/fallback ---
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  let recog = null
+  let webSpeechText = ''
+  let recorder = null
+  let recChunks = []
+  let micStream = null
+  let useAsr = false
+
+  async function startListening() {
+    if (!wsReady) { statusEl.textContent = '還沒連上 bot,稍等……'; return }
+    useAsr = asrAvailable && !!window.MediaRecorder
+    if (!useAsr && !SR) {
+      showText('<span class="interim">⚠ 這個瀏覽器不支援語音輸入,請用 Chrome/Edge</span>')
+      return
+    }
+
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch {
+      if (!SR) { showText('<span class="interim">⚠ 拿不到麥克風權限</span>'); return }
+      micStream = null // Web Speech manages its own mic
+    }
+
+    if (micStream) startMicMeter(micStream)
+
+    if (useAsr && micStream) {
+      recChunks = []
+      try {
+        recorder = new MediaRecorder(micStream, { mimeType: 'audio/webm;codecs=opus' })
+      } catch {
+        recorder = new MediaRecorder(micStream)
+      }
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data) }
+      recorder.start(250)
+    } else {
+      useAsr = false
+    }
+
+    webSpeechText = ''
+    if (SR) {
+      recog = new SR()
+      recog.lang = 'zh-TW'
+      recog.interimResults = true
+      recog.continuous = true
+      recog.onresult = (e) => {
+        let interim = ''
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript
+          if (e.results[i].isFinal) webSpeechText += t
+          else interim += t
+        }
+        if (state === 'listening') {
+          showText(esc(webSpeechText) + '<span class="interim">' + esc(interim) + '</span>')
+        }
+      }
+      recog.onerror = () => { if (state === 'listening' && !useAsr) backToIdle('沒聽清楚,再點一次') }
+      // Silence (or our stop() call) ends recognition. ASR path: trigger the
+      // recorder stop flow. Web Speech path: final results land just before
+      // onend, so only here is the transcript complete enough to send.
+      recog.onend = () => {
+        if (state !== 'listening') return
+        if (useAsr) stopListening()
+        else finishWebSpeech()
+      }
+      recog.start()
+    }
+
+    setState('listening')
+  }
+
+  function stopListening() {
+    if (recog) { try { recog.stop() } catch { /* already stopped */ } }
+    if (useAsr && recorder && recorder.state !== 'inactive') {
+      setState('thinking')
+      statusEl.textContent = '辨識中……'
+      recorder.onstop = () => {
+        const blob = new Blob(recChunks, { type: 'audio/webm' })
+        releaseMic()
+        finishWithAsr(blob)
+      }
+      recorder.stop()
+    } else if (recog) {
+      // Web Speech path: wait for onend — final results arrive just before it
+      statusEl.textContent = '處理中……'
+    } else {
+      backToIdle('沒聽到內容,再點一次')
+    }
+  }
+
+  function finishWebSpeech() {
+    releaseMic()
+    const text = webSpeechText.trim()
+    if (!text) { backToIdle('沒聽到內容,再點一次'); return }
+    sendAsk(text)
+  }
+
+  async function finishWithAsr(blob) {
+    try {
+      const res = await fetch('/asr?token=' + encodeURIComponent(token), { method: 'POST', body: blob })
+      const data = await res.json()
+      if (data.ok && data.text) { sendAsk(data.text.trim()); return }
+      throw new Error(data.error || 'ASR failed')
+    } catch {
+      const fallback = webSpeechText.trim()
+      if (fallback) { sendAsk(fallback); return }
+      backToIdle('辨識失敗,再點一次')
+    }
+  }
+
   function backToIdle(hint) {
-    stopMicMeter()
+    releaseMic()
     setState('idle')
     if (hint) statusEl.textContent = hint
   }
 
   // --- Mic volume → dot scale (the show-off part) ---
-  let audioCtx = null, meterRaf = 0, micStream = null
-  async function startMicMeter() {
+  let audioCtx = null, meterRaf = 0
+  function startMicMeter(stream) {
     try {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
       audioCtx = new AudioContext()
-      const src = audioCtx.createMediaStreamSource(micStream)
+      const src = audioCtx.createMediaStreamSource(stream)
       const analyser = audioCtx.createAnalyser()
       analyser.fftSize = 256
       src.connect(analyser)
@@ -219,44 +401,27 @@ export function jarvisPage(): string {
         meterRaf = requestAnimationFrame(tick)
       }
       tick()
-    } catch { /* no mic permission — ripple animation still plays */ }
+    } catch { /* meter is cosmetic — ripple animation still plays */ }
   }
-  function stopMicMeter() {
+  function releaseMic() {
     cancelAnimationFrame(meterRaf)
     dot.style.transform = ''
     if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null }
     if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null }
-  }
-
-  // --- TTS ---
-  let zhVoice = null
-  function pickVoice() {
-    const voices = speechSynthesis.getVoices()
-    zhVoice = voices.find((v) => /zh[-_]TW/i.test(v.lang))
-      || voices.find((v) => /^zh/i.test(v.lang))
-      || null
-  }
-  pickVoice()
-  speechSynthesis.onvoiceschanged = pickVoice
-
-  function speak(text) {
-    const spoken = text.length > TTS_MAX ? text.slice(0, TTS_MAX) + '……詳細內容我發到 Telegram 了' : text
-    speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance(spoken)
-    if (zhVoice) u.voice = zhVoice
-    u.lang = 'zh-TW'
-    u.rate = 1.05
-    u.onend = () => { if (state === 'speaking') setState('idle') }
-    u.onerror = () => { if (state === 'speaking') setState('idle') }
-    setState('speaking')
-    speechSynthesis.speak(u)
+    recorder = null
   }
 
   // --- The dot ---
   dot.addEventListener('click', () => {
     if (state === 'idle') startListening()
-    else if (state === 'listening') { recog && recog.stop() }
-    else if (state === 'speaking') { speechSynthesis.cancel(); setState('idle') }
+    else if (state === 'listening') stopListening()
+    else if (state === 'speaking') {
+      // Shut up: mute the rest of this answer; queue keeps running
+      speechSynthesis.cancel()
+      if (sp) { sp.muted = true; sp.pending = 0 }
+      if (sp && sp.answered) setState('idle')
+      else { setState('thinking'); statusEl.textContent = '已靜音,等它做完……' }
+    }
     // thinking: queue is running — let it finish
   })
 
