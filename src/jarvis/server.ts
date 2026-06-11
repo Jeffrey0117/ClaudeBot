@@ -8,6 +8,7 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import { writeFile, unlink, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -21,6 +22,8 @@ import { isChannelEnabled } from '../ai/channel/opt-in-store.js'
 import { enqueue } from '../claude/queue.js'
 import { onResponseEvent } from '../dashboard/response-broker.js'
 import { isSherpaAvailable } from '../asr/sherpa-client.js'
+import { detectRemoteIntent } from '../utils/remote-intent.js'
+import { getPairing } from '../remote/pairing-store.js'
 import { jarvisPage } from './page.js'
 import { isValidToken, tokenFromUrl } from './auth.js'
 
@@ -49,6 +52,52 @@ function isAuthorized(req: IncomingMessage, token: string): boolean {
 function send(ws: WebSocket, msg: Record<string, unknown>): void {
   if (ws.readyState === ws.OPEN) {
     ws.send(JSON.stringify(msg))
+  }
+}
+
+/**
+ * Fast path: deterministic media/app intents (「我要聽 X」「大聲一點」「暫停」…)
+ * execute directly — same recipes the dashboard uses — and reply instantly,
+ * never touching the AI queue. Returns true when the intent was handled
+ * (successfully or with a reported error).
+ */
+async function tryFastIntent(ws: WebSocket, text: string): Promise<boolean> {
+  const intent = detectRemoteIntent(text)
+  if (!intent) return false
+  const chatId = env.ADMIN_CHAT_ID
+  const pairing = chatId
+    ? getPairing(chatId, undefined, getUserState(chatId).activeMachine)
+    : null
+
+  try {
+    if (pairing?.connected) {
+      const { remoteToolCall } = await import('../remote/relay-client.js')
+      if (intent.js) {
+        await remoteToolCall(pairing.code, 'remote_browser_eval', { js: intent.js }, 90_000)
+        if (intent.thenJs) {
+          const then2 = intent.thenJs
+          void (async () => {
+            await new Promise((r) => setTimeout(r, 4000))
+            await remoteToolCall(pairing.code, 'remote_browser_eval', { js: then2 }, 60_000).catch(() => {})
+          })()
+        }
+      } else if (intent.spawnArgs) {
+        await remoteToolCall(pairing.code, 'remote_spawn_detached', { command: 'cmd', args: JSON.stringify(intent.spawnArgs) }, 15_000)
+      } else if (intent.command) {
+        await remoteToolCall(pairing.code, 'remote_execute_command', { command: intent.command }, 30_000)
+      }
+    } else if (intent.spawnArgs) {
+      // No paired machine — GUI launches still work on the bot's own machine
+      spawn('cmd', [...intent.spawnArgs], { detached: true, stdio: 'ignore', shell: false }).unref()
+    } else {
+      return false // CDP-only intent with no pairing — let the AI handle it
+    }
+    send(ws, { type: 'answer', text: intent.reply })
+    return true
+  } catch (error) {
+    const msg = error instanceof Error ? error.message.slice(0, 120) : String(error)
+    send(ws, { type: 'error', text: `${intent.kind} 失敗:${msg}` })
+    return true
   }
 }
 
@@ -203,17 +252,24 @@ export function startJarvisServer(port: number, token: string): void {
     send(ws, { type: 'hello', asr: isSherpaAvailable() })
 
     ws.on('message', (raw) => {
+      let text: string
       try {
         const parsed = askSchema.safeParse(JSON.parse(String(raw)))
         if (!parsed.success) {
           send(ws, { type: 'error', text: '訊息格式不對' })
           return
         }
-        handleAsk(ws, parsed.data.text)
-      } catch (error) {
-        console.error('[jarvis] message handling failed:', error)
+        text = parsed.data.text
+      } catch {
         send(ws, { type: 'error', text: '處理訊息時出錯了' })
+        return
       }
+      void tryFastIntent(ws, text)
+        .then((handled) => { if (!handled) handleAsk(ws, text) })
+        .catch((error) => {
+          console.error('[jarvis] message handling failed:', error)
+          send(ws, { type: 'error', text: '處理訊息時出錯了' })
+        })
     })
 
     ws.on('close', () => dropConnection(ws))

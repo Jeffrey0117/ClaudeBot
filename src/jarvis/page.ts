@@ -38,8 +38,8 @@ export function jarvisPage(): string {
       var(--bg);
     color: var(--ink);
     font-family: "LXGW WenKai TC", "Noto Sans TC", system-ui, sans-serif;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 30px; overflow: hidden; user-select: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+    gap: 26px; overflow: hidden; user-select: none;
   }
   /* faint HUD grain */
   body::after {
@@ -54,18 +54,19 @@ export function jarvisPage(): string {
   }
   #wordmark b { color: var(--core); font-weight: 400; }
   #fs {
-    position: fixed; top: 16px; right: 18px; width: 38px; height: 38px;
-    background: none; border: 1px solid var(--line); color: var(--dim);
-    border-radius: 50%; font-size: 15px; cursor: pointer;
+    position: fixed; bottom: 26px; right: 26px; width: 54px; height: 54px;
+    background: rgba(20, 50, 90, .25); border: 1px solid var(--line); color: var(--dim);
+    border-radius: 50%; font-size: 22px; cursor: pointer;
     transition: color .3s, border-color .3s, box-shadow .3s;
     opacity: 0; animation: fadein 1.4s .5s ease forwards;
   }
-  #fs:hover { color: var(--core); border-color: var(--core); box-shadow: 0 0 18px rgba(120, 200, 255, .25); }
+  #fs:hover { color: var(--core); border-color: var(--core); box-shadow: 0 0 22px rgba(120, 200, 255, .35); }
   @keyframes fadein { to { opacity: 1; } }
 
   /* ── The reactor ───────────────────────────────────── */
   #stage {
     position: relative; width: 320px; height: 320px;
+    margin-top: max(20vh, 90px); flex-shrink: 0;
     display: grid; place-items: center;
     animation: arrive 1.2s cubic-bezier(.2, .8, .2, 1) both;
   }
