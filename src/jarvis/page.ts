@@ -3,9 +3,10 @@
  *
  * State machine: idle → listening → thinking → speaking → idle.
  *
- * Speech in: MediaRecorder → POST /asr (Sherpa, project hotwords) when the
- * server advertises ASR in its hello message; Web Speech API runs alongside
- * for live interim captions and is the fallback transcriber.
+ * Speech in: Web Speech API is the primary transcriber (live interim
+ * captions + final text — clearly better for mixed Chinese/English everyday
+ * speech). MediaRecorder records in parallel and the audio goes to POST /asr
+ * (Sherpa) only as fallback when Web Speech produced nothing.
  *
  * Speech out: sentence-level streaming — complete sentences from response
  * chunks are spoken as they arrive instead of waiting for the full answer.
@@ -292,6 +293,7 @@ export function jarvisPage(): string {
 
     if (micStream) startMicMeter(micStream)
 
+    // Record in parallel — only uploaded if Web Speech comes up empty
     if (useAsr && micStream) {
       recChunks = []
       try {
@@ -322,15 +324,10 @@ export function jarvisPage(): string {
           showText(esc(webSpeechText) + '<span class="interim">' + esc(interim) + '</span>')
         }
       }
-      recog.onerror = () => { if (state === 'listening' && !useAsr) backToIdle('沒聽清楚,再點一次') }
-      // Silence (or our stop() call) ends recognition. ASR path: trigger the
-      // recorder stop flow. Web Speech path: final results land just before
-      // onend, so only here is the transcript complete enough to send.
-      recog.onend = () => {
-        if (state !== 'listening') return
-        if (useAsr) stopListening()
-        else finishWebSpeech()
-      }
+      recog.onerror = () => { /* finishCapture falls back to Sherpa */ }
+      // Silence (or our stop() call) ends recognition. Final results land
+      // just before onend, so only here is the transcript complete.
+      recog.onend = () => { if (state === 'listening') finishCapture() }
       recog.start()
     }
 
@@ -338,7 +335,24 @@ export function jarvisPage(): string {
   }
 
   function stopListening() {
-    if (recog) { try { recog.stop() } catch { /* already stopped */ } }
+    if (recog) {
+      // Wait for onend — Web Speech delivers its last final result just before it
+      statusEl.textContent = '處理中……'
+      try { recog.stop() } catch { finishCapture() }
+    } else {
+      finishCapture()
+    }
+  }
+
+  // Web Speech text wins (better for everyday mixed Chinese/English);
+  // Sherpa transcribes the recording only when Web Speech produced nothing.
+  function finishCapture() {
+    const text = webSpeechText.trim()
+    if (text) {
+      releaseMic()
+      sendAsk(text)
+      return
+    }
     if (useAsr && recorder && recorder.state !== 'inactive') {
       setState('thinking')
       statusEl.textContent = '辨識中……'
@@ -348,19 +362,9 @@ export function jarvisPage(): string {
         finishWithAsr(blob)
       }
       recorder.stop()
-    } else if (recog) {
-      // Web Speech path: wait for onend — final results arrive just before it
-      statusEl.textContent = '處理中……'
-    } else {
-      backToIdle('沒聽到內容,再點一次')
+      return
     }
-  }
-
-  function finishWebSpeech() {
-    releaseMic()
-    const text = webSpeechText.trim()
-    if (!text) { backToIdle('沒聽到內容,再點一次'); return }
-    sendAsk(text)
+    backToIdle('沒聽到內容,再點一次')
   }
 
   async function finishWithAsr(blob) {
@@ -370,8 +374,6 @@ export function jarvisPage(): string {
       if (data.ok && data.text) { sendAsk(data.text.trim()); return }
       throw new Error(data.error || 'ASR failed')
     } catch {
-      const fallback = webSpeechText.trim()
-      if (fallback) { sendAsk(fallback); return }
       backToIdle('辨識失敗,再點一次')
     }
   }
