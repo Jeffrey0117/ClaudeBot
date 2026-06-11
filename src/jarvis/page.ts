@@ -19,95 +19,173 @@ export function jarvisPage(): string {
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>JARVIS</title>
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC&family=Michroma&display=swap');
+
+  :root {
+    --bg: #02050b;
+    --core: #bfe9ff;
+    --ink: #eaf4ff;
+    --dim: #7e97b8;
+    --line: rgba(140, 200, 255, .22);
+    --warn: #ffb454;
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
   body {
-    background: #06080f;
-    color: #c8d0e0;
-    font-family: system-ui, -apple-system, "Noto Sans TC", sans-serif;
+    background:
+      radial-gradient(ellipse 70% 55% at 50% 38%, rgba(40, 110, 190, .16), transparent 65%),
+      radial-gradient(ellipse 120% 90% at 50% 110%, rgba(10, 35, 70, .35), transparent 60%),
+      var(--bg);
+    color: var(--ink);
+    font-family: "LXGW WenKai TC", "Noto Sans TC", system-ui, sans-serif;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 28px; overflow: hidden; user-select: none;
+    gap: 30px; overflow: hidden; user-select: none;
   }
+  /* faint HUD grain */
+  body::after {
+    content: ''; position: fixed; inset: 0; pointer-events: none; opacity: .05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
+  }
+
+  #wordmark {
+    position: fixed; top: 22px; left: 26px;
+    font-family: Michroma, sans-serif; font-size: 11px; letter-spacing: .5em;
+    color: var(--dim); opacity: 0; animation: fadein 1.4s .3s ease forwards;
+  }
+  #wordmark b { color: var(--core); font-weight: 400; }
   #fs {
-    position: fixed; top: 16px; right: 16px;
-    background: none; border: 1px solid #2a3350; color: #5a6b88;
-    border-radius: 8px; padding: 6px 12px; font-size: 16px; cursor: pointer;
+    position: fixed; top: 16px; right: 18px; width: 38px; height: 38px;
+    background: none; border: 1px solid var(--line); color: var(--dim);
+    border-radius: 50%; font-size: 15px; cursor: pointer;
+    transition: color .3s, border-color .3s, box-shadow .3s;
+    opacity: 0; animation: fadein 1.4s .5s ease forwards;
   }
-  #fs:hover { color: #c8d0e0; border-color: #4a5a80; }
+  #fs:hover { color: var(--core); border-color: var(--core); box-shadow: 0 0 18px rgba(120, 200, 255, .25); }
+  @keyframes fadein { to { opacity: 1; } }
 
-  #stage { position: relative; width: 220px; height: 220px; display: grid; place-items: center; }
+  /* ── The reactor ───────────────────────────────────── */
+  #stage {
+    position: relative; width: 320px; height: 320px;
+    display: grid; place-items: center;
+    animation: arrive 1.2s cubic-bezier(.2, .8, .2, 1) both;
+  }
+  @keyframes arrive { from { opacity: 0; transform: scale(.85); } }
 
-  /* The dot */
+  #stage > * { grid-area: 1 / 1; }
+
+  /* wide soft halo */
+  #halo {
+    width: 320px; height: 320px; border-radius: 50%; pointer-events: none;
+    background: radial-gradient(circle, rgba(90, 180, 255, .14), transparent 60%);
+    transition: opacity .6s; opacity: .6;
+  }
+  body[data-state="listening"] #halo { opacity: 1; }
+  body[data-state="speaking"] #halo { animation: halopulse 1.1s ease-in-out infinite; }
+  @keyframes halopulse { 50% { opacity: 1; transform: scale(1.06); } }
+
+  /* tick ring — thin instrument bezel */
+  #ring {
+    width: 230px; height: 230px; border-radius: 50%; pointer-events: none;
+    background: repeating-conic-gradient(rgba(150, 210, 255, .5) 0 .5deg, transparent .5deg 6deg);
+    -webkit-mask: radial-gradient(circle, transparent 64%, #000 65%, #000 70%, transparent 71%);
+            mask: radial-gradient(circle, transparent 64%, #000 65%, #000 70%, transparent 71%);
+    opacity: .35; animation: rotate 60s linear infinite;
+    transition: opacity .5s;
+  }
+  body[data-state="listening"] #ring { opacity: .9; animation-duration: 18s; }
+  body[data-state="speaking"]  #ring { opacity: .7; animation-duration: 30s; }
+  @keyframes rotate { to { transform: rotate(360deg); } }
+
+  /* the core */
   #dot {
-    width: 140px; height: 140px; border-radius: 50%; cursor: pointer;
-    background: radial-gradient(circle at 35% 35%, #ff5a5a, #b3001b 70%);
-    box-shadow: 0 0 60px rgba(255, 40, 40, .35);
-    transition: transform .08s linear, background .4s, box-shadow .4s;
+    width: 150px; height: 150px; border-radius: 50%; cursor: pointer;
+    background:
+      radial-gradient(circle at 50% 45%, #ffffff 0%, var(--core) 22%, rgba(70, 150, 230, .85) 48%, rgba(20, 50, 100, .9) 78%, rgba(8, 20, 44, 1) 100%);
+    box-shadow:
+      0 0 24px rgba(150, 215, 255, .55),
+      0 0 90px rgba(70, 160, 255, .30),
+      inset 0 0 34px rgba(255, 255, 255, .25);
+    transition: transform .08s linear, box-shadow .6s, filter .6s;
     will-change: transform;
   }
-  body[data-state="idle"] #dot { animation: breathe 3.2s ease-in-out infinite; }
+  #dot:active { filter: brightness(1.25); }
+  body[data-state="idle"] #dot { animation: breathe 4.2s ease-in-out infinite; filter: brightness(.75) saturate(.9); }
   @keyframes breathe {
-    0%, 100% { transform: scale(1); box-shadow: 0 0 50px rgba(255,40,40,.25); }
-    50%      { transform: scale(1.06); box-shadow: 0 0 90px rgba(255,40,40,.5); }
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.045); box-shadow: 0 0 36px rgba(150, 215, 255, .7), 0 0 130px rgba(70, 160, 255, .4), inset 0 0 40px rgba(255,255,255,.3); }
   }
-
-  /* Listening: expanding ripple rings */
-  .ripple {
-    position: absolute; inset: 0; margin: auto;
-    width: 140px; height: 140px; border-radius: 50%;
-    border: 2px solid rgba(255, 80, 80, .6); pointer-events: none; opacity: 0;
-  }
-  body[data-state="listening"] .ripple { animation: ripple 1.8s ease-out infinite; }
-  body[data-state="listening"] .ripple:nth-child(2) { animation-delay: .9s; }
-  @keyframes ripple {
-    0%   { transform: scale(1); opacity: .7; }
-    100% { transform: scale(1.55); opacity: 0; }
-  }
-
-  /* Thinking: blue dot + spinning arc */
-  body[data-state="thinking"] #dot {
-    background: radial-gradient(circle at 35% 35%, #5ab0ff, #0b3ba6 70%);
-    box-shadow: 0 0 70px rgba(60, 130, 255, .4);
-  }
-  #spinner {
-    position: absolute; inset: 0; margin: auto;
-    width: 180px; height: 180px; border-radius: 50%;
-    border: 3px solid transparent; border-top-color: #4d9fff;
-    opacity: 0; pointer-events: none;
-  }
-  body[data-state="thinking"] #spinner { opacity: 1; animation: spin 1.1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* Speaking: teal pulse */
-  body[data-state="speaking"] #dot {
-    background: radial-gradient(circle at 35% 35%, #4dffd2, #00806b 70%);
-    box-shadow: 0 0 70px rgba(40, 230, 190, .4);
-    animation: speak .55s ease-in-out infinite;
-  }
+  body[data-state="listening"] #dot { filter: brightness(1.12); }
+  body[data-state="thinking"]  #dot { filter: brightness(.9); animation: simmer 2.6s ease-in-out infinite; }
+  @keyframes simmer { 50% { filter: brightness(1.08); } }
+  body[data-state="speaking"]  #dot { animation: speak .62s ease-in-out infinite; }
   @keyframes speak {
     0%, 100% { transform: scale(1); }
-    50%      { transform: scale(1.08); }
+    50%      { transform: scale(1.05); box-shadow: 0 0 40px rgba(150, 215, 255, .75), 0 0 140px rgba(70, 160, 255, .45), inset 0 0 40px rgba(255,255,255,.35); }
   }
 
-  #status { font-size: 15px; color: #5a6b88; letter-spacing: .08em; }
-  #text {
-    min-height: 4.5em; max-height: 38vh; overflow-y: auto;
-    max-width: min(640px, 86vw); text-align: center;
-    font-size: 17px; line-height: 1.7; white-space: pre-wrap; word-break: break-word;
+  /* listening ripples — hairline rings */
+  .ripple {
+    width: 150px; height: 150px; border-radius: 50%; pointer-events: none;
+    border: 1px solid rgba(160, 215, 255, .65); opacity: 0;
   }
-  #text .interim { color: #5a6b88; }
+  body[data-state="listening"] .ripple { animation: ripple 2.2s cubic-bezier(.2, .6, .35, 1) infinite; }
+  body[data-state="listening"] .ripple:nth-child(3) { animation-delay: 1.1s; }
+  @keyframes ripple {
+    0%   { transform: scale(1); opacity: .8; }
+    100% { transform: scale(2.05); opacity: 0; }
+  }
+
+  /* thinking — twin counter-orbiting arcs */
+  #spinner { width: 200px; height: 200px; position: relative; pointer-events: none; opacity: 0; transition: opacity .4s; }
+  body[data-state="thinking"] #spinner { opacity: 1; }
+  #spinner::before, #spinner::after {
+    content: ''; position: absolute; inset: 0; border-radius: 50%;
+    border: 1px solid transparent;
+  }
+  #spinner::before {
+    border-top-color: rgba(170, 220, 255, .9); border-right-color: rgba(170, 220, 255, .25);
+    animation: rotate 1.5s linear infinite;
+  }
+  #spinner::after {
+    inset: 14px;
+    border-bottom-color: rgba(120, 190, 255, .6);
+    animation: rotate 2.3s linear infinite reverse;
+  }
+
+  /* ── Text ──────────────────────────────────────────── */
+  #status {
+    font-family: Michroma, "LXGW WenKai TC", sans-serif;
+    font-size: 13px; letter-spacing: .42em; text-indent: .42em;
+    color: var(--dim); text-transform: uppercase;
+    transition: color .4s;
+  }
+  body[data-state="listening"] #status,
+  body[data-state="speaking"]  #status { color: var(--core); text-shadow: 0 0 14px rgba(120, 200, 255, .5); }
+
+  #text {
+    min-height: 3.2em; max-height: 34vh; overflow-y: auto;
+    max-width: min(760px, 88vw); text-align: center;
+    font-size: clamp(22px, 2.6vw, 30px); line-height: 1.75;
+    white-space: pre-wrap; word-break: break-word;
+    color: var(--ink); text-shadow: 0 0 26px rgba(110, 190, 255, .22);
+  }
+  #text .interim { color: var(--dim); text-shadow: none; }
+  #text .warn { color: var(--warn); font-size: .8em; }
   #text::-webkit-scrollbar { width: 0; }
 </style>
 </head>
 <body data-state="idle">
+  <div id="wordmark"><b>◉</b>&nbsp; J A R V I S</div>
   <button id="fs" title="全螢幕">⛶</button>
   <div id="stage">
+    <div id="halo"></div>
     <div class="ripple"></div>
     <div class="ripple"></div>
+    <div id="ring"></div>
     <div id="spinner"></div>
     <div id="dot"></div>
   </div>
-  <div id="status">點一下紅點開始說話</div>
+  <div id="status">點一下,開始說話</div>
   <div id="text"></div>
 
 <script>
@@ -119,10 +197,10 @@ export function jarvisPage(): string {
   const TTS_MAX = 400 // cap on total spoken chars per answer
 
   const STATUS = {
-    idle: '點一下紅點開始說話',
-    listening: '聽你說……(再點一下送出)',
-    thinking: '思考中……',
-    speaking: '回答中(點一下打斷)',
+    idle: 'TAP · 點一下說話',
+    listening: 'LISTENING · 聽你說',
+    thinking: 'THINKING · 處理中',
+    speaking: 'SPEAKING · 點一下打斷',
   }
 
   let state = 'idle'
@@ -253,7 +331,7 @@ export function jarvisPage(): string {
       } else if (msg.type === 'answer') {
         onAnswer(msg.text)
       } else if (msg.type === 'error') {
-        showText('<span class="interim">⚠ ' + esc(msg.text) + '</span>')
+        showText('<span class="warn">⚠' + esc(msg.text) + '</span>')
         setState('idle')
       }
     }
@@ -280,14 +358,14 @@ export function jarvisPage(): string {
     if (!wsReady) { statusEl.textContent = '還沒連上 bot,稍等……'; return }
     useAsr = asrAvailable && !!window.MediaRecorder
     if (!useAsr && !SR) {
-      showText('<span class="interim">⚠ 這個瀏覽器不支援語音輸入,請用 Chrome/Edge</span>')
+      showText('<span class="warn">⚠這個瀏覽器不支援語音輸入,請用 Chrome/Edge</span>')
       return
     }
 
     try {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
     } catch {
-      if (!SR) { showText('<span class="interim">⚠ 拿不到麥克風權限</span>'); return }
+      if (!SR) { showText('<span class="warn">⚠拿不到麥克風權限</span>'); return }
       micStream = null // Web Speech manages its own mic
     }
 
