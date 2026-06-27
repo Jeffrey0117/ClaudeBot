@@ -313,11 +313,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'remote_spawn_detached',
-      description: 'Spawn a detached process on the remote computer that runs independently (survives bot restart). Use for launching applications.',
+      description: 'Spawn a detached process on the remote computer that runs independently (survives bot restart). Use for launching GUI apps or long-running services in a visible window. A full shell command line is OK — on Windows use e.g. `cmd /c start "" cmd /k "C:\\path\\to\\install.bat"` to open a visible console; on Unix wrap with `sh -c "..."`. Returns immediately.',
       inputSchema: {
         type: 'object' as const,
         properties: {
-          command: { type: 'string', description: 'Command to spawn' },
+          command: { type: 'string', description: 'Command line to spawn. May be a single executable or a full shell command line (it is run through the shell when it contains spaces/operators).' },
           cwd: { type: 'string', description: 'Optional working directory' },
         },
         required: ['command'],

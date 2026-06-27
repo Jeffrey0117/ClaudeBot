@@ -270,22 +270,73 @@ export async function handleBrowserConnect(): Promise<string> {
 
 /**
  * Spawn a detached process that outlives the agent command.
- * Used by /pair chat to launch Electron without blocking.
+ *
+ * Two calling conventions are supported:
+ *  1. executable + args array — internal callers pass `{command:'cmd', args:'["..."]'}`
+ *     so the executable and its arguments are already separated → spawned with
+ *     shell:false (no injection surface).
+ *  2. a full command line in `command` with no args array — the MCP schema only
+ *     exposes a single `command` field, so the host AI puts the whole line there
+ *     (e.g. `cmd /c start "" cmd /k "...bat"`). That can only run through a shell,
+ *     so we auto-enable the shell when `command` contains shell syntax.
+ *
+ * Returns a Promise so a spawn failure (ENOENT/EACCES) is reported back instead
+ * of bubbling up as an unhandled 'error' event — which would otherwise crash the
+ * whole agent via process 'uncaughtException'.
  */
-export function handleSpawnDetached(args: Record<string, unknown>, baseDir: string): string {
+export function handleSpawnDetached(args: Record<string, unknown>, baseDir: string): Promise<string> {
   const cmd = String(args.command || 'npx')
-  const cmdArgs: readonly string[] = args.args
-    ? JSON.parse(String(args.args))
-    : []
+  let cmdArgs: readonly string[] = []
+  if (args.args) {
+    try {
+      const parsed = JSON.parse(String(args.args))
+      if (Array.isArray(parsed)) cmdArgs = parsed.map(String)
+    } catch {
+      return Promise.resolve('Error: `args` must be a JSON array string, e.g. ["main.js","--flag"]')
+    }
+  }
   const cwd = args.cwd ? String(args.cwd) : baseDir
 
-  const child = spawn(cmd, [...cmdArgs], {
-    cwd,
-    detached: true,
-    stdio: 'ignore',
-    shell: false,
-  })
-  child.unref()
+  // Use a shell only when a full command line was given (no separate args and
+  // the command contains shell metacharacters). Keeps the executable+args path
+  // shell-free while letting `cmd /c start ...`-style lines work.
+  const useShell = cmdArgs.length === 0 && /[\s&|<>^"']/.test(cmd)
+  const isWin = process.platform === 'win32'
+  const shellOption = useShell
+    ? (isWin ? (process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe') : true)
+    : false
 
-  return `Spawned detached: ${cmd} ${cmdArgs.join(' ')} (pid ${child.pid ?? 'unknown'})`
+  return new Promise((resolve) => {
+    let settled = false
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn(cmd, [...cmdArgs], {
+        cwd,
+        detached: true,
+        stdio: 'ignore',
+        shell: shellOption,
+        windowsHide: false, // detached GUI/console windows should be visible
+      })
+    } catch (err) {
+      resolve(`Error: failed to spawn detached process: ${err instanceof Error ? err.message : String(err)}`)
+      return
+    }
+
+    // CRITICAL: an unhandled 'error' (e.g. ENOENT) crashes the whole agent.
+    child.on('error', (err) => {
+      if (settled) return
+      settled = true
+      resolve(`Error: failed to spawn detached process: ${err.message}`)
+    })
+
+    // Give the OS a moment to surface ENOENT/EACCES before declaring success,
+    // then detach so the process outlives this command.
+    setTimeout(() => {
+      if (settled) return
+      settled = true
+      child.unref()
+      const shown = cmdArgs.length ? `${cmd} ${cmdArgs.join(' ')}` : cmd
+      resolve(`Spawned detached: ${shown} (pid ${child.pid ?? 'unknown'})`)
+    }, 600)
+  })
 }
