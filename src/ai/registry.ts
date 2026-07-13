@@ -3,6 +3,7 @@ import { claudeAdapter } from './claude-adapter.js'
 import { geminiRunner } from './gemini-runner.js'
 import { codexRunner } from './codex-runner.js'
 import { channelRunner } from './channel/channel-runner.js'
+import { batRemoteRunner } from './bat-remote/index.js'
 
 const runners = new Map<AIBackend, AIRunner>()
 
@@ -51,3 +52,4 @@ registerRunner(claudeAdapter)
 registerRunner(geminiRunner)
 registerRunner(codexRunner)
 registerRunner(channelRunner)
+registerRunner(batRemoteRunner)

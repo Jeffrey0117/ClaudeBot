@@ -41,7 +41,7 @@ const MAX_PROMPTS_PER_SESSION = 50
 const mySessions = new Map<string, string>()
 
 // Known AI backends for key format validation
-const KNOWN_BACKENDS = new Set(['claude', 'gemini', 'codex', 'channel'])
+const KNOWN_BACKENDS = new Set(['claude', 'gemini', 'codex', 'channel', 'bat-remote'])
 
 /** Check if a key is the valid new format: BOT_ID:backend:path */
 function isNewFormatKey(key: string): boolean {

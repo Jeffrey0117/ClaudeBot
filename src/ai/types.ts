@@ -1,4 +1,4 @@
-export type AIBackend = 'claude' | 'gemini' | 'codex' | 'channel' | 'auto'
+export type AIBackend = 'claude' | 'gemini' | 'codex' | 'channel' | 'bat-remote' | 'auto'
 
 export interface AIModelSelection {
   readonly backend: AIBackend
