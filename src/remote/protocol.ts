@@ -49,6 +49,21 @@ export interface AgentClientError {
   readonly message: string
 }
 
+// --- BAT credential distribution (join-bat client → relay → credential pack) ---
+
+export interface BatCredentialsRequest {
+  readonly type: 'bat_credentials_request'
+  readonly code: string
+}
+
+export interface BatCredentials {
+  readonly type: 'bat_credentials'
+  readonly url: string
+  readonly token: string
+  readonly fingerprint: string
+  readonly cwdDefault?: string
+}
+
 // --- Tool call forwarding (unchanged, used after handshake) ---
 
 export interface ToolCallRequest {
@@ -94,6 +109,7 @@ export type {
 /** Messages the relay receives (includes Electron chat handshake + messages) */
 export type RelayInbound =
   | AgentRegister | ProxyConnect | AgentShutdown | AgentClientError
+  | BatCredentialsRequest
   | ToolCallRequest | ToolCallResult | ToolCallError
   | import('./chat-protocol.js').ElectronChatRegister
   | import('./chat-protocol.js').LicenseRegister
@@ -104,6 +120,7 @@ export type RelayInbound =
 /** Messages the relay sends back */
 export type RelayOutbound =
   | AgentRegistered | ProxyConnected | RelayError
+  | BatCredentials
   | ToolCallRequest | ToolCallResult | ToolCallError
   | import('./chat-protocol.js').ElectronChatRegistered
   | import('./chat-protocol.js').LicenseRegistered

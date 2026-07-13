@@ -44,6 +44,11 @@ export function onPairingDisconnect(fn: PairingEventFn): void {
   onDisconnectFn = fn
 }
 
+/** What a pairing code is for. `agent` (default) is the classic remote-agent
+ *  registration; `bat` codes are one-time tokens redeemed for a BAT remote
+ *  credential pack (see consumeBatCode) and never host a connected machine. */
+export type PairingPurpose = 'agent' | 'bat'
+
 export interface PairingSession {
   readonly code: string
   readonly chatId: number
@@ -55,6 +60,8 @@ export interface PairingSession {
   readonly hostname?: string
   /** Bot token that created this pairing — used by relay to send notifications via correct bot */
   readonly botToken: string
+  /** Absent = 'agent' (backward compatible with pre-existing pairings.json). */
+  readonly purpose?: PairingPurpose
 }
 
 /** Build the base key prefix for a chat (without label suffix). */
@@ -126,6 +133,7 @@ function deduplicateLabel(existing: readonly PairingSession[], rawLabel: string)
 export function createPairingCode(
   chatId: number,
   threadId: number | undefined,
+  purpose: PairingPurpose = 'agent',
 ): string {
   const store = readStore()
   const pairings = { ...store.pairings }
@@ -153,12 +161,36 @@ export function createPairingCode(
     label: '',
     connected: false,
     botToken: env.BOT_TOKEN,
+    ...(purpose !== 'agent' ? { purpose } : {}),
   }
 
   pairings[tempKey] = session
   codeIndex[code] = tempKey
   writeStore({ pairings, codeIndex })
   return code
+}
+
+/**
+ * Redeem a `bat`-purpose pairing code exactly once. Returns the session if the
+ * code exists, is a bat code, and is unexpired; otherwise null. Valid bat codes
+ * are deleted on redemption (one-time, replay-safe). Non-bat codes are left
+ * untouched so an agent pairing can never be consumed by a bat request.
+ */
+export function consumeBatCode(code: string): PairingSession | null {
+  const store = readStore()
+  const key = store.codeIndex[code]
+  if (!key) return null
+  const session = store.pairings[key]
+  if (!session || session.purpose !== 'bat') return null
+
+  // One-time: remove before returning so a code can't be redeemed twice.
+  const pairings = { ...store.pairings }
+  const codeIndex = { ...store.codeIndex }
+  delete pairings[key]
+  delete codeIndex[code]
+  writeStore({ pairings, codeIndex })
+
+  return isExpired(session) ? null : session
 }
 
 /** Get all pairings for a chat (purges expired ones). */
@@ -192,6 +224,10 @@ export function getPairings(
       dirty = true
       continue
     }
+    // bat-purpose codes are redeemable credential tokens, not machines — keep
+    // them in the store (so consumeBatCode can find them) but hide them from
+    // machine listings / active-machine selection.
+    if (session.purpose === 'bat') continue
     results.push(session)
   }
 

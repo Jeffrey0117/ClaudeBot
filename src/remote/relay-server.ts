@@ -17,6 +17,7 @@ import {
   resetAllConnectedFlags,
   remoteProjectPath,
   notifyOwnerError,
+  consumeBatCode,
 } from './pairing-store.js'
 import { env } from '../config/env.js'
 import { startTunnel, setPublicRelayUrl, getPublicRelayUrl, getRelayPasteId, publishRelayUrl } from './tunnel.js'
@@ -37,6 +38,7 @@ import type {
   ChatMessage,
   ChatCallback,
   ChatVoice,
+  BatCredentials,
 } from './protocol.js'
 import { validateLicense } from './license-store.js'
 import { getOrCreateVirtualChat, isCodeUsedByVirtualChat, getOrCreateVirtualChatWithLicense } from './virtual-chat-store.js'
@@ -131,6 +133,38 @@ function handleAgentRegister(ws: WebSocket, code: string, ip: string, baseDir?: 
   const pasteId = getRelayPasteId()
   send(ws, { type: 'agent_registered', ...(pasteId ? { relayPasteId: pasteId } : {}) })
   console.log(`[relay] Agent registered: code=${code} from=${ip}`)
+}
+
+function handleBatCredentialsRequest(ws: WebSocket, code: string, ip: string): void {
+  // The host serves the credential pack straight from its own env — the same
+  // vars the bat-remote driver reads locally. Check config before consuming the
+  // code so a misconfigured host doesn't burn the user's one-time code.
+  if (!env.BAT_REMOTE_URL || !env.BAT_REMOTE_TOKEN || !env.BAT_REMOTE_FINGERPRINT) {
+    send(ws, { type: 'error', error: 'Host has no BAT credentials configured (set BAT_REMOTE_URL / BAT_REMOTE_TOKEN / BAT_REMOTE_FINGERPRINT)' })
+    return
+  }
+
+  const session = consumeBatCode(code)
+  if (!session) {
+    if (isRateLimited(ip)) {
+      send(ws, { type: 'error', error: 'Too many attempts. Try again later.' })
+      return
+    }
+    send(ws, { type: 'error', error: 'Invalid or expired pairing code' })
+    return
+  }
+
+  const pack: BatCredentials = {
+    type: 'bat_credentials',
+    url: env.BAT_REMOTE_URL,
+    token: env.BAT_REMOTE_TOKEN,
+    fingerprint: env.BAT_REMOTE_FINGERPRINT,
+    ...(env.BAT_REMOTE_CWD ? { cwdDefault: env.BAT_REMOTE_CWD } : {}),
+  }
+  if (ws.readyState === ws.OPEN) {
+    ws.send(JSON.stringify(pack))
+  }
+  console.log(`[relay] BAT credentials issued: code=${code} from=${ip}`)
 }
 
 function handleProxyConnect(ws: WebSocket, code: string): void {
@@ -425,7 +459,14 @@ export function startRelayServer(port: number): void {
           handleLicenseRegister(ws, licMsg.licenseKey, licMsg.clientId, ip)
           return
         }
-        send(ws, { type: 'error', error: 'First message must be agent_register, proxy_connect, electron_chat_register, or license_register' })
+        if (msg.type === 'bat_credentials_request') {
+          // Short-lived request/response: hand back the BAT credential pack for a
+          // valid one-time code, then close. Never becomes a long-lived role.
+          handleBatCredentialsRequest(ws, msg.code, ip)
+          ws.close()
+          return
+        }
+        send(ws, { type: 'error', error: 'First message must be agent_register, proxy_connect, electron_chat_register, license_register, or bat_credentials_request' })
         ws.close()
         return
       }

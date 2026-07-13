@@ -64,6 +64,11 @@ export async function pairCommand(ctx: BotContext): Promise<void> {
     return pairChatCommand(ctx, chatId, threadId)
   }
 
+  // /pair bat → one-time code to fetch BAT remote credentials on another machine
+  if (arg === 'bat') {
+    return pairBatCommand(ctx, chatId, threadId)
+  }
+
   // Always allow creating new pairing codes (multi-machine support)
   const code = createPairingCode(chatId, threadId)
   const { url: wsUrl, isPublic } = getRelayUrl()
@@ -152,6 +157,38 @@ async function pairChatCommand(ctx: BotContext, chatId: number, threadId: number
     '```\n' + code + '\n```\n\n' +
     `_在 Electron 桌面客戶端貼上即可連線_\n` +
     `_配對碼 5 分鐘後過期_\n\n` +
+    `${networkNote}`,
+    { parse_mode: 'Markdown' },
+  )
+}
+
+async function pairBatCommand(ctx: BotContext, chatId: number, threadId: number | undefined): Promise<void> {
+  // The host must have its own BAT credentials in env — that's what the relay
+  // hands back. Warn early instead of issuing a code that can't be redeemed.
+  if (!env.BAT_REMOTE_URL || !env.BAT_REMOTE_TOKEN || !env.BAT_REMOTE_FINGERPRINT) {
+    await ctx.reply(
+      '⚠️ 這台主機尚未設定 BAT 憑證。\n' +
+      '請先在主機 `.env` 填入 `BAT_REMOTE_URL` / `BAT_REMOTE_TOKEN` / `BAT_REMOTE_FINGERPRINT`（可從 BAT 的 Settings → Remote 取得），再執行 /pair bat。',
+      { parse_mode: 'Markdown' },
+    )
+    return
+  }
+
+  const code = createPairingCode(chatId, threadId, 'bat')
+  const { url: wsUrl, isPublic } = getRelayUrl()
+
+  const networkNote = isPublic
+    ? '🌐 公開 URL — 跨網路可用'
+    : '🏠 區網 URL — 需同個 WiFi（設 `RELAY_TUNNEL=true` 開啟跨網路）'
+
+  await ctx.reply(
+    `🤖 *BAT 遠端配對*\n\n` +
+    `在新機器的 ClaudeBot 目錄執行這行，即可自動取得並保存 BAT 憑證：\n` +
+    '```\n' +
+    `npx tsx src/remote/join-bat.ts ${wsUrl} ${code}\n` +
+    '```\n\n' +
+    `完成後把該專案的 AI 後端切成 \`bat-remote\` 即可使用。\n` +
+    `_配對碼 5 分鐘後過期，且只能領取一次_\n\n` +
     `${networkNote}`,
     { parse_mode: 'Markdown' },
   )

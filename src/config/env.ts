@@ -141,6 +141,18 @@ const envSchema = z.object({
       }
       return map
     }),
+  /** Better Agent Terminal (BAT) remote host, for the `bat-remote` AI backend.
+   *  All optional — the backend errors clearly at run time if URL/token/
+   *  fingerprint are unset. See docs/bat-remote-protocol.md. */
+  BAT_REMOTE_URL: z.string().default(''),
+  BAT_REMOTE_TOKEN: z.string().default(''),
+  /** SHA-256 leaf-cert fingerprint to pin (uppercase hex, colon-separated). */
+  BAT_REMOTE_FINGERPRINT: z.string().default(''),
+  /** Working directory the host opens the agent session in. Falls back to the
+   *  per-run projectPath when empty. */
+  BAT_REMOTE_CWD: z.string().default(''),
+  /** Agent preset id selecting the host-side agent flavor (e.g. claude-agent). */
+  BAT_REMOTE_AGENT_PRESET: z.string().default('claude-agent'),
 })
 
 export type Env = z.infer<typeof envSchema>
