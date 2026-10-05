@@ -28,12 +28,16 @@ export function jarvisPage(): string {
     --dim: #7e97b8;
     --line: rgba(140, 200, 255, .22);
     --warn: #ffb454;
+    /* reactor scale — every orb size derives from this so phones stay round & centred */
+    --k: 1;
+    --top: max(20vh, 90px);
   }
+  @media (max-width: 600px) { :root { --k: .72; --top: max(14vh, 70px); } }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
   body {
     background:
-      radial-gradient(ellipse 70% 55% at 50% 38%, rgba(40, 110, 190, .16), transparent 65%),
+      radial-gradient(circle calc(420px * var(--k)) at 50% calc(var(--top) + 160px * var(--k)), rgba(40, 110, 190, .16), transparent),
       radial-gradient(ellipse 120% 90% at 50% 110%, rgba(10, 35, 70, .35), transparent 60%),
       var(--bg);
     color: var(--ink);
@@ -65,8 +69,8 @@ export function jarvisPage(): string {
 
   /* ── The reactor ───────────────────────────────────── */
   #stage {
-    position: relative; width: 320px; height: 320px;
-    margin-top: max(20vh, 90px); flex-shrink: 0;
+    position: relative; width: calc(320px * var(--k)); height: calc(320px * var(--k));
+    margin-top: var(--top); flex-shrink: 0;
     display: grid; place-items: center;
     animation: arrive 1.2s cubic-bezier(.2, .8, .2, 1) both;
   }
@@ -76,7 +80,7 @@ export function jarvisPage(): string {
 
   /* wide soft halo */
   #halo {
-    width: 320px; height: 320px; border-radius: 50%; pointer-events: none;
+    width: calc(320px * var(--k)); height: calc(320px * var(--k)); border-radius: 50%; pointer-events: none;
     background: radial-gradient(circle, rgba(90, 180, 255, .14), transparent 60%);
     transition: opacity .6s; opacity: .6;
   }
@@ -86,7 +90,7 @@ export function jarvisPage(): string {
 
   /* tick ring — thin instrument bezel */
   #ring {
-    width: 230px; height: 230px; border-radius: 50%; pointer-events: none;
+    width: calc(230px * var(--k)); height: calc(230px * var(--k)); border-radius: 50%; pointer-events: none;
     background: repeating-conic-gradient(rgba(150, 210, 255, .5) 0 .5deg, transparent .5deg 6deg);
     -webkit-mask: radial-gradient(circle, transparent 64%, #000 65%, #000 70%, transparent 71%);
             mask: radial-gradient(circle, transparent 64%, #000 65%, #000 70%, transparent 71%);
@@ -99,7 +103,7 @@ export function jarvisPage(): string {
 
   /* the core */
   #dot {
-    width: 150px; height: 150px; border-radius: 50%; cursor: pointer;
+    width: calc(150px * var(--k)); height: calc(150px * var(--k)); border-radius: 50%; cursor: pointer;
     background:
       radial-gradient(circle at 50% 45%, #ffffff 0%, var(--core) 22%, rgba(70, 150, 230, .85) 48%, rgba(20, 50, 100, .9) 78%, rgba(8, 20, 44, 1) 100%);
     box-shadow:
@@ -126,7 +130,7 @@ export function jarvisPage(): string {
 
   /* listening ripples — hairline rings */
   .ripple {
-    width: 150px; height: 150px; border-radius: 50%; pointer-events: none;
+    width: calc(150px * var(--k)); height: calc(150px * var(--k)); border-radius: 50%; pointer-events: none;
     border: 1px solid rgba(160, 215, 255, .65); opacity: 0;
   }
   body[data-state="listening"] .ripple { animation: ripple 2.2s cubic-bezier(.2, .6, .35, 1) infinite; }
@@ -137,7 +141,7 @@ export function jarvisPage(): string {
   }
 
   /* thinking — twin counter-orbiting arcs */
-  #spinner { width: 200px; height: 200px; position: relative; pointer-events: none; opacity: 0; transition: opacity .4s; }
+  #spinner { width: calc(200px * var(--k)); height: calc(200px * var(--k)); position: relative; pointer-events: none; opacity: 0; transition: opacity .4s; }
   body[data-state="thinking"] #spinner { opacity: 1; }
   #spinner::before, #spinner::after {
     content: ''; position: absolute; inset: 0; border-radius: 50%;
