@@ -383,12 +383,19 @@ export function runClaude(options: RunOptions): void {
   )
 
   const mcpConfigs: string[] = []
+  // 設定檔不存在就跳過並警告 — 把不存在的路徑交給 CLI 會直接 exit 1
+  // (Invalid MCP configuration),所有任務全滅(2026-10 實案:自動修復部署功能死了兩個月)
+  const pushMcpConfig = (file: string) => {
+    const p = path.resolve('data', file)
+    if (existsSync(p)) mcpConfigs.push(p)
+    else console.error(`[claude-runner] MCP config missing, skipping: ${p} (check env flags vs data/ files)`)
+  }
   if (env.MCP_BROWSER) {
-    mcpConfigs.push(path.resolve('data', 'mcp-browser.json'))
+    pushMcpConfig('mcp-browser.json')
   }
   // Local agent-browser only when NOT remote — remote proxy provides ab_* tools
   if (env.MCP_AGENT_BROWSER && !isRemoteSession) {
-    mcpConfigs.push(path.resolve('data', 'mcp-agent-browser.json'))
+    pushMcpConfig('mcp-agent-browser.json')
   }
 
   // Dynamic remote pairing MCP config — find the agent's code
