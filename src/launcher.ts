@@ -37,7 +37,12 @@ async function notifyAdmin(message: string): Promise<void> {
 }
 
 function envFileToBotId(envFile: string): string {
-  return envFile === '.env' ? 'main' : envFile.replace('.env.', '')
+  // Must match the bot process's own deriveBotId() (heartbeat-writer.ts):
+  // '.env' → 'bot1'. The old 'main' mapping meant the launcher looked for
+  // data/heartbeat/main.json which never exists — so the watchdog silently
+  // never monitored the main bot, and graceful restart never saw it as idle
+  // (only the 10-min force deadline fired).
+  return envFile === '.env' ? 'bot1' : envFile.replace('.env.', '')
 }
 
 const root = process.cwd()
