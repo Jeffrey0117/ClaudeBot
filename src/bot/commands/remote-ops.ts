@@ -82,6 +82,14 @@ export async function ropenCommand(ctx: BotContext): Promise<void> {
   if ('error' in r) { await ctx.reply(r.error); return }
   if (!r.rest) { await ctx.reply('用法: `/ropen <機器> <url>`', { parse_mode: 'Markdown' }); return }
   const url = r.rest.split(/\s+/)[0]
+  // The URL lands inside a cmd string on the remote — validate hard (no quotes,
+  // no shell metachars, http/https only) to shut the injection path.
+  let parsedUrl: URL | null = null
+  try { parsedUrl = new URL(url) } catch { /* invalid */ }
+  if (!parsedUrl || !['http:', 'https:'].includes(parsedUrl.protocol) || /["&|^<>%\\]/.test(url)) {
+    await ctx.reply('❌ 只接受乾淨的 http/https 網址')
+    return
+  }
   try {
     // `start "" "<url>"` returns immediately (no timeout hang) and opens visibly.
     await remoteToolCall(r.code, 'remote_execute_command', { command: `start "" "${url}"` }, 20_000)
@@ -155,6 +163,11 @@ export async function rkillCommand(ctx: BotContext): Promise<void> {
   if ('error' in r) { await ctx.reply(r.error); return }
   if (!r.rest) { await ctx.reply('用法: `/rkill <機器> <程式名|PID>`', { parse_mode: 'Markdown' }); return }
   const target = r.rest.split(/\s+/)[0]
+  // Image names go inside quotes in a cmd string — restrict to safe chars.
+  if (!/^\d+$/.test(target) && !/^[\w.-]+$/.test(target)) {
+    await ctx.reply('❌ 程式名只接受英數、點、連字號（或純數字 PID）')
+    return
+  }
   const cmd = /^\d+$/.test(target) ? `taskkill /f /pid ${target}` : `taskkill /f /im "${target}"`
   try {
     const out = await remoteToolCall(r.code, 'remote_execute_command', { command: cmd }, 30_000)
@@ -191,6 +204,11 @@ export async function rpullCommand(ctx: BotContext): Promise<void> {
   const r = resolve(ctx, 'rpull')
   if ('error' in r) { await ctx.reply(r.error); return }
   if (!r.rest) { await ctx.reply('用法: `/rpull <機器> <專案目錄>`', { parse_mode: 'Markdown' }); return }
+  // Directory is interpolated into a cmd string — reject shell metachars.
+  if (/["&|;<>^`%\r\n]/.test(r.rest)) {
+    await ctx.reply('❌ 目錄路徑含不允許的字元')
+    return
+  }
   try {
     const out = await remoteToolCall(r.code, 'remote_execute_command', { command: `cd /d "${r.rest}" && git pull` }, 120_000)
     await ctx.reply(`🔄 ${r.label} > ${r.rest}\n\n${out.slice(0, 2000) || '(無輸出)'}`)

@@ -188,7 +188,7 @@ export async function transcribeVoiceFile(
       await execFileAsync(ffmpegPath ?? 'ffmpeg', [
         '-i', oggPath,
         '-ar', '16000', '-ac', '1', '-f', 'wav', '-y', wavPath,
-      ], { timeout: 30_000 })
+      ], { timeout: 30_000, windowsHide: true })
     } catch (ffErr) {
       console.error('[voice] ffmpeg error:', ffErr)
       return { text: null, error: 'ffmpeg 轉檔失敗' }
@@ -224,7 +224,7 @@ export async function transcribeLocalAudio(inputPath: string): Promise<VoiceResu
       await execFileAsync(ffmpegPath ?? 'ffmpeg', [
         '-i', inputPath,
         '-ar', '16000', '-ac', '1', '-f', 'wav', '-y', wavPath,
-      ], { timeout: 30_000 })
+      ], { timeout: 30_000, windowsHide: true })
     } catch (ffErr) {
       console.error('[voice] ffmpeg error (local):', ffErr)
       return { text: null, error: 'ffmpeg 轉檔失敗' }

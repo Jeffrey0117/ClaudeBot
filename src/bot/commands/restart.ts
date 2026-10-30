@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { BotContext } from '../../types/context.js'
 import { isProcessing, getQueueLength } from '../../claude/queue.js'
 import { getBotInstance } from '../bot.js'
+import { isRemoteOnly } from '../../auth/auth-service.js'
 
 // Exit code 42 = intentional restart (distinguished from crashes in launcher)
 const RESTART_EXIT_CODE = 42
@@ -87,6 +88,14 @@ export async function restartCommand(ctx: BotContext): Promise<void> {
 
 export async function handleRestartCallback(ctx: BotContext, data: string): Promise<boolean> {
   if (!data.startsWith('restart:')) return false
+
+  // Defense in depth: remote-only / Electron virtual users must never restart the host bot
+  // (auth middleware also blocks this prefix, but keep the gate local too).
+  const chatId = ctx.chat?.id
+  if (!chatId || isRemoteOnly(chatId)) {
+    await ctx.answerCbQuery('🚫 無權限').catch(() => {})
+    return true
+  }
 
   if (data === 'restart:force') {
     await ctx.editMessageText('🔄 強制重啟中...').catch(() => {})

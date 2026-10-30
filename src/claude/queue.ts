@@ -30,7 +30,7 @@ export function enqueue(item: QueueItem): void {
   const queue = queues.get(key) ?? []
   queue.push(item)
   queues.set(key, queue)
-  processNext(key)
+  void processNext(key).catch((err) => console.error('[queue] processNext failed:', err))
 }
 
 export function getQueueLength(projectPath?: string): number {
@@ -178,9 +178,17 @@ async function processNext(projectPath: string): Promise<void> {
   } catch (error) {
     console.error(`Queue processing failed for chat ${firstItem.chatId}, project ${projectPath}:`, error)
   } finally {
-    if (needsLock) await releaseLock(projectPath)
+    // releaseLock must not throw out of finally (unhandled rejection), and the
+    // follow-up drain is fire-and-forget — give it a catch.
+    if (needsLock) {
+      try {
+        await releaseLock(projectPath)
+      } catch (err) {
+        console.error('[queue] releaseLock failed:', err)
+      }
+    }
     processing.delete(projectPath)
     completionFn(projectPath)
-    processNext(projectPath)
+    void processNext(projectPath).catch((err) => console.error('[queue] processNext failed:', err))
   }
 }

@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { splitText, tailText } from '../../src/utils/text-splitter.js'
 
+function fenceCount(s: string): number {
+  return (s.match(/^[ \t]*```/gm) ?? []).length
+}
+
 describe('splitText', () => {
   it('returns the text unchanged when within the limit', () => {
     expect(splitText('hello', 10)).toEqual(['hello'])
@@ -29,6 +33,40 @@ describe('splitText', () => {
 
   it('splits on a single newline when there is no paragraph break', () => {
     expect(splitText('aaaa\nbbbb', 6)).toEqual(['aaaa', 'bbbb'])
+  })
+
+  it('keeps every chunk fence-balanced when splitting inside a code block', () => {
+    const code = '```ts\n' + 'const x = 1\n'.repeat(60) + '```\ntail'
+    const chunks = splitText(code, 200)
+    expect(chunks.length).toBeGreaterThan(1)
+    for (const chunk of chunks) {
+      expect(fenceCount(chunk) % 2).toBe(0)
+    }
+  })
+
+  it('reopens the fence with the original language', () => {
+    const code = 'intro\n\n```python\n' + 'print(1)\n'.repeat(60) + '```'
+    const chunks = splitText(code, 200)
+    const continuation = chunks.find((c, i) => i > 0 && c.startsWith('```python'))
+    expect(continuation).toBeDefined()
+  })
+
+  it('does not touch fence-free splits', () => {
+    const text = 'x'.repeat(500)
+    const joined = splitText(text, 100).join('')
+    expect(joined).toBe(text)
+  })
+
+  it('reconstructs full content (minus whitespace trims) for fenced text', () => {
+    const code = '```\n' + 'line\n'.repeat(100) + '```'
+    const chunks = splitText(code, 150)
+    // Strip the synthetic close/reopen fences, then compare line content
+    const lines = chunks
+      .join('\n')
+      .split('\n')
+      .filter((l) => l.trim() !== '```' && l.trim() !== '')
+    expect(lines.every((l) => l === 'line')).toBe(true)
+    expect(lines.length).toBe(100)
   })
 })
 

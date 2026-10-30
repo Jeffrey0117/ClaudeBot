@@ -14,6 +14,7 @@ import { parseDirectives, executeDirectives, stripDirectives } from '../utils/di
 import { parsePipeDirectives, executePipeDirectives, stripPipeDirectives } from '../utils/pipe-executor.js'
 import { parseUploadDirectives, executeUploadDirectives, stripUploadDirectives } from '../utils/upload-executor.js'
 import { createFakeContext } from '../utils/fake-context.js'
+import { isDangerousCmd, registerPendingCmd } from './cmd-guard.js'
 import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand, getPluginModule } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
@@ -290,6 +291,26 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
     const CMD_TIMEOUT_MS = 60_000
     for (const cmd of cmdDirectives) {
       try {
+        // Dangerous commands never auto-execute from AI output (prompt-injection
+        // path via /bv, /sniff, browse) — ask the user with an inline confirm.
+        if (isDangerousCmd(cmd.name)) {
+          const guardId = registerPendingCmd(cmd.name, cmd.command, ctx.item.chatId)
+          await ctx.telegram.sendMessage(
+            ctx.item.chatId,
+            `🛡️ AI 想執行 \`${cmd.command}\` — 需要你確認`,
+            {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: '✅ 執行', callback_data: `cmdrun:${guardId}` },
+                  { text: '❌ 略過', callback_data: `cmdskip:${guardId}` },
+                ]],
+              },
+            }
+          ).catch((err) => console.error('[queue] @cmd confirm send failed:', err))
+          continue
+        }
+
         const fakeCtx = createFakeContext({
           chatId: ctx.item.chatId,
           commandText: cmd.command,
@@ -414,7 +435,13 @@ async function sendResponseChunks(
       try {
         await ctx.telegram.sendMessage(ctx.item.chatId, chunk, { parse_mode: 'Markdown', ...extra })
       } catch {
-        await ctx.telegram.sendMessage(ctx.item.chatId, chunk, Object.keys(extra).length > 0 ? extra : undefined)
+        // Plain-text fallback for broken Markdown — but a hard failure here
+        // (429, network) must not abort the remaining chunks.
+        try {
+          await ctx.telegram.sendMessage(ctx.item.chatId, chunk, Object.keys(extra).length > 0 ? extra : undefined)
+        } catch (err) {
+          console.error('[queue] chunk send failed:', err instanceof Error ? err.message : err)
+        }
       }
     }
   }
@@ -528,13 +555,18 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
     const aiLabel = formatAILabel(resolvedAI)
     const backend = resolvedAI.backend
 
+    // A failed status send (e.g. 429) must not throw the whole prompt away —
+    // run without the status message instead.
     const statusMsg = isDashboard
       ? null
       : await telegram.sendMessage(
           item.chatId,
           `\u{1F680} *[${tag}]* \u{8655}\u{7406}\u{4E2D}...\n\`${aiLabel}\``,
           { parse_mode: 'Markdown' }
-        )
+        ).catch((err) => {
+          console.error('[queue] status message send failed:', err instanceof Error ? err.message : err)
+          return null
+        })
 
     // One-time warning if project has no CLAUDE.md (slows down Claude significantly)
     // Skip for remote paths (remote:label) — CLAUDE.md is on the remote machine

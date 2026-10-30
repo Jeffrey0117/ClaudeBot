@@ -60,6 +60,7 @@ try {
     cwd: projectRoot,
     detached: true,
     stdio: ['ignore', 'ignore', logFd],
+    windowsHide: true,
     env: { ...process.env, ELECTRON_ENABLE_LOGGING: 'true' },
   })
 } catch (err) {

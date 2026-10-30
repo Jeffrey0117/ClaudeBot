@@ -30,6 +30,17 @@ const DANGEROUS_PATTERNS: readonly RegExp[] = [
   /\bshutdown\b/i,
   /\breboot\b/i,
   /\binit\s+[06]\b/,
+  // Flag-order-tolerant destructive variants the original patterns miss
+  /\brm\s+(?=[^\n]*\s-\w*r)(?=[^\n]*\s-\w*f)/i,          // rm … -r … -f (any order, split flags)
+  /\bdel\s+(?=[^\n]*\/s)(?=[^\n]*\/q)/i,                  // del /s /q (any order)
+  /\b(?:rd|rmdir)\s+(?:\/\w+\s+)*\/s\b/i,                 // rd /s, rmdir /q /s
+  /Remove-Item\b(?=[^\n]*-Recurse)(?=[^\n]*-Force)/i,     // PS recursive force delete
+  /\bvssadmin\s+delete/i,                                 // shadow copy wipe
+  /\bcipher\s+\/w/i,                                      // free-space wipe
+  /\breg\s+(?:delete|add)\s+HKLM/i,                       // machine-level registry edits
+  /\bbcdedit\b/i,
+  /\bdiskpart\b/i,
+  /\bwevtutil\s+cl\b/i,                                   // event-log clearing
 ]
 
 function isDangerousCommand(command: string): string | null {

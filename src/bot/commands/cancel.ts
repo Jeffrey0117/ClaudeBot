@@ -1,5 +1,6 @@
 import type { BotContext } from '../../types/context.js'
 import { cancelAnyRunning, isAnyRunning } from '../../ai/registry.js'
+import { clearQueue, getQueueLength } from '../../claude/queue.js'
 import { getUserState } from '../state.js'
 import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
 import { env } from '../../config/env.js'
@@ -35,17 +36,30 @@ export async function cancelCommand(ctx: BotContext): Promise<void> {
 
   if (project && isAnyRunning(project.path)) {
     const cancelled = cancelAnyRunning(project.path)
+    // Cancel means "stop everything I queued", not just the running turn —
+    // otherwise queued prompts fire right after the kill.
+    const dropped = clearQueue(project.path).length
+    const droppedNote = dropped > 0 ? `（佇列中 ${dropped} 筆一併清除）` : ''
     if (cancelled) {
-      await ctx.reply(`\u{1F6D1} \u{5DF2}\u{53D6}\u{6D88} *${project.name}* \u{7684}\u{7A0B}\u{5E8F}`, { parse_mode: 'Markdown' })
+      await ctx.reply(`\u{1F6D1} \u{5DF2}\u{53D6}\u{6D88} *${project.name}* \u{7684}\u{7A0B}\u{5E8F}${droppedNote}`, { parse_mode: 'Markdown' })
     } else {
-      await ctx.reply('\u{26A0}\u{FE0F} \u{7121}\u{6CD5}\u{53D6}\u{6D88}\u{7A0B}\u{5E8F}\u{3002}')
+      await ctx.reply(`\u{26A0}\u{FE0F} \u{7121}\u{6CD5}\u{53D6}\u{6D88}\u{7A0B}\u{5E8F}\u{3002}${droppedNote}`)
     }
     return
   }
 
   if (!project && isAnyRunning()) {
     cancelAnyRunning()
-    await ctx.reply('\u{1F6D1} \u{5DF2}\u{53D6}\u{6D88}\u{6240}\u{6709}\u{7A0B}\u{5E8F}\u{3002}')
+    const dropped = clearQueue().length
+    await ctx.reply(`\u{1F6D1} \u{5DF2}\u{53D6}\u{6D88}\u{6240}\u{6709}\u{7A0B}\u{5E8F}\u{3002}${dropped > 0 ? `（佇列清除 ${dropped} 筆）` : ''}`)
+    return
+  }
+
+  // Nothing running, but prompts may still be queued (e.g. waiting on a lock)
+  const pendingCount = project ? getQueueLength(project.path) : getQueueLength()
+  if (pendingCount > 0) {
+    const dropped = project ? clearQueue(project.path).length : clearQueue().length
+    await ctx.reply(`\u{1F9F9} 已清除佇列中的 ${dropped} 筆任務。`)
     return
   }
 

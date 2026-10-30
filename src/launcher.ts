@@ -37,7 +37,12 @@ async function notifyAdmin(message: string): Promise<void> {
 }
 
 function envFileToBotId(envFile: string): string {
-  return envFile === '.env' ? 'main' : envFile.replace('.env.', '')
+  // Must match the bot process's own deriveBotId() (heartbeat-writer.ts):
+  // '.env' → 'bot1'. The old 'main' mapping meant the launcher looked for
+  // data/heartbeat/main.json which never exists — so the watchdog silently
+  // never monitored the main bot, and graceful restart never saw it as idle
+  // (only the 10-min force deadline fired).
+  return envFile === '.env' ? 'bot1' : envFile.replace('.env.', '')
 }
 
 const root = process.cwd()
@@ -392,7 +397,7 @@ function startRestartAllWatcher(): void {
       // Without this, bots may run stale compiled code even though tsx reads src/.
       console.log('[launcher] restart-all signal received — building before restart...')
       try {
-        execSync('npx tsc', { cwd: root, timeout: 30_000, stdio: 'pipe' })
+        execSync('npx tsc', { cwd: root, timeout: 30_000, stdio: 'pipe', windowsHide: true })
         console.log('[launcher] build complete')
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -460,7 +465,7 @@ function startGracefulRestartWatcher(): void {
         unlinkSync(RESTART_GRACEFUL_SIGNAL)
         console.log('[launcher] 優雅重啟信號 — 編譯後等各 bot 閒置再重啟...')
         try {
-          execSync('npx tsc', { cwd: root, timeout: 30_000, stdio: 'pipe' })
+          execSync('npx tsc', { cwd: root, timeout: 30_000, stdio: 'pipe', windowsHide: true })
           console.log('[launcher] 編譯完成')
         } catch (err) {
           console.error(`[launcher] 編譯失敗（仍繼續）: ${err instanceof Error ? err.message : String(err)}`)

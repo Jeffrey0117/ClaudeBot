@@ -274,6 +274,7 @@ function startCloudflared(port: number): Promise<string> {
     const proc = spawn(bin, ['tunnel', '--config', 'NUL', '--url', `http://localhost:${port}`], {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
+      windowsHide: true,
     })
 
     cfProcess = proc
