@@ -53,7 +53,8 @@ function saveStates(): void {
   }
 
   try {
-    const tmp = `${STATE_FILE}.tmp`
+    // Unique tmp name — sibling bot processes write this file too.
+    const tmp = `${STATE_FILE}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`
     writeFileSync(tmp, JSON.stringify(all, null, 2))
     renameSync(tmp, STATE_FILE)
   } catch (err) {

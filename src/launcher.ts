@@ -392,7 +392,7 @@ function startRestartAllWatcher(): void {
       // Without this, bots may run stale compiled code even though tsx reads src/.
       console.log('[launcher] restart-all signal received — building before restart...')
       try {
-        execSync('npx tsc', { cwd: root, timeout: 30_000, stdio: 'pipe' })
+        execSync('npx tsc', { cwd: root, timeout: 30_000, stdio: 'pipe', windowsHide: true })
         console.log('[launcher] build complete')
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -460,7 +460,7 @@ function startGracefulRestartWatcher(): void {
         unlinkSync(RESTART_GRACEFUL_SIGNAL)
         console.log('[launcher] 優雅重啟信號 — 編譯後等各 bot 閒置再重啟...')
         try {
-          execSync('npx tsc', { cwd: root, timeout: 30_000, stdio: 'pipe' })
+          execSync('npx tsc', { cwd: root, timeout: 30_000, stdio: 'pipe', windowsHide: true })
           console.log('[launcher] 編譯完成')
         } catch (err) {
           console.error(`[launcher] 編譯失敗（仍繼續）: ${err instanceof Error ? err.message : String(err)}`)

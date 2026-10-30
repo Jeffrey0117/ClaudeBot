@@ -87,8 +87,13 @@ async function tryFastIntent(ws: WebSocket, text: string): Promise<boolean> {
         await remoteToolCall(pairing.code, 'remote_execute_command', { command: intent.command }, 30_000)
       }
     } else if (intent.spawnArgs) {
-      // No paired machine — GUI launches still work on the bot's own machine
-      spawn('cmd', [...intent.spawnArgs], { detached: true, stdio: 'ignore', shell: false }).unref()
+      // No paired machine — GUI launches still work on the bot's own machine.
+      // windowsHide keeps the cmd shell invisible; the error handler stops a
+      // spawn ENOENT (async event) from escaping to uncaughtException and
+      // killing the whole bot.
+      const child = spawn('cmd', [...intent.spawnArgs], { detached: true, stdio: 'ignore', shell: false, windowsHide: true })
+      child.on('error', (err) => console.error('[jarvis] spawn failed:', err.message))
+      child.unref()
     } else {
       return false // CDP-only intent with no pairing — let the AI handle it
     }

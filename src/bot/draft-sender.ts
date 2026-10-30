@@ -33,6 +33,10 @@ interface DraftState {
   lastUpdate: number
   /** Is this a private chat? */
   readonly isPrivate: boolean
+  /** Pause edits until this timestamp after a Telegram 429 */
+  cooldownUntil: number
+  /** Consecutive edit errors already logged (cap log spam) */
+  errorsLogged: number
 }
 
 const activeDrafts = new Map<number, DraftState>()
@@ -97,6 +101,8 @@ export async function startDraft(
       lastText: initialText,
       lastUpdate: Date.now(),
       isPrivate: true,
+      cooldownUntil: 0,
+      errorsLogged: 0,
     })
 
     return result.message_id
@@ -117,14 +123,16 @@ export async function updateDraft(
   const state = activeDrafts.get(chatId)
   if (!state || !state.isPrivate) return
 
-  // Throttle: skip if too soon or text change too small
   const now = Date.now()
+  if (now < state.cooldownUntil) return // backing off after a 429
+
+  // Throttle: never edit faster than THROTTLE_MS (big deltas used to bypass the
+  // time floor and spam the API); small deltas additionally wait up to 1.5s.
   const timeDiff = now - state.lastUpdate
   const textDiff = Math.abs(newText.length - state.lastText.length)
 
-  if (timeDiff < THROTTLE_MS && textDiff < MIN_DELTA) {
-    return
-  }
+  if (timeDiff < THROTTLE_MS) return
+  if (textDiff < MIN_DELTA && timeDiff < 1500) return
 
   // Only stream the live TAIL: Telegram caps messages at 4096 chars, so for a
   // long /deep stream sending the whole accumulated text every 300ms both
@@ -147,9 +155,26 @@ export async function updateDraft(
 
     state.lastText = displayText
     state.lastUpdate = now
+    state.errorsLogged = 0
   } catch (err) {
-    // Silently ignore update errors (user experience degrades gracefully)
-    // console.error('[draft] updateDraft failed:', err)
+    if (isNotModifiedError(err)) {
+      state.lastText = displayText
+      state.lastUpdate = now
+      return
+    }
+    // Telegram 429: honor retry_after instead of hammering the API
+    const retryAfter = (err as { response?: { parameters?: { retry_after?: number } } })
+      ?.response?.parameters?.retry_after
+    if (typeof retryAfter === 'number') {
+      state.cooldownUntil = now + (retryAfter + 1) * 1000
+      console.error(`[draft] rate limited, backing off ${retryAfter}s (chat ${chatId})`)
+      return
+    }
+    // Other errors: log the first few, then go quiet (finalizeDraft still recovers)
+    if (state.errorsLogged < 3) {
+      state.errorsLogged++
+      console.error('[draft] updateDraft failed:', err instanceof Error ? err.message : err)
+    }
   }
 }
 
