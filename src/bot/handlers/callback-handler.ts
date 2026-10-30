@@ -72,6 +72,8 @@ export async function callbackHandler(ctx: BotContext): Promise<void> {
   } else if (data.startsWith('bookmark:remove:')) {
     const slot = parseInt(data.slice('bookmark:remove:'.length), 10)
     await handleBookmarkRemove(ctx, chatId, slot)
+  } else if (data.startsWith('cmdrun:') || data.startsWith('cmdskip:')) {
+    await handleCmdGuard(ctx, chatId, data)
   } else {
     await ctx.answerCbQuery()
   }
@@ -419,3 +421,56 @@ async function handleUnpairSelect(ctx: BotContext, chatId: number, label: string
   }
 }
 
+
+/** AI-initiated dangerous @cmd — user tapped 執行/略過 on the guard message. */
+async function handleCmdGuard(ctx: BotContext, chatId: number, data: string): Promise<void> {
+  const run = data.startsWith('cmdrun:')
+  const id = data.slice(run ? 'cmdrun:'.length : 'cmdskip:'.length)
+
+  const { takePendingCmd } = await import('../cmd-guard.js')
+  const pendingCmd = takePendingCmd(id, chatId)
+  if (!pendingCmd) {
+    await ctx.answerCbQuery('已過期或已處理')
+    await ctx.editMessageText('⌛ 此確認已過期').catch(() => {})
+    return
+  }
+
+  if (!run) {
+    await ctx.answerCbQuery('已略過')
+    await ctx.editMessageText(`❌ 已略過 \`${pendingCmd.command}\``, { parse_mode: 'Markdown' }).catch(() => {})
+    return
+  }
+
+  await ctx.answerCbQuery('執行中…')
+  await ctx.editMessageText(`▶️ 執行 \`${pendingCmd.command}\`…`, { parse_mode: 'Markdown' }).catch(() => {})
+
+  // Lazy imports — bot.ts imports this handler, so a static import would cycle.
+  const [{ createFakeContext }, { getCoreCommandHandler }, { dispatchPluginCommand, isPluginCommand }] =
+    await Promise.all([
+      import('../../utils/fake-context.js'),
+      import('../bot.js'),
+      import('../../plugins/loader.js'),
+    ])
+
+  const fakeCtx = createFakeContext({ chatId, commandText: pendingCmd.command, telegram: ctx.telegram })
+  const coreHandler = getCoreCommandHandler(pendingCmd.name)
+  const handler = coreHandler
+    ?? (isPluginCommand(pendingCmd.name) ? (c: BotContext) => dispatchPluginCommand(pendingCmd.name, c) : null)
+
+  if (!handler) {
+    await ctx.editMessageText(`⚠️ 找不到指令 ${pendingCmd.command}`).catch(() => {})
+    return
+  }
+
+  try {
+    await Promise.race([
+      handler(fakeCtx),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('執行逾時 (60s)')), 60_000)
+      ),
+    ])
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await ctx.telegram.sendMessage(chatId, `⚠️ ${pendingCmd.command} 失敗: ${msg.slice(0, 300)}`).catch(() => {})
+  }
+}

@@ -30,7 +30,10 @@ process.on('uncaughtException', (error) => {
     msg.includes('net::ERR_') ||
     msg.includes('Session closed') ||
     msg.includes('Connection closed') ||
-    msg.includes('Timeout') ||
+    // Playwright-shaped timeouts only ("Timeout 30000ms exceeded", TimeoutError) —
+    // a bare includes('Timeout') used to swallow unrelated fatal errors.
+    /\bTimeout\s+\d+\s*ms\b/i.test(msg) ||
+    /\bTimeoutError\b/.test(msg) ||
     msg.includes('截圖逾時')
   if (isPlaywrightCrash) {
     console.error('[fatal] Playwright crash — suppressed, bot continues')
