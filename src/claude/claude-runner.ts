@@ -325,12 +325,17 @@ export function runClaude(options: RunOptions): void {
     }
   }
 
-  // For short or affirmative replies, inject context so Claude knows what
-  // the user is referring to after context compression.
-  // Prefers structured [CTX] digest; falls back to raw response tail.
-  if (prompt.length <= 15 || (prompt.length <= 80 && looksAffirmative(prompt))) {
-    const isAffirmative = looksAffirmative(prompt)
-    const injection = buildContextInjection(contextKey, isAffirmative)
+  // Inject the stored [CTX] digest so Claude keeps continuity when it would
+  // otherwise be amnesiac:
+  //  - sessionId === null: a brand-new session (first turn, TTL-expired after
+  //    4h idle, bot-restarted with no on-disk session, or stale-session retry).
+  //    This was the big gap — a normal-length prompt after idle used to open a
+  //    fresh session with ZERO context and no warning.
+  //  - short / affirmative replies: user is referring to the previous turn.
+  const isNewSession = sessionId === null
+  const isShortRef = prompt.length <= 15 || (prompt.length <= 80 && looksAffirmative(prompt))
+  if (isNewSession || isShortRef) {
+    const injection = buildContextInjection(contextKey, looksAffirmative(prompt))
     if (injection) {
       parts.push(injection)
     }

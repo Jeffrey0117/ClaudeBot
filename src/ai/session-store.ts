@@ -25,6 +25,13 @@ const sessionTokens = new Map<string, number>()
 /** Session keys we've already nudged to use /new (one reminder per session). */
 const remindedNew = new Set<string>()
 
+/** Session keys that just auto-expired (idle > TTL) — consumed once by the
+ *  queue processor to tell the user a fresh session was opened. */
+const expiryNotices = new Set<string>()
+
+/** When each session was first created (ms) — for /status session age. */
+const sessionStartedAt = new Map<string, number>()
+
 /** Fraction of ROTATE_AT_TOKENS at which we proactively suggest /new
  *  (fires before the auto-rotation so the user has a heads-up). */
 const REMIND_TOKEN_FRACTION = 0.6
@@ -158,7 +165,10 @@ export function getAISessionId(backend: AIBackend, projectPath: string): string 
     mySessions.delete(key)
     lastActivity.delete(key)
     sessionTokens.delete(key)
+    promptCounts.delete(key) // was leaking — stale count skewed rotation after expiry
     remindedNew.delete(key)
+    sessionStartedAt.delete(key)
+    expiryNotices.add(key) // so the UI can say "opened a fresh session"
     saveSessions()
     return null
   }
@@ -184,10 +194,45 @@ export function getAISessionId(backend: AIBackend, projectPath: string): string 
 
 export function setAISessionId(backend: AIBackend, projectPath: string, sessionId: string): void {
   const key = makeKey(backend, projectPath)
+  const isNew = !mySessions.has(key)
   mySessions.set(key, sessionId)
   lastActivity.set(key, Date.now())
   promptCounts.set(key, (promptCounts.get(key) ?? 0) + 1)
+  if (isNew && !sessionStartedAt.has(key)) sessionStartedAt.set(key, Date.now())
   saveSessions()
+}
+
+/** Consume the one-shot "this session just auto-expired" flag. */
+export function consumeExpiryNotice(backend: AIBackend, projectPath: string): boolean {
+  const key = makeKey(backend, projectPath)
+  return expiryNotices.delete(key)
+}
+
+export interface SessionInfo {
+  readonly exists: boolean
+  readonly ageMs: number
+  readonly idleMs: number
+  readonly promptCount: number
+  readonly tokens: number
+  /** Occupancy fraction of ROTATE_AT_TOKENS (0–1+), or 0 if unknown. */
+  readonly tokenFraction: number
+}
+
+/** Snapshot of the current session for /status. */
+export function getSessionInfo(backend: AIBackend, projectPath: string): SessionInfo {
+  const key = makeKey(backend, projectPath)
+  const exists = mySessions.has(key)
+  const started = sessionStartedAt.get(key) ?? 0
+  const last = lastActivity.get(key) ?? 0
+  const tokens = sessionTokens.get(key) ?? 0
+  return {
+    exists,
+    ageMs: started ? Date.now() - started : 0,
+    idleMs: last ? Date.now() - last : 0,
+    promptCount: promptCounts.get(key) ?? 0,
+    tokens,
+    tokenFraction: tokens > 0 ? tokens / env.ROTATE_AT_TOKENS : 0,
+  }
 }
 
 export function clearAISession(backend: AIBackend, projectPath: string): boolean {
@@ -196,7 +241,9 @@ export function clearAISession(backend: AIBackend, projectPath: string): boolean
   // Reset occupancy so the fresh session doesn't inherit a stale token count
   // and rotate immediately on its first turn.
   sessionTokens.delete(key)
+  promptCounts.delete(key)
   remindedNew.delete(key)
+  sessionStartedAt.delete(key)
   if (deleted) saveSessions()
   return deleted
 }
