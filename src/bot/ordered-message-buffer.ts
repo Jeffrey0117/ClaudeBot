@@ -53,6 +53,10 @@ interface ChatBuffer {
 const buffers = new Map<string, ChatBuffer>()
 
 const TEXT_COLLECT_MS = 1_000
+/** A lone text message (no pending voice, nothing else buffered) doesn't need
+ *  the full coalescing window — send it fast so single prompts feel snappy.
+ *  A second message arriving within this window bumps back to TEXT_COLLECT_MS. */
+const QUICK_COLLECT_MS = 350
 const STALE_MS = 30_000
 const STALE_CHECK_MS = 30_000
 
@@ -94,10 +98,15 @@ function getOrCreate(key: string): ChatBuffer {
 
 function resetTimer(key: string, buf: ChatBuffer): void {
   if (buf.flushTimer) clearTimeout(buf.flushTimer)
+  // Fast path for a single lone text entry; full window once more piles up or
+  // a voice message is still transcribing (ordering must hold).
+  const loneText = buf.voiceActive === 0 && buf.entries.size === 1 &&
+    [...buf.entries.values()][0]?.type === 'text'
+  const delay = loneText ? QUICK_COLLECT_MS : TEXT_COLLECT_MS
   buf.flushTimer = setTimeout(() => {
     buf.flushTimer = null
     tryFlushByKey(key)
-  }, TEXT_COLLECT_MS)
+  }, delay)
 }
 
 /**

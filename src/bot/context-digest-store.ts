@@ -26,6 +26,8 @@ export interface ContextDigest {
 interface StoredContext {
   readonly digest: ContextDigest | null
   readonly rawTail: string
+  /** ms epoch when this context was saved; absent on pre-2026-10-31 data. */
+  readonly savedAt?: number
 }
 
 const BOT_ID = env.BOT_TOKEN.slice(-6)
@@ -123,6 +125,7 @@ export function setContext(projectPath: string, fullText: string, digest: Contex
   store.set(projectPath, {
     digest,
     rawTail: fullText.slice(-MAX_RAW_LENGTH),
+    savedAt: Date.now(),
   })
   persistStore()
 }
@@ -154,11 +157,15 @@ export function buildContextInjection(projectPath: string, isAffirmative: boolea
     ? `\n完整前次回覆檔案: ${fullFilePath}\n如果摘要不夠詳細，用 Read 工具讀取完整回覆。`
     : ''
 
+  // Age hint: a digest from hours ago may be a DIFFERENT task — let Claude judge
+  // relevance instead of blindly assuming continuity.
+  const ageHint = ctx.savedAt ? buildAgeHint(Date.now() - ctx.savedAt) : ''
+
   // Prefer structured digest
   if (ctx.digest) {
     const actionHint = buildActionHint(ctx.digest, isAffirmative)
     const lines = [
-      `[前次對話摘要]`,
+      `[前次對話摘要]${ageHint}`,
       `狀態: ${ctx.digest.status}`,
       `摘要: ${ctx.digest.summary}`,
       `待決: ${ctx.digest.pending}`,
@@ -184,10 +191,20 @@ export function buildContextInjection(projectPath: string, isAffirmative: boolea
     const hint = isAffirmative
       ? '使用者的短回覆是在確認/同意你上次提出的內容。請根據上次回覆繼續執行，不要只回「收到」。'
       : '以下是你上次的回覆，使用者的訊息是針對這個內容。'
-    return `[前次回覆參考]\n${hint}\n${ctx.rawTail}${fileHint}\n[/前次回覆參考]`
+    return `[前次回覆參考]${ageHint}\n${hint}\n${ctx.rawTail}${fileHint}\n[/前次回覆參考]`
   }
 
   return null
+}
+
+/** Human age hint appended to an injected digest. Empty for very recent (<10 min). */
+export function buildAgeHint(ageMs: number): string {
+  const min = ageMs / 60000
+  if (min < 10) return ''
+  if (min < 90) return ` (約 ${Math.round(min)} 分鐘前)`
+  const hours = min / 60
+  if (hours < 36) return ` (約 ${Math.round(hours)} 小時前，可能是不同任務，請自行判斷關聯性)`
+  return ` (約 ${Math.round(hours / 24)} 天前，很可能是不同任務，若無關就忽略這段摘要)`
 }
 
 /** Generate a specific action hint based on digest status + reply type. */

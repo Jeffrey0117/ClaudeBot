@@ -18,7 +18,7 @@ import { isDangerousCmd, registerPendingCmd } from './cmd-guard.js'
 import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand, getPluginModule } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
-import { getAISessionId, shouldRotateSession, rotateSession, setSessionTokens, needsNewReminder, markNewReminded } from '../ai/session-store.js'
+import { getAISessionId, shouldRotateSession, rotateSession, setSessionTokens, needsNewReminder, markNewReminded, consumeExpiryNotice } from '../ai/session-store.js'
 import { getActiveMachine } from './state.js'
 import { detectChoices } from '../utils/choice-detector.js'
 import { cleanMarkdown } from '../utils/markdown-cleaner.js'
@@ -33,7 +33,7 @@ import { recordCost } from '../plugins/cost/index.js'
 import { recordActivity } from '../plugins/stats/activity-logger.js'
 import { emitResponseChunk, emitResponseComplete, emitResponseError } from '../dashboard/response-broker.js'
 import { setLastResponse } from './last-response-store.js'
-import { extractDigest, setContext, buildContextInjection } from './context-digest-store.js'
+import { extractDigest, setContext } from './context-digest-store.js'
 import { recordResponse } from './memory-consolidator.js'
 import { autoCommitAndPush } from '../utils/auto-commit.js'
 import { reportCloudPipeDeploy } from './cloudpipe-deploy-report.js'
@@ -744,13 +744,11 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       // conversation keeps continuity regardless of this message's length —
       // claude-runner only auto-injects the digest for short/affirmative replies.
       const resolvedBackend = resolveBackend(resolvedAI.backend)
-      let runPrompt = item.prompt
       if (shouldRotateSession(resolvedBackend, item.project.path)) {
         const count = rotateSession(resolvedBackend, item.project.path)
-        const injection = buildContextInjection(item.project.path, false)
-        if (injection) {
-          runPrompt = `${injection}\n\n${item.prompt}`
-        }
+        // No prepend here — rotation clears the session, so freshSessionId below
+        // comes back null and claude-runner injects the [CTX] digest itself
+        // (single injection path; previously this double-injected on short replies).
         if (!isDashboard) {
           telegram.sendMessage(
             item.chatId,
@@ -764,9 +762,20 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       // This ensures we use the latest session after previous tasks complete.
       const freshSessionId = getAISessionId(resolvedBackend, item.project.path)
 
+      // TTL expiry: getAISessionId just auto-expired an idle (>4h) session and
+      // opened a fresh one. Tell the user so "amnesia" is never silent — the
+      // runner is seeding the stored digest, so continuity is preserved.
+      if (!isDashboard && freshSessionId === null && consumeExpiryNotice(resolvedBackend, item.project.path)) {
+        telegram.sendMessage(
+          item.chatId,
+          `\u{1F9E0} *[${tag}]* \u{8DDD}\u{4E0A}\u{6B21}\u{5C0D}\u{8A71}\u{8D85}\u{904E} 4 \u{5C0F}\u{6642}\u{FF0C}\u{5DF2}\u{958B}\u{65B0} session\u{FF08}\u{7528}\u{4E0A}\u{6B21}\u{6458}\u{8981}\u{63A5}\u{7E8C}\u{FF09}\u{3002}\u{8981}\u{5F9E}\u{982D}\u{958B}\u{5C31}\u{6253} /new`,
+          { parse_mode: 'Markdown', disable_notification: true },
+        ).catch(() => {})
+      }
+
       const runner = getRunner(backend)
       runner.run({
-        prompt: runPrompt,
+        prompt: item.prompt,
         projectPath: item.project.path,
         projectName: item.project.name,
         model: resolvedAI.model,
