@@ -51,7 +51,12 @@ export async function generateSuggestions(
   responseText: string,
   projectName: string,
 ): Promise<readonly string[]> {
-  if (process.env.SUGGESTIONS_DISABLED === '1') return []
+  // Opt-in, not opt-out. This cold-starts a whole extra Claude CLI process
+  // after *every* reply that has no detected choices — a hidden per-turn cost
+  // in tokens, money and (on Windows) a fresh process launch, plus one more
+  // Telegram message of clutter, for follow-up buttons that are optional
+  // polish. Set SUGGESTIONS_ENABLED=1 to turn it back on.
+  if (process.env.SUGGESTIONS_ENABLED !== '1') return []
   // Shed load instead of piling up CLI processes when many replies land together.
   if (inFlightSuggestions >= MAX_INFLIGHT_SUGGESTIONS) return []
 
@@ -74,7 +79,9 @@ export async function generateSuggestions(
       '--output-format', 'stream-json',
       '--model', 'haiku',
       '--max-turns', '1',
-      '--dangerously-skip-permissions',
+      // No --dangerously-skip-permissions: this turn only asks for a JSON
+      // array and uses no tools, so it has nothing to approve. The 8s timeout
+      // below bounds the downside if a future prompt ever did need one.
       '--append-system-prompt', SYSTEM_PROMPT,
     ]
 
