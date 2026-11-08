@@ -7,7 +7,7 @@ import { readFile, writeFile, readdir, stat, mkdir, open, rm, rename, copyFile }
 import { resolve, join, relative, sep, isAbsolute, dirname, basename } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { execFile } from 'node:child_process'
-import { MAX_FILE_SIZE, MAX_TRANSFER_SIZE, MAX_SEARCH_RESULTS, IS_WIN } from './index.js'
+import { MAX_FILE_SIZE, MAX_TRANSFER_SIZE, MAX_SEARCH_RESULTS, IS_WIN } from './constants.js'
 
 export async function handleReadFile(args: Record<string, unknown>, validatePath: (p: string) => string): Promise<string> {
   const filePath = validatePath(String(args.path))

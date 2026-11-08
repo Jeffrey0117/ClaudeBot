@@ -16,6 +16,7 @@ import {
 import { sniff } from '../../bot/vision/sniffer.js'
 import { runUserscript } from '../../bot/vision/userscript-runner.js'
 import { validateUrl } from '../../utils/validate-url.js'
+import { isDangerousCommand } from './dangerous-commands.js'
 
 const AB_TIMEOUT_MS = 60_000 // 60s — heavy pages like Gmail need time to load
 
@@ -284,7 +285,11 @@ export async function handleBrowserConnect(): Promise<string> {
  * of bubbling up as an unhandled 'error' event — which would otherwise crash the
  * whole agent via process 'uncaughtException'.
  */
-export function handleSpawnDetached(args: Record<string, unknown>, baseDir: string): Promise<string> {
+export function handleSpawnDetached(
+  args: Record<string, unknown>,
+  baseDir: string,
+  validatePath: (p: string) => string,
+): Promise<string> {
   const cmd = String(args.command || 'npx')
   let cmdArgs: readonly string[] = []
   if (args.args) {
@@ -295,7 +300,22 @@ export function handleSpawnDetached(args: Record<string, unknown>, baseDir: stri
       return Promise.resolve('Error: `args` must be a JSON array string, e.g. ["main.js","--flag"]')
     }
   }
-  const cwd = args.cwd ? String(args.cwd) : baseDir
+
+  // This was the one tool in the dispatcher that received baseDir instead of
+  // validatePath and never consulted the blacklist, which made the guard on
+  // remote_execute_command trivially sidesteppable: a command it rejects runs
+  // fine here the moment it contains shell metacharacters (useShell below),
+  // detached and outside baseDir. The AI reaching this only has to be confused
+  // by a prompt-injected page — exactly what the blacklist exists to catch.
+  const danger = isDangerousCommand([cmd, ...cmdArgs].join(' '))
+  if (danger) return Promise.resolve(`Error: ${danger}`)
+
+  let cwd: string
+  try {
+    cwd = args.cwd ? validatePath(String(args.cwd)) : baseDir
+  } catch (err) {
+    return Promise.resolve(`Error: ${err instanceof Error ? err.message : String(err)}`)
+  }
 
   // Use a shell only when a full command line was given (no separate args and
   // the command contains shell metacharacters). Keeps the executable+args path

@@ -12,12 +12,15 @@ import { handleIgPost } from './ig-tools.js'
 
 export { createPathValidator } from './path-validator.js'
 
-export const MAX_FILE_SIZE = 500 * 1024
-export const MAX_TRANSFER_SIZE = 20 * 1024 * 1024 // 20 MB for file transfer
-export const EXEC_TIMEOUT_MS = 120_000
-export const MAX_OUTPUT_SIZE = 1024 * 1024 // 1 MB output cap
-export const MAX_SEARCH_RESULTS = 50
-export const IS_WIN = process.platform === 'win32'
+// Declared in a leaf module — see constants.ts for why this cycle was fatal.
+export {
+  MAX_FILE_SIZE,
+  MAX_TRANSFER_SIZE,
+  EXEC_TIMEOUT_MS,
+  MAX_OUTPUT_SIZE,
+  MAX_SEARCH_RESULTS,
+  IS_WIN,
+} from './constants.js'
 
 export interface ToolDispatcher {
   dispatch(tool: string, args: Record<string, unknown>): Promise<string>
@@ -60,7 +63,7 @@ export function createToolDispatcher(baseDir: string): ToolDispatcher {
         case 'remote_browser_sniff': return handleBrowserSniff(args)
         case 'remote_userscript_run': return handleUserscriptRun(args)
         case 'remote_ig_post': return handleIgPost(args, validatePath)
-        case 'remote_spawn_detached': return handleSpawnDetached(args, baseDir)
+        case 'remote_spawn_detached': return handleSpawnDetached(args, baseDir, validatePath)
         default: throw new Error(`Unknown tool: ${tool}`)
       }
     },

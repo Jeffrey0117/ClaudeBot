@@ -6,51 +6,13 @@
 import { readFile } from 'node:fs/promises'
 import { exec, execFile, spawn } from 'node:child_process'
 import { join, sep } from 'node:path'
-import { EXEC_TIMEOUT_MS, MAX_OUTPUT_SIZE, IS_WIN } from './index.js'
+import { EXEC_TIMEOUT_MS, MAX_OUTPUT_SIZE, IS_WIN } from './constants.js'
 
-// --- Dangerous command blacklist ---
+// Blacklist lives in a leaf module so browser-tools can share it without
+// adding an edge to this directory's import cycle.
+export { isDangerousCommand } from './dangerous-commands.js'
+import { isDangerousCommand } from './dangerous-commands.js'
 
-const DANGEROUS_PATTERNS: readonly RegExp[] = [
-  // Destructive file operations
-  /rm\s+(-[a-z]*r[a-z]*\s+(-[a-z]*f[a-z]*\s+)?|(-[a-z]*f[a-z]*\s+)?-[a-z]*r[a-z]*\s+)[/\\]/i,
-  /\brm\s+-rf\s+\/(?!\w)/i,
-  /\bformat\s+[a-z]:/i,
-  /\bmkfs\b/i,
-  /\bdd\s+if=\/dev\/(zero|random)/i,
-  // Fork bombs
-  /:\(\)\s*\{\s*:\|:\s*&\s*\}\s*;?\s*:/,
-  /\bfork\s*bomb/i,
-  // Kill node/electron processes (blocks all variants)
-  /taskkill\s+[/\\]+f\s+[/\\]+im\s+(node|electron)\.exe/i,
-  /Get-Process\s+(node|electron)\s*\|\s*Stop-Process/i,
-  /Stop-Process\s+-Name\s+(node|electron)/i,
-  /\bpkill\s+(node|electron)\b/i,
-  /\bkillall\s+(node|electron)\b/i,
-  // System shutdown/reboot
-  /\bshutdown\b/i,
-  /\breboot\b/i,
-  /\binit\s+[06]\b/,
-  // Flag-order-tolerant destructive variants the original patterns miss
-  /\brm\s+(?=[^\n]*\s-\w*r)(?=[^\n]*\s-\w*f)/i,          // rm … -r … -f (any order, split flags)
-  /\bdel\s+(?=[^\n]*\/s)(?=[^\n]*\/q)/i,                  // del /s /q (any order)
-  /\b(?:rd|rmdir)\s+(?:\/\w+\s+)*\/s\b/i,                 // rd /s, rmdir /q /s
-  /Remove-Item\b(?=[^\n]*-Recurse)(?=[^\n]*-Force)/i,     // PS recursive force delete
-  /\bvssadmin\s+delete/i,                                 // shadow copy wipe
-  /\bcipher\s+\/w/i,                                      // free-space wipe
-  /\breg\s+(?:delete|add)\s+HKLM/i,                       // machine-level registry edits
-  /\bbcdedit\b/i,
-  /\bdiskpart\b/i,
-  /\bwevtutil\s+cl\b/i,                                   // event-log clearing
-]
-
-function isDangerousCommand(command: string): string | null {
-  for (const pattern of DANGEROUS_PATTERNS) {
-    if (pattern.test(command)) {
-      return `Blocked dangerous command matching: ${pattern.source}`
-    }
-  }
-  return null
-}
 
 // Cache whether rg is available (checked once at first grep call)
 let rgAvailable: boolean | null = null
