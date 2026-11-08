@@ -34,12 +34,26 @@ function loadBasePrompt(): string {
   return basePrompt
 }
 
+/**
+ * A spec file that silently resolves to '' takes a whole subsystem down with
+ * it: data/ctx-spec.md was absent, so the model was never told to emit [CTX]
+ * blocks, every stored digest was null, and the bot still told the user
+ * "已用摘要接續". Say so instead of degrading quietly.
+ */
+function warnMissingSpec(path: string, what: string): void {
+  console.error(
+    `[system-prompt] ${path} is missing — ${what} is disabled. ` +
+      `Anything depending on it will degrade silently.`,
+  )
+}
+
 function loadCtxSpec(): string {
   if (ctxSpec !== null) return ctxSpec
   try {
     ctxSpec = readFileSync(CTX_SPEC_PATH, 'utf-8').trim()
   } catch {
     ctxSpec = ''
+    warnMissingSpec(CTX_SPEC_PATH, 'the [CTX] continuity digest')
   }
   return ctxSpec
 }
@@ -50,6 +64,7 @@ function loadSubagentSpec(): string {
     subagentSpec = readFileSync(SUBAGENT_SPEC_PATH, 'utf-8').trim()
   } catch {
     subagentSpec = ''
+    warnMissingSpec(SUBAGENT_SPEC_PATH, "/deep's subagent protocol")
   }
   return subagentSpec
 }
