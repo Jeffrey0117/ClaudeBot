@@ -38,7 +38,7 @@ import { recordResponse } from './memory-consolidator.js'
 import { autoCommitAndPush } from '../utils/auto-commit.js'
 import { reportCloudPipeDeploy } from './cloudpipe-deploy-report.js'
 import { env } from '../config/env.js'
-import { startDraft, updateDraft, finalizeDraft, cancelDraft, hasDraft } from './draft-sender.js'
+import { startDraft, updateDraft, finalizeDraft, cancelDraft, hasDraft, draftKeyFor } from './draft-sender.js'
 import path from 'node:path'
 import { isVirtualChat } from '../remote/virtual-chat-store.js'
 
@@ -187,7 +187,11 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       setLastResponse(ctx.item.project.path, digestCleaned || hookedText)
     }
 
-    const responseText = digest !== null ? digestCleaned : hookedText
+    // Always show the stripped text. extractDigest() returns digest: null when
+    // a [CTX] block IS present but its status: is not one of the six valid
+    // values — falling back to hookedText then dumped the raw [CTX]...[/CTX]
+    // block into the chat while the stored copy was correctly stripped.
+    const responseText = hookedText ? digestCleaned : hookedText
     const totalTime = ((Date.now() - ctx.startTime) / 1000).toFixed(1)
     const cost = (result.costUsd ?? 0).toFixed(4)
 
@@ -409,7 +413,12 @@ async function sendResponseChunks(
     const { cleaned: draftDigestCleaned } = extractDigest(draftStripped)
     const draftCleaned = cleanMarkdown(draftDigestCleaned || draftStripped)
     const botLabel = `\`[${deriveBotId()}]\` `
-    await finalizeDraft(ctx.telegram, ctx.item.chatId, botLabel + (draftCleaned || cleaned))
+    await finalizeDraft(
+      ctx.telegram,
+      ctx.item.chatId,
+      draftKeyFor(ctx.item.chatId, ctx.item.project.path, ctx.item.threadId),
+      botLabel + (draftCleaned || cleaned),
+    )
     ctx.draftActive = false
 
     // If there are choice buttons, send them separately (draft can't attach buttons)
@@ -634,7 +643,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         }
         // Cancel any active draft
         if (ctx.draftActive) {
-          cancelDraft(item.chatId)
+          cancelDraft(draftKeyFor(item.chatId, item.project.path, item.threadId))
         }
         cleanupImages()
         resolve()
@@ -656,17 +665,22 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         ctx.done()
       }, TIMEOUT_MS)
 
-      // Update status message with elapsed time + tool progress
-      // Throttle: only update when tool count changes or 5s elapsed since last update
-      let lastToolCount = 0
+      // Update status message with elapsed time + tool progress.
+      //
+      // The 5s floor is unconditional. It used to be bypassed whenever the tool
+      // count changed, so a turn that read 20 files fired 20 editMessageText
+      // calls in a few seconds — on top of the 5s tick, sendChatAction, and the
+      // draft edits on another message in the same chat. Telegram's per-chat
+      // budget is roughly one message a second, so this reliably earned 429s;
+      // and because this path swallows errors without honouring retry_after
+      // (unlike draft-sender), the throwaway status edits kept hammering while
+      // the actual content draft sat in a multi-second cooldown. The tool count
+      // is still shown, just coalesced onto the next tick.
       let lastUpdateTime = 0
       const updateStatus = (): void => {
         if (ctx.resolved || !statusMsg) return
         const now = Date.now()
-        const hasNewTool = ctx.toolCount > lastToolCount
-        // Skip if no new tool and updated within last 5s
-        if (!hasNewTool && now - lastUpdateTime < 5_000) return
-        lastToolCount = ctx.toolCount
+        if (now - lastUpdateTime < 5_000) return
         lastUpdateTime = now
         const elapsed = ((now - startTime) / 1000).toFixed(0)
         const toolInfo = ctx.toolCount > 0
@@ -795,14 +809,24 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
           // Uses draftText (never resets) so text grows across tool-use turns
           if (!isDashboard) {
             if (!ctx.draftActive && !ctx.draftStartPromise) {
-              ctx.draftStartPromise = startDraft(telegram, item.chatId, ctx.draftText)
+              ctx.draftStartPromise = startDraft(
+                telegram,
+                item.chatId,
+                draftKeyFor(item.chatId, item.project.path, item.threadId),
+                ctx.draftText,
+              )
               const draftId = await ctx.draftStartPromise
               if (draftId !== null) {
                 ctx.draftActive = true
               }
               ctx.draftStartPromise = null
             } else if (ctx.draftActive) {
-              await updateDraft(telegram, item.chatId, ctx.draftText)
+              await updateDraft(
+                telegram,
+                item.chatId,
+                draftKeyFor(item.chatId, item.project.path, item.threadId),
+                ctx.draftText,
+              )
             }
           }
         },
@@ -856,7 +880,29 @@ function dispatchCrossProjectTasks(
   if (tasks.length === 0) return
 
   for (const task of tasks) {
-    if (task.project.path === sourceItem.project.path) continue
+    // A delegation that cannot be delivered must be reported, never dropped:
+    // the @run line is stripped from the reply either way, so staying silent
+    // leaves the user believing the work was handed off.
+    if (!task.project) {
+      telegram.sendMessage(
+        sourceItem.chatId,
+        `\u{26A0}\u{FE0F} *\u{7121}\u{6CD5}\u{59D4}\u{6D3E}* \u{2014} \u{627E}\u{4E0D}\u{5230}\u{5C08}\u{6848} \`${task.projectName}\`\n` +
+          `\u{4EFB}\u{52D9}\u{672A}\u{57F7}\u{884C}：${task.prompt.slice(0, 150)}${task.prompt.length > 150 ? '...' : ''}\n` +
+          `\u{540D}\u{7A31}\u{53EF}\u{80FD}\u{6253}\u{932F}\u{3001}\u{4E0D}\u{5728} PROJECTS_BASE_DIR \u{7BC4}\u{570D}\u{5185}，\u{6216}\u{7B26}\u{5408}\u{591A}\u{500B}\u{5C08}\u{6848}\u{800C}\u{7121}\u{6CD5}\u{5224}\u{5225}\u{3002}`,
+        { parse_mode: 'Markdown' },
+      ).catch(() => {})
+      continue
+    }
+
+    if (task.project.path === sourceItem.project.path) {
+      telegram.sendMessage(
+        sourceItem.chatId,
+        `\u{26A0}\u{FE0F} *\u{8DF3}\u{904E}\u{59D4}\u{6D3E}* \u{2014} \`${task.projectName}\` \u{5C31}\u{662F}\u{76EE}\u{524D}\u{5C08}\u{6848}，\u{4E0D}\u{80FD}\u{59D4}\u{6D3E}\u{7D66}\u{81EA}\u{5DF1}\u{3002}\n` +
+          `\u{4EFB}\u{52D9}\u{672A}\u{57F7}\u{884C}：${task.prompt.slice(0, 150)}${task.prompt.length > 150 ? '...' : ''}`,
+        { parse_mode: 'Markdown' },
+      ).catch(() => {})
+      continue
+    }
 
     const sessionId = getAISessionId(
       sourceItem.ai.backend === 'auto' ? 'claude' : sourceItem.ai.backend,
