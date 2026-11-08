@@ -6,11 +6,7 @@ import type { ClaudeModel, ClaudeResult } from '../types/index.js'
 import type { StreamEvent, StreamResult, StreamContentBlockDelta, StreamAssistantMessage } from '../types/claude-stream.js'
 import { setAISessionId, clearAISession, normalizeProjectKey } from '../ai/session-store.js'
 import { validateProjectPath } from '../utils/path-validator.js'
-import { getTodos } from '../bot/todo-store.js'
-import { formatPinsForPrompt, touchPins } from '../bot/context-pin-store.js'
-import { formatRulesForPrompt, touchLearnedRules } from '../bot/learned-rules-store.js'
 import { getLastResponse } from '../bot/last-response-store.js'
-import { buildContextInjection } from '../bot/context-digest-store.js'
 import { getSystemPrompt } from '../utils/system-prompt.js'
 import { env } from '../config/env.js'
 import { getPairing, getPairings, isRemotePath } from '../remote/pairing-store.js'
@@ -19,16 +15,7 @@ import { getRelayPort, getAgentBaseDir } from '../remote/relay-server.js'
 import { generateRemoteMcpConfig, cleanupRemoteMcpConfig } from '../remote/mcp-config-generator.js'
 import { isVirtualChat, getVirtualChatPairingCode, getVirtualChatLicenseKey } from '../remote/virtual-chat-store.js'
 import { isAdminLicense } from '../remote/license-store.js'
-
-/** Detect affirmative/agreement replies that reference the previous message. */
-const AFFIRMATIVE_RE = /^(好|可以|沒問題|沒差|OK|ok|Yes|yes|對|嗯|行|做吧|來吧|就這樣|同意|贊成|go|就醬|開始|動手|沒錯|是的|確定|sure|yep|yeah|做啊|加吧|弄吧|改吧|要|proceed|continue|繼續)/i
-const AFFIRMATIVE_EMOJI = /^[👍✅✔️👌🫡💪🤙☑️]+$/u
-
-function looksAffirmative(text: string): boolean {
-  const stripped = text.replace(/^[\[（(【]語音輸入[\]）)】]\s*/i, '').trim()
-  if (AFFIRMATIVE_EMOJI.test(stripped)) return true
-  return AFFIRMATIVE_RE.test(stripped)
-}
+import { buildMemoryParts, buildDigestParts } from '../utils/context-parts.js'
 
 export type OnTextDelta = (text: string, accumulated: string) => void
 export type OnToolUse = (toolName: string) => void
@@ -278,35 +265,17 @@ export function runClaude(options: RunOptions): void {
 
   const parts: string[] = []
 
-  // Inject project todos as context
-  const todos = getTodos(contextKey)
-  const pendingTodos = todos.filter((t) => !t.done)
-  if (pendingTodos.length > 0) {
-    const todoLines = pendingTodos.map((t, i) => `${i + 1}. ${t.text}`).join('\n')
-    parts.push(`[專案待辦清單]\n${todoLines}`)
-  }
-
-  // Inject pinned context + track usage
-  const pinnedContext = formatPinsForPrompt(contextKey)
-  if (pinnedContext) {
-    touchPins(contextKey)
-    parts.push(pinnedContext)
-  }
-
-  // Inject learned behavior rules
-  const rulesContext = formatRulesForPrompt(contextKey)
-  if (rulesContext) {
-    touchLearnedRules(contextKey)
-    parts.push(rulesContext)
-  }
-
-  // Inject current project context (so Claude knows which project it's working on)
-  if (options.projectName) {
-    const projectLine = isRemotePath(projectPath)
-      ? `[當前專案: ${options.projectName}]\n路徑: ${projectPath.replace(/^remote:/, '')}`
-      : `[當前專案: ${options.projectName}]\n路徑: ${projectPath}`
-    parts.push(projectLine)
-  }
+  // Todos + pins + learned rules + current project (shared with the channel
+  // backend via context-parts, so both get the same memory)
+  parts.push(
+    ...buildMemoryParts({
+      contextKey,
+      projectName: options.projectName,
+      displayPath: isRemotePath(projectPath)
+        ? projectPath.replace(/^remote:/, '')
+        : projectPath,
+    }),
+  )
 
   // Inject remote pairing context — Telegram users need REMOTE_ENABLED,
   // but Electron virtual chats are ALWAYS remote by definition
@@ -346,14 +315,7 @@ export function runClaude(options: RunOptions): void {
   //    This was the big gap — a normal-length prompt after idle used to open a
   //    fresh session with ZERO context and no warning.
   //  - short / affirmative replies: user is referring to the previous turn.
-  const isNewSession = sessionId === null
-  const isShortRef = prompt.length <= 15 || (prompt.length <= 80 && looksAffirmative(prompt))
-  if (isNewSession || isShortRef) {
-    const injection = buildContextInjection(contextKey, looksAffirmative(prompt))
-    if (injection) {
-      parts.push(injection)
-    }
-  }
+  parts.push(...buildDigestParts({ contextKey, prompt, isNewSession: sessionId === null }))
 
   parts.push(prompt)
 
