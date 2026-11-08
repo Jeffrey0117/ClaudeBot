@@ -15,6 +15,22 @@ export interface RemoteQuotaState {
   readonly rateUsage: readonly UsageRecord[] // 5-min sliding window
   readonly weeklyUsage: readonly UsageRecord[] // 7-day sliding window
   readonly pendingReserve: number // pre-reserved turns awaiting settle
+  /**
+   * The individual amounts making up pendingReserve, oldest first.
+   *
+   * tryReserve adds min(reserveAmount, rateBudget) but settle used to subtract
+   * the raw reserveAmount, so the two disagreed whenever those differ — at the
+   * defaults (reserveAmount 3, per-remote rateBudget 1) three queued requests
+   * reserved 3 total and the first settle released all 3, leaving the two
+   * still-running requests unaccounted and admitting traffic that should have
+   * been blocked. With rateBudget > reserveAmount the error flips sign and
+   * under-releases instead, which strands quota.
+   *
+   * Recording each amount lets settle release exactly what was taken, even if
+   * the budget changed in between (auto mode moves it on 429).
+   * Optional for backwards compatibility with existing data/allot.json.
+   */
+  readonly reservations?: readonly number[]
 }
 
 /** Plugin configuration */

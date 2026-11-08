@@ -180,10 +180,11 @@ export function tryReserve(
     return { allowed: false, reason }
   }
 
-  // Reserve turns
+  // Reserve turns — record the exact amount so settle can release it
   updateRemote(id, (r) => ({
     ...r,
     pendingReserve: r.pendingReserve + effectiveReserve,
+    reservations: [...(r.reservations ?? []), effectiveReserve],
   }))
   addHistory({ type: 'reserve', remoteId: id, detail: `+${effectiveReserve}` })
 
@@ -216,12 +217,21 @@ export function settle(
   const now = Date.now()
   const record: UsageRecord = { timestamp: now, turns: actualTurns }
 
-  updateRemote(id, (r) => ({
-    ...r,
-    pendingReserve: Math.max(0, r.pendingReserve - config.reserveAmount),
-    rateUsage: [...r.rateUsage, record],
-    weeklyUsage: [...r.weeklyUsage, record],
-  }))
+  updateRemote(id, (r) => {
+    // Release exactly the amount this request reserved (oldest first), not a
+    // fresh read of config.reserveAmount — see RemoteQuotaState.reservations.
+    // No recorded reservation means nothing was held for this request, so
+    // release nothing rather than inventing a refund and drifting negative.
+    const held = r.reservations ?? []
+    const releasing = held.length > 0 ? held[0] : 0
+    return {
+      ...r,
+      pendingReserve: Math.max(0, r.pendingReserve - releasing),
+      reservations: held.slice(1),
+      rateUsage: [...r.rateUsage, record],
+      weeklyUsage: [...r.weeklyUsage, record],
+    }
+  })
   addHistory({ type: 'settle', remoteId: id, detail: `actual=${actualTurns}` })
 }
 

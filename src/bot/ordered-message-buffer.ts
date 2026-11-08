@@ -17,6 +17,8 @@ import { recordActivity } from '../plugins/stats/activity-logger.js'
 import { getPairing, remoteProjectPath } from '../remote/pairing-store.js'
 import { getPluginModule } from '../plugins/loader.js'
 import { isChannelEnabled } from '../ai/channel/opt-in-store.js'
+import { getVirtualChatLicenseKey } from '../remote/virtual-chat-store.js'
+import { tryReserveLicense } from '../remote/license-store.js'
 
 // Allot rejection notification callback (wired from bot.ts)
 type NotifyFn = (chatId: number, text: string) => void
@@ -128,26 +130,6 @@ function flushEntries(entries: readonly BufferEntry[]): void {
     ?? (pairing?.connected ? { name: 'remote', path: remoteProjectPath(pairing.label) } : null)
   if (!project) return
 
-  // Allot gate: check quota for remote requests
-  if (project.name === 'remote') {
-    const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
-    if (allotMod?.tryReserve) {
-      const check = (allotMod.tryReserve as (c: number, t: number | undefined) => { allowed: boolean; reason?: string; warningLevel?: number })(chatId, threadId)
-      if (!check.allowed) {
-        allotRejectNotifyFn(chatId, check.reason ?? '\u{23F3} \u{984D}\u{5EA6}\u{5DF2}\u{7528}\u{5B8C}')
-        return
-      }
-      if (check.warningLevel) {
-        const warnMsg = check.warningLevel >= 95
-          ? '\u{1F534} \u{672C}\u{9031}\u{984D}\u{5EA6}\u{5373}\u{5C07}\u{7528}\u{5B8C} (95%)'
-          : check.warningLevel >= 85
-            ? '\u{1F7E1} \u{672C}\u{9031}\u{984D}\u{5EA6}\u{4F7F}\u{7528}\u{5DF2}\u{9054} 85%'
-            : '\u{1F4CA} \u{672C}\u{9031}\u{984D}\u{5EA6}\u{4F7F}\u{7528}\u{5DF2}\u{9054} 70%'
-        allotRejectNotifyFn(chatId, warnMsg)
-      }
-    }
-  }
-
   // Combine texts — skip failed entries (no text)
   const parts: string[] = []
   for (const entry of entries) {
@@ -157,6 +139,53 @@ function flushEntries(entries: readonly BufferEntry[]): void {
   }
 
   if (parts.length === 0) return
+
+  // Reserve AFTER every validation that can bail out. It used to sit above
+  // the parts check, so a flush whose entries all failed (e.g. a voice note
+  // that would not transcribe) charged quota for work that never ran and was
+  // never settled — a few of those and the remote is locked out until
+  // /allot reset.
+  // Quota gate for remote requests — THE single reserve point.
+  //
+  // The Electron bridge used to run its own license/allot gate before calling
+  // addText, so a desktop text message reserved twice and settled once:
+  // pendingReserve grew monotonically and, at the default per-remote budget of
+  // 1, two messages were enough to lock the user out permanently (only settle
+  // decrements it). Worse for license users — the bridge charged the license,
+  // this charged allot, and queue-processor settled only the license, so the
+  // allot reserve leaked on 100% of their messages.
+  //
+  // The license branch mirrors the settle side in queue-processor exactly, so
+  // whatever is reserved here is what gets released there. Rejections reach
+  // Electron clients fine: bot.telegram is wrapped by createTelegramProxy,
+  // which routes virtual chat ids to the desktop socket.
+  if (project.name === 'remote') {
+    const licenseKey = getVirtualChatLicenseKey(chatId)
+    if (licenseKey) {
+      const check = tryReserveLicense(licenseKey)
+      if (!check.allowed) {
+        allotRejectNotifyFn(chatId, check.reason ?? '\u{23F3} \u{984D}\u{5EA6}\u{5DF2}\u{7528}\u{5B8C}')
+        return
+      }
+    } else {
+      const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
+      if (allotMod?.tryReserve) {
+        const check = (allotMod.tryReserve as (c: number, t: number | undefined) => { allowed: boolean; reason?: string; warningLevel?: number })(chatId, threadId)
+        if (!check.allowed) {
+          allotRejectNotifyFn(chatId, check.reason ?? '\u{23F3} \u{984D}\u{5EA6}\u{5DF2}\u{7528}\u{5B8C}')
+          return
+        }
+        if (check.warningLevel) {
+          const warnMsg = check.warningLevel >= 95
+            ? '\u{1F534} \u{672C}\u{9031}\u{984D}\u{5EA6}\u{5373}\u{5C07}\u{7528}\u{5B8C} (95%)'
+            : check.warningLevel >= 85
+              ? '\u{1F7E1} \u{672C}\u{9031}\u{984D}\u{5EA6}\u{4F7F}\u{7528}\u{5DF2}\u{9054} 85%'
+              : '\u{1F4CA} \u{672C}\u{9031}\u{984D}\u{5EA6}\u{4F7F}\u{7528}\u{5DF2}\u{9054} 70%'
+          allotRejectNotifyFn(chatId, warnMsg)
+        }
+      }
+    }
+  }
 
   const quote = entries.find((e) => e.replyQuote)?.replyQuote ?? ''
   const combined = quote + parts.join('\n\n')

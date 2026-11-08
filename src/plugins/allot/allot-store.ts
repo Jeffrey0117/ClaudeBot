@@ -14,8 +14,11 @@ import type {
 import { DEFAULT_CONFIG, MAX_HISTORY } from './types.js'
 import { mainRepoPath } from '../../git/worktree.js'
 
-// Shared across all bot instances: always write to main repo's data/allot.json
-const mainRoot = mainRepoPath(process.cwd()) ?? process.cwd()
+// Shared across all bot instances: always write to main repo's data/allot.json.
+// CLAUDEBOT_STATE_DIR overrides it as a test seam (see src/config/paths.ts) so
+// the suite cannot spend or corrupt real quota; production behaviour is
+// unchanged because that variable is only set by tests/setup.ts.
+const mainRoot = process.env.CLAUDEBOT_STATE_DIR ?? mainRepoPath(process.cwd()) ?? process.cwd()
 const DATA_PATH = join(mainRoot, 'data', 'allot.json')
 
 let store: JsonFileStore<AllotStore> | null = null

@@ -109,30 +109,15 @@ export async function handleElectronChatMessage(
     return
   }
 
-  // License quota gate (takes priority over allot for license-based users)
-  if (state.selectedProject.name === 'remote') {
-    const { getVirtualChatLicenseKey } = await import('./virtual-chat-store.js')
-    const licenseKey = getVirtualChatLicenseKey(virtualChatId)
-    if (licenseKey) {
-      const { tryReserveLicense } = await import('./license-store.js')
-      const check = tryReserveLicense(licenseKey)
-      if (!check.allowed) {
-        sendText(ws, check.reason ?? '⏳ 額度已用完')
-        return
-      }
-    } else {
-      // Fallback to allot gate for non-license remote users
-      const { getPluginModule } = await import('../plugins/loader.js')
-      const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
-      if (allotMod?.tryReserve) {
-        const check = (allotMod.tryReserve as (c: number, t: number | undefined) => { allowed: boolean; reason?: string })(virtualChatId, undefined)
-        if (!check.allowed) {
-          sendText(ws, check.reason ?? '⏳ 額度已用完')
-          return
-        }
-      }
-    }
-  }
+  // No quota gate here on purpose.
+  //
+  // This used to reserve license/allot quota before calling addText, which
+  // reserves again on flush — two reserves, one settle. pendingReserve only
+  // ever grew, and at the default per-remote budget of 1 two messages locked
+  // the user out permanently. The buffer is now the single reserve point for
+  // both quota kinds, and its rejection reaches this client anyway because
+  // bot.telegram is wrapped by createTelegramProxy, which routes virtual chat
+  // ids back to the desktop socket.
 
   // Feed into ordered message buffer (same path as Telegram text messages)
   const { addText } = await import('../bot/ordered-message-buffer.js')

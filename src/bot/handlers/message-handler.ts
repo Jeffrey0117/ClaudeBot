@@ -212,6 +212,17 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
       return
     }
 
+    const remoteProject = { name: 'remote', path: remoteProjectPath(pairing.label) }
+
+    // Reject a bare "!" BEFORE reserving quota. This validation used to live
+    // inside the steer branch below, i.e. after the reserve, so typing just "!"
+    // charged a reservation that was never settled — a few of those and the
+    // remote is locked out until /allot reset.
+    if (text.startsWith('!') && isProcessing(remoteProject.path) && !text.slice(1).trim()) {
+      await ctx.reply('用法: !<訊息> 取消目前並傳送新提示')
+      return
+    }
+
     // Allot gate: check quota before enqueue (plugin may not be loaded)
     const allotMod = getPluginModule('allot') as Record<string, unknown> | undefined
     if (allotMod?.tryReserve) {
@@ -230,15 +241,10 @@ export async function messageHandler(ctx: BotContext): Promise<void> {
       }
     }
 
-    const remoteProject = { name: 'remote', path: remoteProjectPath(pairing.label) }
-
-    // Steer mode: "!" prefix cancels current remote process and replaces
+    // Steer mode: "!" prefix cancels current remote process and replaces.
+    // The empty case was already rejected above, before the reserve.
     if (text.startsWith('!') && isProcessing(remoteProject.path)) {
       const steerText = text.slice(1).trim()
-      if (!steerText) {
-        await ctx.reply('用法: !<訊息> 取消目前並傳送新提示')
-        return
-      }
       clearBuffer(chatId, threadId)
       cancelAnyRunning(remoteProject.path)
       const sessionId = getAISessionId(resolveBackend(state.ai.backend), remoteProject.path)
