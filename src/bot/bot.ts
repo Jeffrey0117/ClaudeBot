@@ -92,6 +92,7 @@ import { onPairingConnect, onPairingDisconnect, getPairings, remoteProjectPath }
 import { remoteToolCall } from '../remote/relay-client.js'
 import { setUserProject, getActiveMachine, setActiveMachine } from './state.js'
 import { createTelegramProxy } from '../remote/telegram-proxy.js'
+import { publishBotCommands } from './publish-commands.js'
 
 /** Remote pairing codes we've already auto-provisioned agent-browser on
  *  (per bot process) — so we install at most once per connection. */
@@ -445,9 +446,19 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   setBotInstance(bot)
   botInstance = bot
 
-  // Start dashboard heartbeat writer + command reader
+  // The heartbeat is NOT dashboard-only plumbing despite the name: the launcher
+  // watchdog reads it to detect a wedged bot, and isBotIdle() uses it so
+  // /restart all and /deploy can wait for a bot to drain. Without it a graceful
+  // restart has no idle signal and sits out the full 10-minute force deadline,
+  // so it stays on unconditionally.
   startHeartbeat()
-  startCommandReader()
+
+  // The command reader is genuinely dashboard-only — it polls data/commands.json
+  // every 2s for prompts submitted from the web UI (~43k reads per bot per day)
+  // and has no other consumer.
+  if (env.DASHBOARD) {
+    startCommandReader()
+  }
 
   // Pre-spawn Sherpa ASR process (avoid cold start on first voice)
   if (isSherpaAvailable()) {
@@ -467,7 +478,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   // Inject all commands into system prompt so Claude knows what's available
   setAvailableCommands([...CORE_COMMANDS, ...pluginCommands])
 
-  bot.telegram.setMyCommands([...CORE_COMMANDS, ...pluginCommands]).catch(() => {})
+  void publishBotCommands(bot.telegram, [...CORE_COMMANDS, ...pluginCommands])
 
   // After restart, notify users who had active projects with a "Continue?" button
   scheduleRestartNotifications(bot)

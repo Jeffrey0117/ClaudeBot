@@ -3,7 +3,8 @@ import type { SessionEvent } from './types.js'
 import { ChannelSessionManager } from './session-manager.js'
 import { LocalStreamJsonBackend } from './stream-json-backend.js'
 import { resolveChannelLaunch } from './remote-launch.js'
-import { getAISessionId, setAISessionId } from '../session-store.js'
+import { getAISessionId, setAISessionId, clearAISession, normalizeProjectKey } from '../session-store.js'
+import { buildMemoryParts, buildDigestParts } from '../../utils/context-parts.js'
 
 // One manager process-wide; backend factory is the Phase 1 stream-json backend.
 let manager = new ChannelSessionManager(() => new LocalStreamJsonBackend())
@@ -11,8 +12,24 @@ let manager = new ChannelSessionManager(() => new LocalStreamJsonBackend())
 /** Test seam: swap the manager (and thus the backend factory). */
 export function __setManagerForTest(m: ChannelSessionManager): void { manager = m }
 
-/** Phase 1 session key = projectPath (activeMachine/threadId folded in later). */
-function keyFor(projectPath: string): string { return projectPath }
+/**
+ * Phase 1 session key = projectPath (activeMachine/threadId folded in later),
+ * canonicalized so the two Windows path spellings map to one warm session.
+ */
+function keyFor(projectPath: string): string { return normalizeProjectKey(projectPath) }
+
+/**
+ * Full reset for /new and /context clear.
+ *
+ * Clearing the stored id is not enough on this backend: the warm CLI process
+ * holds the conversation in memory and runTurn reuses it without consulting
+ * resumeSessionId. So /new used to report "已清除" while the next message
+ * landed in the very same session with all the old context.
+ */
+export async function channelReset(projectPath: string): Promise<void> {
+  clearAISession('channel', projectPath)
+  await manager.stop(keyFor(projectPath))
+}
 
 export function isChannelRunning(projectPath?: string): boolean {
   if (!projectPath) return false
@@ -40,6 +57,26 @@ export const channelRunner: AIRunner = {
     // warm session ignores this — runTurn reuses the live process, no start().
     const resumeSessionId = getAISessionId('channel', opts.projectPath) ?? undefined
     const cfg = resumeSessionId ? { ...baseCfg, resumeSessionId } : baseCfg
+
+    // Per-turn memory. This backend used to pass opts.prompt straight through,
+    // so pins, @learn rules and project todos were stored and confirmed to the
+    // user but never actually reached the model on the default path.
+    const key = keyFor(opts.projectPath)
+    const coldStart = !manager.hasSession(key) && !resumeSessionId
+    const prompt = [
+      ...buildMemoryParts({
+        contextKey: opts.projectPath,
+        projectName: opts.projectName,
+        displayPath: opts.projectPath,
+      }),
+      ...buildDigestParts({
+        contextKey: opts.projectPath,
+        prompt: opts.prompt,
+        isNewSession: coldStart,
+      }),
+      opts.prompt,
+    ].join('\n\n')
+
     let accumulated = ''
     const onEvent = (e: SessionEvent): void => {
       switch (e.kind) {
@@ -53,7 +90,7 @@ export const channelRunner: AIRunner = {
       }
     }
     void manager
-      .runTurn(keyFor(opts.projectPath), cfg, fingerprint, opts.prompt, onEvent)
+      .runTurn(key, cfg, fingerprint, prompt, onEvent)
       .catch((err) => { opts.onError(err instanceof Error ? err.message : String(err)) })
   },
 

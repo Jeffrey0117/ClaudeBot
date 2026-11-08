@@ -78,12 +78,23 @@ function drainAndMerge(projectPath: string, first: QueueItem): QueueItem {
   const queue = queues.get(projectPath)
   if (!queue || queue.length === 0) return first
 
-  // Collect all items from the same chatId
+  // Only merge items that share a response channel.
+  //
+  // Merging kept `first`'s dashboardCommandId and threadId and discarded the
+  // absorbed items', so whoever asked through the dashboard or Jarvis waited
+  // forever with no answer and no error: the broker only ever fires for
+  // ctx.dashCmdId and Jarvis resolves strictly by commandId. Jarvis enqueues
+  // with chatId = ADMIN_CHAT_ID, i.e. the admin's own Telegram chat, so a
+  // Telegram message and a Jarvis utterance would merge and one channel was
+  // abandoned. threadId matters too — it drives the allot settle and machine
+  // routing, so a merged batch could bill the wrong forum topic.
+  const canMerge = (item: QueueItem): boolean => canMergeInto(first, item)
+
   const sameChatItems: QueueItem[] = []
   const remaining: QueueItem[] = []
 
   for (const item of queue) {
-    if (item.chatId === first.chatId) {
+    if (canMerge(item)) {
       sameChatItems.push(item)
     } else {
       remaining.push(item)
@@ -100,6 +111,25 @@ function drainAndMerge(projectPath: string, first: QueueItem): QueueItem {
   }
 
   return mergeQueueItems(first, sameChatItems)
+}
+
+/**
+ * May `item` be absorbed into `first`?
+ *
+ * Only when they share a response channel. Merging keeps `first`'s
+ * dashboardCommandId and threadId and discards the absorbed item's, so an item
+ * carrying its own channel must stay a separate queue entry or its requester is
+ * silently abandoned.
+ *
+ * Exported for unit testing alongside mergeQueueItems.
+ */
+export function canMergeInto(first: QueueItem, item: QueueItem): boolean {
+  return (
+    item.chatId === first.chatId &&
+    item.threadId === first.threadId &&
+    item.dashboardCommandId === undefined &&
+    first.dashboardCommandId === undefined
+  )
 }
 
 /**

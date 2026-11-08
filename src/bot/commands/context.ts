@@ -5,6 +5,7 @@ import { getAISessionId, clearAISession } from '../../ai/session-store.js'
 import { resolveBackend } from '../../ai/types.js'
 import { enqueue } from '../../claude/queue.js'
 import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
+import { channelReset } from '../../ai/channel/channel-runner.js'
 
 export async function contextCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -83,8 +84,13 @@ export async function contextCommand(ctx: BotContext): Promise<void> {
 
   // /context clear
   if (args === 'clear') {
+    // Local projects actually run on `channel`, so clearing only the resolved
+    // backend left the live warm session intact — this reported success and
+    // changed nothing. Clear both keys and reset the channel session too.
     const resolvedBackend = resolveBackend(state.ai.backend)
     clearAISession(resolvedBackend, projectPath)
+    clearAISession('claude', projectPath)
+    await channelReset(projectPath)
 
     const pinCount = getPins(projectPath).length
     await ctx.reply(
@@ -98,8 +104,13 @@ export async function contextCommand(ctx: BotContext): Promise<void> {
 
   // /context clear pins
   if (args === 'clear pins') {
+    // Local projects actually run on `channel`, so clearing only the resolved
+    // backend left the live warm session intact — this reported success and
+    // changed nothing. Clear both keys and reset the channel session too.
     const resolvedBackend = resolveBackend(state.ai.backend)
     clearAISession(resolvedBackend, projectPath)
+    clearAISession('claude', projectPath)
+    await channelReset(projectPath)
     const cleared = clearPins(projectPath)
 
     await ctx.reply(

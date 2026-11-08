@@ -52,12 +52,12 @@ export function updatePin(projectPath: string, index: number, text: string): boo
   if (index < 0 || index >= list.length) return false
 
   const existing = list[index]
-  list[index] = {
-    ...existing,
-    text,
-    lastUsed: new Date().toISOString(),
-    hitCount: (existing.hitCount ?? 0) + 1,
-  }
+  // Only the text changes. lastUsed/hitCount track how often a pin is actually
+  // fed to the model (touchPins does that) — bumping them on an *edit* made
+  // every pin the consolidator rewrote look freshly used, so the
+  // "⚠️可能過時" staleness tag could never fire on exactly the pins most
+  // likely to be stale.
+  list[index] = { ...existing, text }
   store.save({ ...data, [projectPath]: list })
   return true
 }

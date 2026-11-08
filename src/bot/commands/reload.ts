@@ -3,6 +3,7 @@ import { reloadPlugins, getLoadedPlugins } from '../../plugins/loader.js'
 import { getEnabledPlugins } from '../../plugins/plugin-manager.js'
 import { getBotInstance, CORE_COMMANDS, wireReminderSendFn, wireSchedulerSendFn, wireTaskSendFn } from '../bot.js'
 import { setAvailableCommands } from '../../utils/system-prompt.js'
+import { publishBotCommands } from '../publish-commands.js'
 
 export async function reloadCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -24,7 +25,7 @@ export async function reloadCommand(ctx: BotContext): Promise<void> {
         p.commands.map((cmd) => ({ command: cmd.name, description: cmd.description }))
       )
       setAvailableCommands([...CORE_COMMANDS, ...pluginCommands])
-      await bot.telegram.setMyCommands([...CORE_COMMANDS, ...pluginCommands]).catch(() => {})
+      await publishBotCommands(bot.telegram, [...CORE_COMMANDS, ...pluginCommands])
     }
 
     const names = plugins.map((p) => p.name).join(', ')

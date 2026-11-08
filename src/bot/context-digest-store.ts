@@ -13,7 +13,7 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { env } from '../config/env.js'
-import { getLastResponseFilePath } from './last-response-store.js'
+import { getLastResponseFilePath, getResponseHistoryDir } from './last-response-store.js'
 
 export interface ContextDigest {
   readonly status: 'proposal' | 'question' | 'options' | 'done' | 'error' | 'info'
@@ -154,7 +154,9 @@ export function buildContextInjection(projectPath: string, isAffirmative: boolea
   const fullFilePath = getLastResponseFilePath(projectPath)
   const hasFullFile = existsSync(fullFilePath)
   const fileHint = hasFullFile
-    ? `\n完整前次回覆檔案: ${fullFilePath}\n如果摘要不夠詳細，用 Read 工具讀取完整回覆。`
+    ? `\n完整前次回覆檔案: ${fullFilePath}\n如果摘要不夠詳細，用 Read 工具讀取完整回覆。` +
+      `\n更早的回覆在同一個目錄 (${getResponseHistoryDir(projectPath)})，檔名是 ISO 時間戳，` +
+      `需要「上一則的上一則」時用 Glob 或列目錄找最新的幾個。`
     : ''
 
   // Age hint: a digest from hours ago may be a DIFFERENT task — let Claude judge

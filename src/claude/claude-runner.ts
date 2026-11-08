@@ -4,13 +4,9 @@ import path from 'node:path'
 import fs from 'node:fs'
 import type { ClaudeModel, ClaudeResult } from '../types/index.js'
 import type { StreamEvent, StreamResult, StreamContentBlockDelta, StreamAssistantMessage } from '../types/claude-stream.js'
-import { setAISessionId, clearAISession } from '../ai/session-store.js'
+import { setAISessionId, clearAISession, normalizeProjectKey } from '../ai/session-store.js'
 import { validateProjectPath } from '../utils/path-validator.js'
-import { getTodos } from '../bot/todo-store.js'
-import { formatPinsForPrompt, touchPins } from '../bot/context-pin-store.js'
-import { formatRulesForPrompt, touchLearnedRules } from '../bot/learned-rules-store.js'
 import { getLastResponse } from '../bot/last-response-store.js'
-import { buildContextInjection } from '../bot/context-digest-store.js'
 import { getSystemPrompt } from '../utils/system-prompt.js'
 import { env } from '../config/env.js'
 import { getPairing, getPairings, isRemotePath } from '../remote/pairing-store.js'
@@ -19,16 +15,7 @@ import { getRelayPort, getAgentBaseDir } from '../remote/relay-server.js'
 import { generateRemoteMcpConfig, cleanupRemoteMcpConfig } from '../remote/mcp-config-generator.js'
 import { isVirtualChat, getVirtualChatPairingCode, getVirtualChatLicenseKey } from '../remote/virtual-chat-store.js'
 import { isAdminLicense } from '../remote/license-store.js'
-
-/** Detect affirmative/agreement replies that reference the previous message. */
-const AFFIRMATIVE_RE = /^(好|可以|沒問題|沒差|OK|ok|Yes|yes|對|嗯|行|做吧|來吧|就這樣|同意|贊成|go|就醬|開始|動手|沒錯|是的|確定|sure|yep|yeah|做啊|加吧|弄吧|改吧|要|proceed|continue|繼續)/i
-const AFFIRMATIVE_EMOJI = /^[👍✅✔️👌🫡💪🤙☑️]+$/u
-
-function looksAffirmative(text: string): boolean {
-  const stripped = text.replace(/^[\[（(【]語音輸入[\]）)】]\s*/i, '').trim()
-  if (AFFIRMATIVE_EMOJI.test(stripped)) return true
-  return AFFIRMATIVE_RE.test(stripped)
-}
+import { buildMemoryParts, buildDigestParts } from '../utils/context-parts.js'
 
 export type OnTextDelta = (text: string, accumulated: string) => void
 export type OnToolUse = (toolName: string) => void
@@ -86,22 +73,34 @@ interface ActiveProcess {
   cancelled: boolean
 }
 
+/**
+ * Running CLI processes, keyed by the *logical* project path (what callers
+ * hold: a real path in either slash style, or `remote:<label>`), canonicalized
+ * through normalizeProjectKey.
+ *
+ * This used to be keyed by `validatedPath` — path.resolve()'d, and replaced
+ * with process.cwd() for remote paths — while every reader looked up the
+ * caller's `project.path`. Both spellings differ, so isRunning/cancelRunning
+ * missed: /cancel answered "nothing running" while the CLI kept going, and two
+ * concurrent remote tasks collided on the single cwd entry.
+ */
 const activeProcesses = new Map<string, ActiveProcess>()
 
 export function isRunning(projectPath?: string): boolean {
   if (projectPath) {
-    return activeProcesses.has(projectPath)
+    return activeProcesses.has(normalizeProjectKey(projectPath))
   }
   return activeProcesses.size > 0
 }
 
 export function cancelRunning(projectPath?: string): boolean {
   if (projectPath) {
-    const active = activeProcesses.get(projectPath)
+    const key = normalizeProjectKey(projectPath)
+    const active = activeProcesses.get(key)
     if (active) {
       active.cancelled = true
       active.proc.kill('SIGTERM')
-      activeProcesses.delete(projectPath)
+      activeProcesses.delete(key)
       return true
     }
     return false
@@ -120,7 +119,7 @@ export function getActiveProjects(): readonly string[] {
 }
 
 export function getElapsedMs(projectPath: string): number {
-  const active = activeProcesses.get(projectPath)
+  const active = activeProcesses.get(normalizeProjectKey(projectPath))
   return active ? Date.now() - active.startedAt : 0
 }
 
@@ -260,39 +259,23 @@ export function runClaude(options: RunOptions): void {
   // This MUST match what queue-processor uses for setContext/setLastResponse,
   // otherwise remote sessions get amnesia (stores use remote:xxx, lookups use cwd).
   const contextKey = projectPath
+  /** Key for activeProcesses and the session store — logical, not the spawn cwd. */
+  const procKey = normalizeProjectKey(contextKey)
   let remoteSystemBlock: string | null = null
 
   const parts: string[] = []
 
-  // Inject project todos as context
-  const todos = getTodos(contextKey)
-  const pendingTodos = todos.filter((t) => !t.done)
-  if (pendingTodos.length > 0) {
-    const todoLines = pendingTodos.map((t, i) => `${i + 1}. ${t.text}`).join('\n')
-    parts.push(`[專案待辦清單]\n${todoLines}`)
-  }
-
-  // Inject pinned context + track usage
-  const pinnedContext = formatPinsForPrompt(contextKey)
-  if (pinnedContext) {
-    touchPins(contextKey)
-    parts.push(pinnedContext)
-  }
-
-  // Inject learned behavior rules
-  const rulesContext = formatRulesForPrompt(contextKey)
-  if (rulesContext) {
-    touchLearnedRules(contextKey)
-    parts.push(rulesContext)
-  }
-
-  // Inject current project context (so Claude knows which project it's working on)
-  if (options.projectName) {
-    const projectLine = isRemotePath(projectPath)
-      ? `[當前專案: ${options.projectName}]\n路徑: ${projectPath.replace(/^remote:/, '')}`
-      : `[當前專案: ${options.projectName}]\n路徑: ${projectPath}`
-    parts.push(projectLine)
-  }
+  // Todos + pins + learned rules + current project (shared with the channel
+  // backend via context-parts, so both get the same memory)
+  parts.push(
+    ...buildMemoryParts({
+      contextKey,
+      projectName: options.projectName,
+      displayPath: isRemotePath(projectPath)
+        ? projectPath.replace(/^remote:/, '')
+        : projectPath,
+    }),
+  )
 
   // Inject remote pairing context — Telegram users need REMOTE_ENABLED,
   // but Electron virtual chats are ALWAYS remote by definition
@@ -332,14 +315,7 @@ export function runClaude(options: RunOptions): void {
   //    This was the big gap — a normal-length prompt after idle used to open a
   //    fresh session with ZERO context and no warning.
   //  - short / affirmative replies: user is referring to the previous turn.
-  const isNewSession = sessionId === null
-  const isShortRef = prompt.length <= 15 || (prompt.length <= 80 && looksAffirmative(prompt))
-  if (isNewSession || isShortRef) {
-    const injection = buildContextInjection(contextKey, looksAffirmative(prompt))
-    if (injection) {
-      parts.push(injection)
-    }
-  }
+  parts.push(...buildDigestParts({ contextKey, prompt, isNewSession: sessionId === null }))
 
   parts.push(prompt)
 
@@ -464,17 +440,31 @@ export function runClaude(options: RunOptions): void {
   console.log('[claude-runner] process spawned, pid:', proc.pid)
 
   const active: ActiveProcess = { proc, startedAt: Date.now(), cancelled: false }
-  activeProcesses.set(validatedPath, active)
+  activeProcesses.set(procKey, active)
   let accumulated = ''
   let buffer = ''
   let resultReceived = false
+  /**
+   * Set once a stale-session retry has taken over.
+   *
+   * The retry spawns a replacement while THIS child is still alive. Without
+   * this flag the old child's close/error handler then fired onError on the
+   * same callbacks, which resolved the queue item and released the project
+   * lock while the retry was still running — so the retry's answer was
+   * discarded by `if (ctx.resolved) return`, the user saw "exited with code 1",
+   * the next queued item started concurrently against the same working
+   * directory, and the old child's `activeProcesses.delete` removed the
+   * RETRY's entry, leaving it untracked and uncancellable.
+   */
+  let retried = false
 
   // Auto-retry: if session is stale, clear it and re-run without --resume
   const onErrorWithRetry = (error: string) => {
     if (sessionId && error.includes('No conversation found')) {
       console.log('[claude-runner] stale session detected, clearing and retrying without --resume')
-      clearAISession('claude', validatedPath)
-      activeProcesses.delete(validatedPath)
+      retried = true
+      clearAISession('claude', contextKey)
+      activeProcesses.delete(procKey)
       // Notify the UI layer BEFORE retrying so the user knows the bot just forgot
       try { options.onStaleRetry?.() } catch {}
       runClaude({ ...options, sessionId: null })
@@ -509,7 +499,7 @@ export function runClaude(options: RunOptions): void {
           onResult: (result) => {
             resultReceived = true
             try {
-              setAISessionId('claude', validatedPath, result.sessionId)
+              setAISessionId('claude', contextKey, result.sessionId)
             } catch (err) {
               console.error('Failed to save session ID:', err)
             }
@@ -529,11 +519,14 @@ export function runClaude(options: RunOptions): void {
 
   proc.on('close', (code) => {
     console.log('[claude-runner] process closed, code:', code, 'project:', validatedPath, 'cancelled:', active.cancelled)
-    activeProcesses.delete(validatedPath)
+    // A retry has already replaced our activeProcesses entry — deleting here
+    // would untrack the retry and make it uncancellable.
+    if (!retried) activeProcesses.delete(procKey)
     if (remoteMcpConfigPath) cleanupRemoteMcpConfig(remoteMcpConfigPath)
 
-    // If cancelled or result already received, don't fire more callbacks
-    if (active.cancelled || resultReceived) return
+    // If cancelled, superseded by a retry, or the result already arrived,
+    // don't fire more callbacks
+    if (active.cancelled || resultReceived || retried) return
 
     if (buffer.trim()) {
       try {
@@ -551,7 +544,7 @@ export function runClaude(options: RunOptions): void {
           onResult: (result) => {
             resultReceived = true
             try {
-              setAISessionId('claude', validatedPath, result.sessionId)
+              setAISessionId('claude', contextKey, result.sessionId)
             } catch (err) {
               console.error('Failed to save session ID:', err)
             }
@@ -585,9 +578,10 @@ export function runClaude(options: RunOptions): void {
 
   proc.on('error', (error) => {
     console.log('[claude-runner] process error:', error.message, 'cancelled:', active.cancelled)
-    activeProcesses.delete(validatedPath)
-    // Don't report errors if cancelled (expected) or already got result
-    if (active.cancelled || resultReceived) return
+    if (!retried) activeProcesses.delete(procKey)
+    // Don't report errors if cancelled (expected), superseded by a retry, or
+    // the result already arrived
+    if (active.cancelled || resultReceived || retried) return
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       onError('Claude CLI 未安裝。請先安裝：npm install -g @anthropic-ai/claude-code')
     } else {

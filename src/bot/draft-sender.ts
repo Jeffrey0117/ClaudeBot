@@ -39,7 +39,23 @@ interface DraftState {
   errorsLogged: number
 }
 
-const activeDrafts = new Map<number, DraftState>()
+/**
+ * Live drafts keyed by RUNNER, not by chat.
+ *
+ * This used to be a Map<chatId, DraftState>, but the queue runs one concurrent
+ * runner per project path and they all share a chatId (/parallel, cross-project
+ * @run dispatch, auto project-switch). The second runner's startDraft silently
+ * overwrote the first's entry, both then edited the second message, and the
+ * first finalizeDraft deleted the shared state — so the other runner's
+ * finalizeDraft hit `if (!state) return` and its entire reply was never sent.
+ * With /parallel over 3 tasks, 2 answers vanished with no error.
+ */
+const activeDrafts = new Map<string, DraftState>()
+
+/** Stable per-runner draft identity: one chat can host several at once. */
+export function draftKeyFor(chatId: number, projectPath: string, threadId?: number): string {
+  return `${chatId}:${threadId ?? ''}:${projectPath}`
+}
 
 /** Minimum interval between draft updates (ms) */
 const THROTTLE_MS = 300
@@ -81,6 +97,7 @@ async function checkChatType(
 export async function startDraft(
   telegram: Telegraf<BotContext>['telegram'],
   chatId: number,
+  draftKey: string,
   initialText: string,
 ): Promise<number | null> {
   try {
@@ -96,7 +113,7 @@ export async function startDraft(
       parse_mode: 'Markdown',
     })
 
-    activeDrafts.set(chatId, {
+    activeDrafts.set(draftKey, {
       messageId: result.message_id,
       lastText: initialText,
       lastUpdate: Date.now(),
@@ -118,9 +135,10 @@ export async function startDraft(
 export async function updateDraft(
   telegram: Telegraf<BotContext>['telegram'],
   chatId: number,
+  draftKey: string,
   newText: string,
 ): Promise<void> {
-  const state = activeDrafts.get(chatId)
+  const state = activeDrafts.get(draftKey)
   if (!state || !state.isPrivate) return
 
   const now = Date.now()
@@ -196,9 +214,10 @@ function isNotModifiedError(err: unknown): boolean {
 export async function finalizeDraft(
   telegram: Telegraf<BotContext>['telegram'],
   chatId: number,
+  draftKey: string,
   finalText: string,
 ): Promise<void> {
-  const state = activeDrafts.get(chatId)
+  const state = activeDrafts.get(draftKey)
   if (!state) return
 
   // Split to Telegram's 4096 limit. The draft is ONE message, so it can only
@@ -256,20 +275,20 @@ export async function finalizeDraft(
       }
     }
   } finally {
-    activeDrafts.delete(chatId)
+    activeDrafts.delete(draftKey)
   }
 }
 
 /**
  * Cancel a draft (cleanup state without sending final message)
  */
-export function cancelDraft(chatId: number): void {
-  activeDrafts.delete(chatId)
+export function cancelDraft(draftKey: string): void {
+  activeDrafts.delete(draftKey)
 }
 
 /**
  * Check if a draft is active for a chat
  */
-export function hasDraft(chatId: number): boolean {
-  return activeDrafts.has(chatId)
+export function hasDraft(draftKey: string): boolean {
+  return activeDrafts.has(draftKey)
 }
