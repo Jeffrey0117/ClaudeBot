@@ -42,21 +42,49 @@ export function channelInterrupt(projectPath?: string): boolean {
   return manager.interrupt(keyFor(projectPath))
 }
 
+/** The CLI's wording when a resumed conversation no longer exists on disk. */
+export function isStaleSessionError(message: string): boolean {
+  return message.includes('No conversation found')
+}
+
 export const channelRunner: AIRunner = {
   backend: 'channel',
 
   run(opts: AIRunOptions): void {
-    const { cfg: baseCfg, fingerprint } = resolveChannelLaunch({
-      projectPath: opts.projectPath,
-      model: opts.model,
-      chatId: opts.chatId,
-      threadId: opts.threadId,
-      maxTurns: opts.maxTurns,
-    })
-    // Resume prior context on a COLD start (after idle-sweep / bot restart). A
-    // warm session ignores this — runTurn reuses the live process, no start().
-    const resumeSessionId = getAISessionId('channel', opts.projectPath) ?? undefined
-    const cfg = resumeSessionId ? { ...baseCfg, resumeSessionId } : baseCfg
+    runChannelTurn(opts, true)
+  },
+
+  isRunning(projectPath?: string): boolean { return isChannelRunning(projectPath) },
+  cancelRunning(projectPath?: string): boolean { return channelInterrupt(projectPath) },
+  getElapsedMs(): number { return 0 },
+}
+
+/**
+ * One channel turn, with stale-session recovery.
+ *
+ * A stored session id can outlive the conversation it points at (the transcript
+ * is deleted, or the worktree it belonged to never had one). A WARM session
+ * ignores resumeSessionId entirely, so a dangling id can sit unnoticed for
+ * weeks and only bites on the next cold start — which is exactly what a bot
+ * restart causes. claude-runner already clears and retries in that case; this
+ * backend did not, so the raw "No conversation found with session ID: ..." was
+ * surfaced to the user and every following turn failed the same way, with no
+ * way out short of /new.
+ */
+function runChannelTurn(opts: AIRunOptions, allowResume: boolean): void {
+  const { cfg: baseCfg, fingerprint } = resolveChannelLaunch({
+    projectPath: opts.projectPath,
+    model: opts.model,
+    chatId: opts.chatId,
+    threadId: opts.threadId,
+    maxTurns: opts.maxTurns,
+  })
+  // Resume prior context on a COLD start (after idle-sweep / bot restart). A
+  // warm session ignores this — runTurn reuses the live process, no start().
+  const resumeSessionId = allowResume
+    ? getAISessionId('channel', opts.projectPath) ?? undefined
+    : undefined
+  const cfg = resumeSessionId ? { ...baseCfg, resumeSessionId } : baseCfg
 
     // Per-turn memory. This backend used to pass opts.prompt straight through,
     // so pins, @learn rules and project todos were stored and confirmed to the
@@ -77,24 +105,53 @@ export const channelRunner: AIRunner = {
       opts.prompt,
     ].join('\n\n')
 
-    let accumulated = ''
-    const onEvent = (e: SessionEvent): void => {
-      switch (e.kind) {
-        case 'text-delta': accumulated += e.text; opts.onTextDelta(e.text, accumulated); break
-        case 'tool-use': opts.onToolUse(e.toolName); break
-        case 'result':
-          if (e.result.sessionId) setAISessionId('channel', opts.projectPath, e.result.sessionId)
-          opts.onResult({ ...e.result, backend: 'channel', model: opts.model })
-          break
-        case 'error': opts.onError(e.message); break
-      }
-    }
-    void manager
-      .runTurn(key, cfg, fingerprint, prompt, onEvent)
-      .catch((err) => { opts.onError(err instanceof Error ? err.message : String(err)) })
-  },
+  let accumulated = ''
+  let handled = false
 
-  isRunning(projectPath?: string): boolean { return isChannelRunning(projectPath) },
-  cancelRunning(projectPath?: string): boolean { return channelInterrupt(projectPath) },
-  getElapsedMs(): number { return 0 },
+  /**
+   * Drop the dangling id and run the turn again cold, once.
+   * Returns true when recovery took over, so the caller must not report.
+   */
+  const recoverFromStaleSession = (message: string): boolean => {
+    if (handled) return true
+    if (!resumeSessionId || !isStaleSessionError(message)) return false
+    handled = true
+    console.error(
+      `[channel] stored session ${resumeSessionId} no longer exists — clearing and retrying cold`,
+    )
+    clearAISession('channel', opts.projectPath)
+    // Drop the warm entry too: it was started with the bad resume id
+    void manager.stop(keyFor(opts.projectPath)).catch(() => {})
+    // Tell the UI the bot just lost its memory, same as the Claude backend does
+    try { opts.onStaleRetry?.() } catch { /* best effort */ }
+    runChannelTurn(opts, false)
+    return true
+  }
+
+  const onEvent = (e: SessionEvent): void => {
+    switch (e.kind) {
+      case 'text-delta': accumulated += e.text; opts.onTextDelta(e.text, accumulated); break
+      case 'tool-use': opts.onToolUse(e.toolName); break
+      case 'result':
+        if (handled) return
+        handled = true
+        if (e.result.sessionId) setAISessionId('channel', opts.projectPath, e.result.sessionId)
+        opts.onResult({ ...e.result, backend: 'channel', model: opts.model })
+        break
+      case 'error':
+        if (recoverFromStaleSession(e.message)) return
+        handled = true
+        opts.onError(e.message)
+        break
+    }
+  }
+  void manager
+    .runTurn(key, cfg, fingerprint, prompt, onEvent)
+    .catch((err) => {
+      const message = err instanceof Error ? err.message : String(err)
+      if (recoverFromStaleSession(message)) return
+      if (handled) return
+      handled = true
+      opts.onError(message)
+    })
 }
