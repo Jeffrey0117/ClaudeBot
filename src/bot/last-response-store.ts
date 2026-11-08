@@ -24,10 +24,11 @@ import {
 import { join, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { env } from '../config/env.js'
+import { statePath } from '../config/paths.js'
 
 const BOT_ID = env.BOT_TOKEN.slice(-6)
-const STORE_FILE = join(process.cwd(), 'data', 'last-responses.json')
-const FULL_RESPONSE_DIR = join(process.cwd(), 'data', 'last-response-full')
+const STORE_FILE = statePath('data', 'last-responses.json')
+const FULL_RESPONSE_DIR = statePath('data', 'last-response-full')
 const MAX_STORE_LENGTH = 1500
 
 /**

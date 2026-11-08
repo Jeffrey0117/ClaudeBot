@@ -11,9 +11,10 @@
  */
 
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { dirname } from 'node:path'
 import { env } from '../config/env.js'
 import { getLastResponseFilePath, getResponseHistoryDir } from './last-response-store.js'
+import { statePath } from '../config/paths.js'
 
 export interface ContextDigest {
   readonly status: 'proposal' | 'question' | 'options' | 'done' | 'error' | 'info'
@@ -31,7 +32,7 @@ interface StoredContext {
 }
 
 const BOT_ID = env.BOT_TOKEN.slice(-6)
-const STORE_FILE = join(process.cwd(), 'data', 'context-digest.json')
+const STORE_FILE = statePath('data', 'context-digest.json')
 
 type PersistedData = Record<string, StoredContext>
 

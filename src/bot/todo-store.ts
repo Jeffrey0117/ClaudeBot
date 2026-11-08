@@ -1,5 +1,5 @@
-import { resolve } from 'node:path'
 import { createJsonFileStore } from '../utils/json-file-store.js'
+import { statePath } from '../config/paths.js'
 
 export interface TodoItem {
   readonly text: string
@@ -9,7 +9,7 @@ export interface TodoItem {
 
 type TodoData = Record<string, TodoItem[]>
 
-const store = createJsonFileStore<TodoData>(resolve('data/todos.json'), () => ({}))
+const store = createJsonFileStore<TodoData>(statePath('data', 'todos.json'), () => ({}))
 
 export function addTodo(projectPath: string, text: string): TodoItem {
   const data = store.load()
