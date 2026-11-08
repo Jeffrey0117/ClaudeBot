@@ -13,6 +13,7 @@ import { parseCommandDirectives, stripCommandDirectives } from '../utils/command
 import { parseDirectives, executeDirectives, stripDirectives } from '../utils/directives.js'
 import { parsePipeDirectives, executePipeDirectives, stripPipeDirectives } from '../utils/pipe-executor.js'
 import { parseUploadDirectives, executeUploadDirectives, stripUploadDirectives } from '../utils/upload-executor.js'
+import { parsePageDirectives, executePageDirectives, stripPageDirectives } from '../utils/page-executor.js'
 import { createFakeContext } from '../utils/fake-context.js'
 import { isDangerousCmd, registerPendingCmd } from './cmd-guard.js'
 import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand, getPluginModule } from '../plugins/loader.js'
@@ -133,6 +134,7 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
     const aiDirectives = parseDirectives(rawAfterRun)
     const pipeDirectives = parsePipeDirectives(rawAfterRun)
     const uploadDirectives = parseUploadDirectives(rawAfterRun)
+    const pageDirectives = parsePageDirectives(rawAfterRun)
 
     // NOTE: @file/@confirm/@notify are executed AFTER sendResponseChunks (below)
     // so button messages appear below the response text, not above.
@@ -147,6 +149,11 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       await executeUploadDirectives(uploadDirectives, ctx.item.chatId, ctx.telegram, ctx.item.project.path)
     }
 
+    // Execute @page directives (publish a generated HTML page, send its URL)
+    if (pageDirectives.length > 0) {
+      await executePageDirectives(pageDirectives, ctx.item.chatId, ctx.telegram, ctx.item.project.path)
+    }
+
     // Strip all directives (@cmd + @file/@confirm/@notify + @upload + @pipe) before output hooks
     // NOTE: @cmd is stripped here but executed AFTER main text is sent (below)
     const afterCmdStrip = cmdDirectives.length > 0
@@ -158,9 +165,12 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
     const afterUploadStrip = uploadDirectives.length > 0
       ? stripUploadDirectives(afterAiStrip)
       : afterAiStrip
-    const textForHooks = pipeDirectives.length > 0
-      ? stripPipeDirectives(afterUploadStrip)
+    const afterPageStrip = pageDirectives.length > 0
+      ? stripPageDirectives(afterUploadStrip)
       : afterUploadStrip
+    const textForHooks = pipeDirectives.length > 0
+      ? stripPipeDirectives(afterPageStrip)
+      : afterPageStrip
 
     const hookResult = await dispatchOutputHooks(textForHooks, {
       projectPath: ctx.item.project.path,
@@ -407,9 +417,9 @@ async function sendResponseChunks(
   const hadDraft = ctx.draftActive
   if (hadDraft) {
     // draftText has ALL turns — strip directives + CTX so user sees full process
-    const draftStripped = stripPipeDirectives(stripUploadDirectives(
+    const draftStripped = stripPipeDirectives(stripPageDirectives(stripUploadDirectives(
       stripDirectives(stripCommandDirectives(stripRunDirectives(ctx.draftText))),
-    ))
+    )))
     const { cleaned: draftDigestCleaned } = extractDigest(draftStripped)
     const draftCleaned = cleanMarkdown(draftDigestCleaned || draftStripped)
     const botLabel = `\`[${deriveBotId()}]\` `

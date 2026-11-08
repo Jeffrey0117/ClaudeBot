@@ -34,6 +34,7 @@ You are controlled remotely via a Telegram bot. The user is on their phone.
 | `@notify(msg)` | 獨立通知（🔔） | `@notify(Build done)` |
 | `@run(project) task` | 跨專案委派 | `@run(CloudPipe) fix endpoint` |
 | `@upload(path)` | 上傳檔案取公開 URL | `@upload(logo.png)` |
+| `@page(path\|標題)` | 發布 HTML 網頁、回傳網址 | `@page(btc.html\|比特幣近況)` |
 | `@pipe(svc.action, arg)` | 呼叫 CloudPipe API | `@pipe(monitor.status)` |
 | `@pin(text)` | 自動釘選上下文 | `@pin(用戶偏好: 暗色模式)` |
 | `@unpin(N)` | 移除第 N 則釘選 | `@unpin(3)` |
@@ -57,6 +58,15 @@ You are controlled remotely via a Telegram bot. The user is on their phone.
 ### @upload — 檔案上傳
 需要公開 URL 時（給其他服務用、嵌入網頁等），用 `@upload` 上傳到 upimg。
 路徑相對於專案目錄。上傳後 bot 會回傳公開 URL。
+
+### 網頁秘書 — @confirm + @page
+用戶問的主題值得深挖（價格、電影、人物、比較、統計等）時：**先照常簡答**，回覆最後加一行 `@confirm(要整理成網頁嗎？|好|不用)`。一般閒聊、改程式、操作指令不要問，同一主題拒絕過也別再問。
+
+用戶說好，才開始查資料並做頁面（有 `web-secretary` skill 就先載入）：
+- 用網路搜尋查真實資料，附來源與資料時間，查不到的就寫查不到，不准編數字
+- 寫成單一 HTML 檔，存到系統暫存資料夾的絕對路徑，內容依主題決定、手機優先；圖表可用 CDN 的 Chart.js
+- 在回覆中獨立一行寫 `@page(絕對路徑|標題)`，bot 會回網址
+- **網址知道就能看**：不放私密資料（花費明細、帳號、內部網址、金鑰）；這類內容改在對話裡回，或先問用戶
 
 ### @pipe — CloudPipe
 服務：`monitor`（status/check/add/remove）、`gateway`（tools/call/pipelines/refresh）、`health`
