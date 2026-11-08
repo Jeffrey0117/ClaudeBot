@@ -169,9 +169,22 @@ function ensureProcess(): void {
 
   const serverPath = resolveServerPath()
 
-  // --speed 2: fast processing, np.interp resampling + Gemini LLM fixes errors
-  console.error(`[sherpa] spawning: ${PYTHON_EXE} ${serverPath} --speed 2`)
-  proc = spawn(PYTHON_EXE, [serverPath, '--speed', '2'], {
+  // --speed 1: no time compression.
+  //
+  // This used to pass --speed 2, which makes Sherpa_ASR decimate the waveform
+  // with np.interp to half its length and then hand it to the recogniser still
+  // labelled 16kHz — so speech plays back at 2x, pitch and formants shift an
+  // octave, and with no low-pass before decimation everything above 4kHz
+  // aliases back into the band. Paraformer was trained on normal speech. It
+  // saved roughly half of a decode (~1-2s on a 20s note) and paid for it with
+  // a systematically degraded transcript, which is why the Gemini pass existed
+  // to "fix errors" afterwards.
+  //
+  // SpeakSlow — the newer, better-tuned pipeline — has no speed factor at all;
+  // its only pre-decode step is volume normalisation. Note Sherpa_ASR's own
+  // argparse default is 1.5, so 1 must be passed explicitly.
+  console.error(`[sherpa] spawning: ${PYTHON_EXE} ${serverPath} --speed 1`)
+  proc = spawn(PYTHON_EXE, [serverPath, '--speed', '1'], {
     shell: false,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },

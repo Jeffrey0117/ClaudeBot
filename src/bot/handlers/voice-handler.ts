@@ -26,6 +26,7 @@ import { addVoice, getVoiceActive } from '../ordered-message-buffer.js'
 import { extractReplyQuote } from './reply-quote.js'
 import { telegramFetch } from '../../utils/telegram-fetch.js'
 import { getPairing } from '../../remote/pairing-store.js'
+import { recordUserMessage } from '../last-message-store.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -130,6 +131,23 @@ async function addPunctuation(text: string): Promise<string> {
   }
 }
 
+/** Does this text already carry sentence punctuation? */
+function hasPunctuation(text: string): boolean {
+  return /[。，！？；、,.!?;]/.test(text)
+}
+
+/**
+ * Punctuate only if the ASR server did not already do it.
+ *
+ * The Sherpa server punctuates in-process, so the common path needs no work at
+ * all. This keeps the rule-based tool as a fallback for a server build that
+ * returns bare text, without paying a Python interpreter launch every time.
+ */
+async function ensurePunctuated(text: string): Promise<string> {
+  if (!text || hasPunctuation(text)) return text
+  return addPunctuation(text)
+}
+
 /**
  * Break long ASR text into paragraphs for readability.
  * Inserts line breaks after sentence-ending punctuation (。！？；).
@@ -198,9 +216,14 @@ export async function transcribeVoiceFile(
     if (!result.success || !result.text) {
       return { text: null, error: `辨識失敗${result.error ? `: ${result.error}` : ''}` }
     }
+    // The Sherpa server already converts and punctuates in-process
+    // (sherpa_server.py: _s2t.convert then add_punctuation), so re-running
+    // punctuation.py here spawned a second Python interpreter per voice message
+    // to redo work that was already done — measured 156-160ms, on the critical
+    // path before the transcript is shown. Only fall back when the server
+    // returns something unpunctuated.
     const rawText = result.text.trim()
-    const punctuated = await addPunctuation(rawText)
-    return { text: punctuated, rawText }
+    return { text: await ensurePunctuated(rawText), rawText }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[voice] ERROR:', err)
@@ -234,7 +257,7 @@ export async function transcribeLocalAudio(inputPath: string): Promise<VoiceResu
       return { text: null, error: `辨識失敗${result.error ? `: ${result.error}` : ''}` }
     }
     const rawText = result.text.trim()
-    return { text: await addPunctuation(rawText), rawText }
+    return { text: await ensurePunctuated(rawText), rawText }
   } catch (err) {
     return { text: null, error: err instanceof Error ? err.message : String(err) }
   } finally {
@@ -369,6 +392,12 @@ async function processVoiceInBackground(
   const formatted = formatAsrText(result.text)
   const sentMsg = await telegram.sendMessage(chatId, `🗣⚡ ${formatted}`)
     .catch(() => null)
+
+  // Record it the same way a typed message is recorded. bot.ts registers
+  // 'voice' as its own handler, so voice never passed through message-handler
+  // — the only recordUserMessage call site — which left /last blind to
+  // everything the user had said out loud.
+  recordUserMessage(chatId, result.text)
 
   // Resolve buffer immediately — don't block queue
   resolveVoice(result.text)

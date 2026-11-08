@@ -70,7 +70,7 @@ import { photoHandler, documentHandler } from './handlers/photo-handler.js'
 import { videoHandler } from './handlers/ig-media-handler.js'
 import { voiceHandler } from './handlers/voice-handler.js'
 import { setAllotRejectNotify } from './ordered-message-buffer.js'
-import { warmupSherpa, addHotwords, isSherpaAvailable } from '../asr/sherpa-client.js'
+import { warmupSherpa, isSherpaAvailable } from '../asr/sherpa-client.js'
 import { scanProjects } from '../config/projects.js'
 import { setupQueueProcessor } from './queue-processor.js'
 import { setBotInstance } from './bio-updater.js'
@@ -463,12 +463,20 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   // Pre-spawn Sherpa ASR process (avoid cold start on first voice)
   if (isSherpaAvailable()) {
     warmupSherpa()
-
-    // Inject project names as hotwords so ASR recognises them correctly
-    const projectNames = scanProjects().map((p) => p.name)
-    // Delay slightly to let Sherpa finish init before sending commands
-    setTimeout(() => { addHotwords(projectNames).catch(() => {}) }, 3_000)
   }
+
+  // Hotword injection removed. It was a no-op AND destructive:
+  //
+  // No-op — Sherpa_ASR builds its recogniser with
+  // `from_paraformer(..., decoding_method="greedy_search")` and never passes
+  // hotwords_file/hotwords_score, so nothing sent via set_hotwords ever reached
+  // the decoder. That is inherent, not an oversight: hotword biasing needs a
+  // transducer with modified_beam_search, which is why SpeakSlow only feeds
+  // hotwords to its streaming Zipformer and never to the offline Paraformer.
+  //
+  // Destructive — _save_hotwords_file truncates and rewrites hotwords.txt on
+  // every bot start, so injecting scanProjects() names overwrote the curated
+  // file with hundreds of directory names (adman--bot1, adman.bak, ...).
 
   // Register commands with Telegram for autocomplete (core + plugins)
   const pluginCommands = plugins.flatMap((p) =>
