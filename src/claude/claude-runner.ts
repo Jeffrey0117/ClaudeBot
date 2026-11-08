@@ -4,7 +4,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import type { ClaudeModel, ClaudeResult } from '../types/index.js'
 import type { StreamEvent, StreamResult, StreamContentBlockDelta, StreamAssistantMessage } from '../types/claude-stream.js'
-import { setAISessionId, clearAISession } from '../ai/session-store.js'
+import { setAISessionId, clearAISession, normalizeProjectKey } from '../ai/session-store.js'
 import { validateProjectPath } from '../utils/path-validator.js'
 import { getTodos } from '../bot/todo-store.js'
 import { formatPinsForPrompt, touchPins } from '../bot/context-pin-store.js'
@@ -86,22 +86,34 @@ interface ActiveProcess {
   cancelled: boolean
 }
 
+/**
+ * Running CLI processes, keyed by the *logical* project path (what callers
+ * hold: a real path in either slash style, or `remote:<label>`), canonicalized
+ * through normalizeProjectKey.
+ *
+ * This used to be keyed by `validatedPath` — path.resolve()'d, and replaced
+ * with process.cwd() for remote paths — while every reader looked up the
+ * caller's `project.path`. Both spellings differ, so isRunning/cancelRunning
+ * missed: /cancel answered "nothing running" while the CLI kept going, and two
+ * concurrent remote tasks collided on the single cwd entry.
+ */
 const activeProcesses = new Map<string, ActiveProcess>()
 
 export function isRunning(projectPath?: string): boolean {
   if (projectPath) {
-    return activeProcesses.has(projectPath)
+    return activeProcesses.has(normalizeProjectKey(projectPath))
   }
   return activeProcesses.size > 0
 }
 
 export function cancelRunning(projectPath?: string): boolean {
   if (projectPath) {
-    const active = activeProcesses.get(projectPath)
+    const key = normalizeProjectKey(projectPath)
+    const active = activeProcesses.get(key)
     if (active) {
       active.cancelled = true
       active.proc.kill('SIGTERM')
-      activeProcesses.delete(projectPath)
+      activeProcesses.delete(key)
       return true
     }
     return false
@@ -120,7 +132,7 @@ export function getActiveProjects(): readonly string[] {
 }
 
 export function getElapsedMs(projectPath: string): number {
-  const active = activeProcesses.get(projectPath)
+  const active = activeProcesses.get(normalizeProjectKey(projectPath))
   return active ? Date.now() - active.startedAt : 0
 }
 
@@ -260,6 +272,8 @@ export function runClaude(options: RunOptions): void {
   // This MUST match what queue-processor uses for setContext/setLastResponse,
   // otherwise remote sessions get amnesia (stores use remote:xxx, lookups use cwd).
   const contextKey = projectPath
+  /** Key for activeProcesses and the session store — logical, not the spawn cwd. */
+  const procKey = normalizeProjectKey(contextKey)
   let remoteSystemBlock: string | null = null
 
   const parts: string[] = []
@@ -464,7 +478,7 @@ export function runClaude(options: RunOptions): void {
   console.log('[claude-runner] process spawned, pid:', proc.pid)
 
   const active: ActiveProcess = { proc, startedAt: Date.now(), cancelled: false }
-  activeProcesses.set(validatedPath, active)
+  activeProcesses.set(procKey, active)
   let accumulated = ''
   let buffer = ''
   let resultReceived = false
@@ -473,8 +487,8 @@ export function runClaude(options: RunOptions): void {
   const onErrorWithRetry = (error: string) => {
     if (sessionId && error.includes('No conversation found')) {
       console.log('[claude-runner] stale session detected, clearing and retrying without --resume')
-      clearAISession('claude', validatedPath)
-      activeProcesses.delete(validatedPath)
+      clearAISession('claude', contextKey)
+      activeProcesses.delete(procKey)
       // Notify the UI layer BEFORE retrying so the user knows the bot just forgot
       try { options.onStaleRetry?.() } catch {}
       runClaude({ ...options, sessionId: null })
@@ -509,7 +523,7 @@ export function runClaude(options: RunOptions): void {
           onResult: (result) => {
             resultReceived = true
             try {
-              setAISessionId('claude', validatedPath, result.sessionId)
+              setAISessionId('claude', contextKey, result.sessionId)
             } catch (err) {
               console.error('Failed to save session ID:', err)
             }
@@ -529,7 +543,7 @@ export function runClaude(options: RunOptions): void {
 
   proc.on('close', (code) => {
     console.log('[claude-runner] process closed, code:', code, 'project:', validatedPath, 'cancelled:', active.cancelled)
-    activeProcesses.delete(validatedPath)
+    activeProcesses.delete(procKey)
     if (remoteMcpConfigPath) cleanupRemoteMcpConfig(remoteMcpConfigPath)
 
     // If cancelled or result already received, don't fire more callbacks
@@ -551,7 +565,7 @@ export function runClaude(options: RunOptions): void {
           onResult: (result) => {
             resultReceived = true
             try {
-              setAISessionId('claude', validatedPath, result.sessionId)
+              setAISessionId('claude', contextKey, result.sessionId)
             } catch (err) {
               console.error('Failed to save session ID:', err)
             }
@@ -585,7 +599,7 @@ export function runClaude(options: RunOptions): void {
 
   proc.on('error', (error) => {
     console.log('[claude-runner] process error:', error.message, 'cancelled:', active.cancelled)
-    activeProcesses.delete(validatedPath)
+    activeProcesses.delete(procKey)
     // Don't report errors if cancelled (expected) or already got result
     if (active.cancelled || resultReceived) return
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {

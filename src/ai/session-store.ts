@@ -50,6 +50,42 @@ const mySessions = new Map<string, string>()
 // Known AI backends for key format validation
 const KNOWN_BACKENDS = new Set(['claude', 'gemini', 'codex', 'channel', 'bat-remote'])
 
+/**
+ * Canonical spelling of the project part of a session key.
+ *
+ * The same project reaches us spelled two different ways depending on the
+ * caller: `git worktree list --porcelain` reports forward slashes
+ * (C:/Users/.../proj--bot1), while path.resolve()/join() produce backslashes
+ * (C:\Users\...\proj--bot1). claude-runner wrote the id with the resolved
+ * (backslash) form while every reader looked it up with project.path (the
+ * forward-slash form git handed back for an existing worktree), so the lookup
+ * always missed, `--resume` was never passed, and every turn silently began a
+ * brand-new Claude conversation.
+ *
+ * Normalising inside makeKey() makes readers and writers agree regardless of
+ * which spelling they hold. Non-path keys (e.g. `remote:<label>`) contain no
+ * separators or drive letter and pass through unchanged.
+ */
+export function normalizeProjectKey(projectPath: string): string {
+  let p = projectPath.trim().replace(/\\/g, '/')
+  // Windows drive letters are case-insensitive — pin them to upper case
+  p = p.replace(/^([a-z]):/, (_full, drive: string) => `${drive.toUpperCase()}:`)
+  // Drop a trailing separator, but keep a bare root like "C:/"
+  if (p.length > 3 && p.endsWith('/')) p = p.slice(0, -1)
+  return p
+}
+
+/** Rewrite a whole `BOT_ID:backend:path` key with a canonical path part. */
+function normalizeFullKey(key: string): string {
+  const firstColon = key.indexOf(':')
+  const afterBotId = key.substring(firstColon + 1)
+  const secondColon = afterBotId.indexOf(':')
+  const botId = key.substring(0, firstColon)
+  const backend = afterBotId.substring(0, secondColon)
+  const projectPath = afterBotId.substring(secondColon + 1)
+  return `${botId}:${backend}:${normalizeProjectKey(projectPath)}`
+}
+
 /** Check if a key is the valid new format: BOT_ID:backend:path */
 function isNewFormatKey(key: string): boolean {
   const firstColon = key.indexOf(':')
@@ -114,6 +150,7 @@ function saveSessions(): void {
 {
   const disk = readDiskSessions()
   let migrationNeeded = false
+  const cleaned: Record<string, string> = {}
 
   for (const [key, sid] of Object.entries(disk)) {
     // Skip legacy keys (no backend segment)
@@ -121,20 +158,21 @@ function saveSessions(): void {
       migrationNeeded = true
       continue
     }
+    // Fold the two path spellings onto one canonical key. Insertion order is
+    // roughly chronological, so when a project was stored under both spellings
+    // the later (newer) entry wins.
+    const canonical = normalizeFullKey(key)
+    if (canonical !== key) migrationNeeded = true
+    cleaned[canonical] = sid
+
     // Only load keys belonging to THIS bot
-    if (key.startsWith(MY_PREFIX)) {
-      mySessions.set(key, sid)
+    if (canonical.startsWith(MY_PREFIX)) {
+      mySessions.set(canonical, sid)
     }
   }
 
-  // Clean up legacy keys from disk (one-time)
+  // Rewrite the file once: drops legacy keys and collapses duplicate spellings
   if (migrationNeeded) {
-    const cleaned: Record<string, string> = {}
-    for (const [key, sid] of Object.entries(disk)) {
-      if (isNewFormatKey(key)) {
-        cleaned[key] = sid
-      }
-    }
     try {
       const tmp = `${SESSION_FILE}.tmp`
       writeFileSync(tmp, JSON.stringify(cleaned, null, 2))
@@ -146,7 +184,7 @@ function saveSessions(): void {
 }
 
 function makeKey(backend: AIBackend, projectPath: string): string {
-  return `${BOT_ID}:${backend}:${projectPath}`
+  return `${BOT_ID}:${backend}:${normalizeProjectKey(projectPath)}`
 }
 
 function isExpired(key: string): boolean {
