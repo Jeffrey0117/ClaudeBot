@@ -444,11 +444,25 @@ export function runClaude(options: RunOptions): void {
   let accumulated = ''
   let buffer = ''
   let resultReceived = false
+  /**
+   * Set once a stale-session retry has taken over.
+   *
+   * The retry spawns a replacement while THIS child is still alive. Without
+   * this flag the old child's close/error handler then fired onError on the
+   * same callbacks, which resolved the queue item and released the project
+   * lock while the retry was still running — so the retry's answer was
+   * discarded by `if (ctx.resolved) return`, the user saw "exited with code 1",
+   * the next queued item started concurrently against the same working
+   * directory, and the old child's `activeProcesses.delete` removed the
+   * RETRY's entry, leaving it untracked and uncancellable.
+   */
+  let retried = false
 
   // Auto-retry: if session is stale, clear it and re-run without --resume
   const onErrorWithRetry = (error: string) => {
     if (sessionId && error.includes('No conversation found')) {
       console.log('[claude-runner] stale session detected, clearing and retrying without --resume')
+      retried = true
       clearAISession('claude', contextKey)
       activeProcesses.delete(procKey)
       // Notify the UI layer BEFORE retrying so the user knows the bot just forgot
@@ -505,11 +519,14 @@ export function runClaude(options: RunOptions): void {
 
   proc.on('close', (code) => {
     console.log('[claude-runner] process closed, code:', code, 'project:', validatedPath, 'cancelled:', active.cancelled)
-    activeProcesses.delete(procKey)
+    // A retry has already replaced our activeProcesses entry — deleting here
+    // would untrack the retry and make it uncancellable.
+    if (!retried) activeProcesses.delete(procKey)
     if (remoteMcpConfigPath) cleanupRemoteMcpConfig(remoteMcpConfigPath)
 
-    // If cancelled or result already received, don't fire more callbacks
-    if (active.cancelled || resultReceived) return
+    // If cancelled, superseded by a retry, or the result already arrived,
+    // don't fire more callbacks
+    if (active.cancelled || resultReceived || retried) return
 
     if (buffer.trim()) {
       try {
@@ -561,9 +578,10 @@ export function runClaude(options: RunOptions): void {
 
   proc.on('error', (error) => {
     console.log('[claude-runner] process error:', error.message, 'cancelled:', active.cancelled)
-    activeProcesses.delete(procKey)
-    // Don't report errors if cancelled (expected) or already got result
-    if (active.cancelled || resultReceived) return
+    if (!retried) activeProcesses.delete(procKey)
+    // Don't report errors if cancelled (expected), superseded by a retry, or
+    // the result already arrived
+    if (active.cancelled || resultReceived || retried) return
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       onError('Claude CLI 未安裝。請先安裝：npm install -g @anthropic-ai/claude-code')
     } else {
