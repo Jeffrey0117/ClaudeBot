@@ -25,6 +25,7 @@ Claude response → parse all directives
 | `@confirm(q\|a\|b)` | `directives.ts` | Inline buttons → selection re-enqueued |
 | `@notify(msg)` | `directives.ts` | Standalone 🔔 notification |
 | `@upload(path)` | `upload-executor.ts` | Upload file to upimg, return public URL |
+| `@page(path\|title)` | `page-executor.ts` | Publish generated HTML at `/p/<id>` on the relay (`../pages/`), send URL |
 | `@pipe(svc.action)` | `pipe-executor.ts` | CloudPipe HTTP API call |
 | `@run(project) task` | `cross-project-parser.ts` | Cross-project delegation |
 

@@ -20,6 +20,7 @@ import {
   consumeBatCode,
 } from './pairing-store.js'
 import { env } from '../config/env.js'
+import { handlePageRequest } from '../pages/page-route.js'
 import { startTunnel, setPublicRelayUrl, getPublicRelayUrl, getRelayPasteId, publishRelayUrl } from './tunnel.js'
 import type {
   RelayInbound,
@@ -379,6 +380,8 @@ export function startRelayServer(port: number): void {
       })
       return
     }
+    // Generated web pages (@page directive)
+    if (handlePageRequest(req, res)) return
     // Cloudflare Tunnel health-check and browser requests
     res.writeHead(200, { 'Content-Type': 'text/plain' })
     res.end('ClaudeBot Relay')
