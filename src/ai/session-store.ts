@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, renameSync } from 'node:fs'
 import type { AIBackend } from './types.js'
 import { env } from '../config/env.js'
 import { statePath } from '../config/paths.js'
+import { createJsonFileStore } from '../utils/json-file-store.js'
 
 /** Short bot identifier from token (last 6 chars) for session isolation. */
 const BOT_ID = env.BOT_TOKEN.slice(-6)
@@ -22,6 +23,20 @@ const promptCounts = new Map<string, number>()
  *  Updated from each turn's result usage; primary rotation signal. */
 const sessionTokens = new Map<string, number>()
 
+/**
+ * Occupancy observed on this session's FIRST turn — the fixed cost of asking
+ * anything at all, before the conversation has accumulated a thing.
+ *
+ * On a real setup that baseline is large: global rules, the bot's own system
+ * prompt, the project's CLAUDE.md files and every MCP tool definition are
+ * re-sent every turn and easily total 25-35k tokens. Judging "this
+ * conversation is getting long" on ABSOLUTE occupancy therefore declared a
+ * brand-new conversation long after two or three turns of ordinary work, which
+ * is exactly the "it nags immediately and nothing has accumulated" complaint.
+ * Growth past the baseline is the honest signal.
+ */
+const baselineTokens = new Map<string, number>()
+
 /** Session keys we've already nudged to use /new (one reminder per session). */
 const remindedNew = new Set<string>()
 
@@ -32,10 +47,14 @@ const expiryNotices = new Set<string>()
 /** When each session was first created (ms) — for /status session age. */
 const sessionStartedAt = new Map<string, number>()
 
-/** Fraction of ROTATE_AT_TOKENS at which we proactively suggest /new
- *  (fires before the auto-rotation so the user has a heads-up). */
-const REMIND_TOKEN_FRACTION = 0.6
-/** Fallback trigger when token usage is unavailable. */
+/**
+ * How much the context must GROW past this session's own baseline before we
+ * suggest /new. Deliberately a growth budget, not a fraction of
+ * ROTATE_AT_TOKENS: the old `0.6 * ROTATE_AT_TOKENS` was an absolute 72k, which
+ * the per-turn fixed overhead alone gets most of the way to.
+ */
+const REMIND_GROWTH_TOKENS = 45_000
+/** Fallback trigger when token usage is unavailable: turns in THIS session. */
 const REMIND_PROMPT_COUNT = 25
 
 /** Auto-rotate session after this many prompts to prevent context bloat.
@@ -46,6 +65,88 @@ const MAX_PROMPTS_PER_SESSION = 50
 
 /** In-memory cache of THIS bot's sessions only */
 const mySessions = new Map<string, string>()
+
+/**
+ * Per-session counters, persisted alongside the id.
+ *
+ * These used to be in-memory only while the session id was on disk, which had
+ * two consequences. The "one reminder per session" promise was really "one per
+ * process", so every bot restart re-armed the /new nag. And after a restart the
+ * bot resumed a long session believing it had 0 tokens and 0 turns, so rotation
+ * and the 4-hour idle expiry both mis-judged it — it could resume a session
+ * already past the model's auto-compact point, which compacts lossily instead
+ * of our digest-seeded rotation.
+ */
+interface PersistedStats {
+  readonly tokens?: number
+  readonly baseline?: number
+  readonly prompts?: number
+  readonly startedAt?: number
+  readonly lastActivity?: number
+  readonly reminded?: boolean
+}
+
+const statsStore = createJsonFileStore<Record<string, PersistedStats>>(
+  statePath('data', 'session-stats.json'),
+  () => ({}),
+)
+
+let statsTimer: ReturnType<typeof setTimeout> | null = null
+
+function saveStats(): void {
+  if (statsTimer) return
+  statsTimer = setTimeout(() => {
+    statsTimer = null
+    try {
+      const others = statsStore.load()
+      const merged: Record<string, PersistedStats> = {}
+      // keep other bots' rows untouched
+      for (const k of Object.keys(others)) {
+        if (!k.startsWith(MY_PREFIX)) merged[k] = others[k]
+      }
+      for (const key of mySessions.keys()) {
+        merged[key] = {
+          tokens: sessionTokens.get(key),
+          baseline: baselineTokens.get(key),
+          prompts: promptCounts.get(key),
+          startedAt: sessionStartedAt.get(key),
+          lastActivity: lastActivity.get(key),
+          reminded: remindedNew.has(key) || undefined,
+        }
+      }
+      statsStore.save(merged)
+    } catch (err) {
+      console.error('[ai-session-store] failed to save stats:', err)
+    }
+  }, 150)
+}
+
+/** Restore a session's counters from disk at startup. */
+function rehydrateStats(key: string): void {
+  try {
+    const row = statsStore.load()[key]
+    if (!row) return
+    if (row.tokens !== undefined) sessionTokens.set(key, row.tokens)
+    if (row.baseline !== undefined) baselineTokens.set(key, row.baseline)
+    if (row.prompts !== undefined) promptCounts.set(key, row.prompts)
+    if (row.startedAt !== undefined) sessionStartedAt.set(key, row.startedAt)
+    if (row.lastActivity !== undefined) lastActivity.set(key, row.lastActivity)
+    if (row.reminded) remindedNew.add(key)
+  } catch {
+    // stats are an optimisation — never block startup on them
+  }
+}
+
+/** Drop every counter for a session key (clear / rotate / expiry). */
+function forgetStats(key: string): void {
+  sessionTokens.delete(key)
+  baselineTokens.delete(key)
+  promptCounts.delete(key)
+  remindedNew.delete(key)
+  sessionStartedAt.delete(key)
+  lastActivity.delete(key)
+  saveStats()
+}
 
 // Known AI backends for key format validation
 const KNOWN_BACKENDS = new Set(['claude', 'gemini', 'codex', 'channel', 'bat-remote'])
@@ -168,6 +269,7 @@ function saveSessions(): void {
     // Only load keys belonging to THIS bot
     if (canonical.startsWith(MY_PREFIX)) {
       mySessions.set(canonical, sid)
+      rehydrateStats(canonical)
     }
   }
 
@@ -201,11 +303,7 @@ export function getAISessionId(backend: AIBackend, projectPath: string): string 
     const hours = Math.round(SESSION_TTL_MS / 3600000)
     console.log(`[ai-session] auto-expired session for ${projectPath} (idle > ${hours}h)`)
     mySessions.delete(key)
-    lastActivity.delete(key)
-    sessionTokens.delete(key)
-    promptCounts.delete(key) // was leaking — stale count skewed rotation after expiry
-    remindedNew.delete(key)
-    sessionStartedAt.delete(key)
+    forgetStats(key)
     expiryNotices.add(key) // so the UI can say "opened a fresh session"
     saveSessions()
     return null
@@ -238,6 +336,7 @@ export function setAISessionId(backend: AIBackend, projectPath: string, sessionI
   promptCounts.set(key, (promptCounts.get(key) ?? 0) + 1)
   if (isNew && !sessionStartedAt.has(key)) sessionStartedAt.set(key, Date.now())
   saveSessions()
+  saveStats()
 }
 
 /** Consume the one-shot "this session just auto-expired" flag. */
@@ -278,10 +377,7 @@ export function clearAISession(backend: AIBackend, projectPath: string): boolean
   const deleted = mySessions.delete(key)
   // Reset occupancy so the fresh session doesn't inherit a stale token count
   // and rotate immediately on its first turn.
-  sessionTokens.delete(key)
-  promptCounts.delete(key)
-  remindedNew.delete(key)
-  sessionStartedAt.delete(key)
+  forgetStats(key)
   if (deleted) saveSessions()
   return deleted
 }
@@ -300,7 +396,12 @@ export function getSessionPromptCount(backend: AIBackend, projectPath: string): 
 /** Record the context-window occupancy (tokens) reported by the latest turn. */
 export function setSessionTokens(backend: AIBackend, projectPath: string, tokens: number): void {
   if (!Number.isFinite(tokens) || tokens <= 0) return
-  sessionTokens.set(makeKey(backend, projectPath), tokens)
+  const key = makeKey(backend, projectPath)
+  // First observation for this session is its baseline: the fixed cost of
+  // asking anything at all, which is not accumulation.
+  if (!baselineTokens.has(key)) baselineTokens.set(key, tokens)
+  sessionTokens.set(key, tokens)
+  saveStats()
 }
 
 /** Get the last-known context-window occupancy (tokens) for the session. */
@@ -308,18 +409,50 @@ export function getSessionTokens(backend: AIBackend, projectPath: string): numbe
   return sessionTokens.get(makeKey(backend, projectPath)) ?? 0
 }
 
-/** True once a session has grown long enough that we should remind the user
- *  they can start fresh with /new — at most once per session. */
+/**
+ * How much context this session has accumulated beyond the fixed cost of its
+ * first turn. 0 when we have no baseline yet.
+ */
+export function getSessionGrowth(backend: AIBackend, projectPath: string): number {
+  const key = makeKey(backend, projectPath)
+  const base = baselineTokens.get(key)
+  const now = sessionTokens.get(key)
+  if (base === undefined || now === undefined) return 0
+  return Math.max(0, now - base)
+}
+
+/** Numbers for the /new suggestion, so it can say WHY instead of just nagging. */
+export function getReminderFacts(
+  backend: AIBackend,
+  projectPath: string,
+): { readonly turns: number; readonly growth: number; readonly occupancy: number } {
+  return {
+    turns: getSessionPromptCount(backend, projectPath),
+    growth: getSessionGrowth(backend, projectPath),
+    occupancy: getSessionTokens(backend, projectPath),
+  }
+}
+
+/**
+ * True once a session has genuinely grown — at most once per session, and that
+ * promise now survives a restart because the flag is persisted.
+ *
+ * Judged on growth past this session's own first turn, not absolute occupancy:
+ * the fixed per-turn overhead (global rules + system prompt + CLAUDE.md files +
+ * MCP tool definitions) is 25-35k tokens before the user says anything, so the
+ * old absolute 72k threshold fired on brand-new conversations.
+ */
 export function needsNewReminder(backend: AIBackend, projectPath: string): boolean {
   const key = makeKey(backend, projectPath)
   if (remindedNew.has(key)) return false
-  if (getSessionTokens(backend, projectPath) >= env.ROTATE_AT_TOKENS * REMIND_TOKEN_FRACTION) return true
+  if (getSessionGrowth(backend, projectPath) >= REMIND_GROWTH_TOKENS) return true
   return getSessionPromptCount(backend, projectPath) >= REMIND_PROMPT_COUNT
 }
 
 /** Mark that we've shown the /new reminder for this session. */
 export function markNewReminded(backend: AIBackend, projectPath: string): void {
   remindedNew.add(makeKey(backend, projectPath))
+  saveStats()
 }
 
 /** Check if session should be rotated. Primary signal: context-window occupancy
@@ -336,10 +469,7 @@ export function rotateSession(backend: AIBackend, projectPath: string): number {
   const key = makeKey(backend, projectPath)
   const count = promptCounts.get(key) ?? 0
   mySessions.delete(key)
-  promptCounts.delete(key)
-  sessionTokens.delete(key)
-  remindedNew.delete(key)
-  lastActivity.delete(key)
+  forgetStats(key)
   saveSessions()
   return count
 }

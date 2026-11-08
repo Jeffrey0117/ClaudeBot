@@ -18,7 +18,7 @@ import { isDangerousCmd, registerPendingCmd } from './cmd-guard.js'
 import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand, getPluginModule } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
-import { getAISessionId, shouldRotateSession, rotateSession, setSessionTokens, needsNewReminder, markNewReminded, consumeExpiryNotice } from '../ai/session-store.js'
+import { getAISessionId, shouldRotateSession, rotateSession, setSessionTokens, needsNewReminder, markNewReminded, consumeExpiryNotice, getReminderFacts } from '../ai/session-store.js'
 import { getActiveMachine } from './state.js'
 import { detectChoices } from '../utils/choice-detector.js'
 import { cleanMarkdown } from '../utils/markdown-cleaner.js'
@@ -855,9 +855,16 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
           if (!isDashboard && !isVirtualChat(item.chatId) &&
               needsNewReminder(resolvedBackend, item.project.path)) {
             markNewReminded(resolvedBackend, item.project.path)
+            // Say what actually accumulated. The old wording asserted "有點長"
+            // with no number behind it, and fired on brand-new conversations.
+            const facts = getReminderFacts(resolvedBackend, item.project.path)
+            const growthK = Math.round(facts.growth / 1000)
+            const detail = growthK > 0
+              ? `\u{5DF2}\u{7D2F}\u{7A4D} ${facts.turns} \u{8F2A}\u{FF0C}\u{8108}\u{7D61}\u{6210}\u{9577}\u{7D04} ${growthK}k tokens\u{3002}`
+              : `\u{5DF2}\u{7D2F}\u{7A4D} ${facts.turns} \u{8F2A}\u{3002}`
             telegram.sendMessage(
               item.chatId,
-              '💬 這個對話累積有點長了。如果覺得我開始忘東忘西，隨時可以用 /new 開乾淨的新對話（重點會自動摘要接續）。',
+              `\u{1F4AC} ${detail}\u{5982}\u{679C}\u{89BA}\u{5F97}\u{6211}\u{958B}\u{59CB}\u{5FD8}\u{6771}\u{5FD8}\u{897F}，\u{53EF}\u{4EE5}\u{7528} /new \u{958B}\u{4E58}\u{6DE8}\u{7684}\u{65B0}\u{5C0D}\u{8A71}（\u{91CD}\u{9EDE}\u{6703}\u{81EA}\u{52D5}\u{6458}\u{8981}\u{63A5}\u{7E8C}）\u{3002}`,
               { disable_notification: true },
             ).catch(() => {})
           }
