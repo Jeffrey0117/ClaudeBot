@@ -6,7 +6,18 @@ export interface JsonFileStore<T> {
   save(data: T): void
 }
 
-export function createJsonFileStore<T>(filePath: string, makeDefault: () => T): JsonFileStore<T> {
+export interface JsonFileStoreOptions {
+  /** Indent the JSON. Default true. Turn off for large machine-only files
+   *  (e.g. a 10k-entry index) where the indentation dominates write cost. */
+  readonly pretty?: boolean
+}
+
+export function createJsonFileStore<T>(
+  filePath: string,
+  makeDefault: () => T,
+  options: JsonFileStoreOptions = {},
+): JsonFileStore<T> {
+  const pretty = options.pretty ?? true
   let cache: T | null = null
   let cachedMtimeMs = -1
 
@@ -38,7 +49,7 @@ export function createJsonFileStore<T>(filePath: string, makeDefault: () => T): 
     // Unique tmp name — N processes writing `${filePath}.tmp` concurrently
     // interleave and corrupt each other.
     const tmp = `${filePath}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`
-    writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8')
+    writeFileSync(tmp, pretty ? JSON.stringify(data, null, 2) : JSON.stringify(data), 'utf-8')
     renameSync(tmp, filePath)
     cache = data
     cachedMtimeMs = currentMtime()

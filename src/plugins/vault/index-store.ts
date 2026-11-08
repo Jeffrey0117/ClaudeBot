@@ -31,41 +31,102 @@ interface VaultData {
 // --- Store ---
 
 const STORE_PATH = resolve('data/vault-index.json')
-const store = createJsonFileStore<VaultData>(STORE_PATH, () => ({ entries: [] }))
+// Not pretty-printed: at the 10k cap the indentation alone is most of a
+// multi-megabyte write, and nothing reads this file by eye.
+const store = createJsonFileStore<VaultData>(STORE_PATH, () => ({ entries: [] }), { pretty: false })
 
-// In-memory cache for fast lookups
-let entriesCache: IndexEntry[] | null = null
+const MAX_ENTRIES = 10000
+/** Batch window for index writes. */
+const FLUSH_MS = 1_000
 
+/**
+ * Entries indexed but not yet written.
+ *
+ * addEntry runs on EVERY inbound message (and every bot reply), and it used to
+ * do a full synchronous rewrite of the whole index each time — at the 10k cap
+ * that is a multi-megabyte JSON.stringify + writeFileSync blocking the event
+ * loop, which stalls Telegram polling and the response-broker tick. Writes are
+ * now batched; reads still see pending entries immediately.
+ */
+let pending: IndexEntry[] = []
+let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+const keyOf = (e: IndexEntry): string => `${e.chatId}:${e.messageId}`
+
+/**
+ * Persisted entries plus anything still queued.
+ *
+ * There used to be a module-level `entriesCache` populated once and never
+ * re-read, which defeated the mtime invalidation json-file-store provides
+ * specifically for the multi-process case: each bot held a stale snapshot and
+ * each save() wrote its own full array, so the last writer silently deleted
+ * everything its siblings had indexed. Relying on store.load() fixes that —
+ * it only re-parses when the file actually changed.
+ */
 function getEntries(): IndexEntry[] {
-  if (!entriesCache) {
-    entriesCache = [...store.load().entries]
+  const persisted = store.load().entries
+  return pending.length === 0 ? persisted : [...persisted, ...pending]
+}
+
+function flushPending(): void {
+  if (flushTimer) {
+    clearTimeout(flushTimer)
+    flushTimer = null
   }
-  return entriesCache
+  if (pending.length === 0) return
+
+  const batch = pending
+  pending = []
+
+  const persisted = store.load().entries
+  const seen = new Set(persisted.map(keyOf))
+  const fresh: IndexEntry[] = []
+  for (const e of batch) {
+    const k = keyOf(e)
+    if (seen.has(k)) continue
+    seen.add(k)
+    fresh.push(e)
+  }
+  if (fresh.length === 0) return
+
+  const updated = [...persisted, ...fresh]
+  // Cap at MAX_ENTRIES — remove oldest
+  if (updated.length > MAX_ENTRIES) {
+    updated.splice(0, updated.length - MAX_ENTRIES)
+  }
+  store.save({ entries: updated })
 }
 
 function saveEntries(entries: IndexEntry[]): void {
-  entriesCache = entries
+  // Callers build `entries` from getEntries(), which already folds in pending,
+  // so the queued batch is represented here — drop it instead of writing twice.
+  pending = []
+  if (flushTimer) {
+    clearTimeout(flushTimer)
+    flushTimer = null
+  }
   store.save({ entries })
 }
 
 // --- Public API ---
 
 export function addEntry(entry: IndexEntry): void {
-  const entries = getEntries()
+  const k = keyOf(entry)
 
-  // Skip if already indexed
-  if (entries.some(e => e.messageId === entry.messageId && e.chatId === entry.chatId)) {
-    return
+  // Skip if already indexed (queued or persisted)
+  if (pending.some(e => keyOf(e) === k)) return
+  if (store.load().entries.some(e => keyOf(e) === k)) return
+
+  pending.push(entry)
+  if (!flushTimer) {
+    flushTimer = setTimeout(flushPending, FLUSH_MS)
+    flushTimer.unref?.()
   }
+}
 
-  const updated = [...entries, entry]
-
-  // Cap at 10000 entries — remove oldest
-  if (updated.length > 10000) {
-    updated.splice(0, updated.length - 10000)
-  }
-
-  saveEntries(updated)
+/** Write any queued entries now (e.g. before reporting stats). */
+export function flushIndex(): void {
+  flushPending()
 }
 
 export function getEntryById(chatId: number, messageId: number): IndexEntry | null {

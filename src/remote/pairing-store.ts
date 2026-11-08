@@ -9,7 +9,7 @@
  */
 
 import { randomBytes } from 'node:crypto'
-import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
 import { env } from '../config/env.js'
 import { sessionKey } from '../bot/state.js'
@@ -89,16 +89,35 @@ function readStore(): StoreData {
   try {
     const raw = readFileSync(STORE_PATH, 'utf-8')
     return JSON.parse(raw) as StoreData
-  } catch {
+  } catch (err) {
+    // A missing file is normal on first run. A PRESENT but unparseable file is
+    // not: returning an empty store here means the next write persists {} and
+    // every paired machine is silently unpaired. Say so loudly.
+    if (existsSync(STORE_PATH)) {
+      console.error(
+        `[pairing] ${STORE_PATH} could not be parsed — treating as empty, pairings may be lost:`,
+        err instanceof Error ? err.message : err,
+      )
+    }
     return { pairings: {}, codeIndex: {} }
   }
 }
 
 function writeStore(data: StoreData): void {
   ensureDir()
-  const tmp = `${STORE_PATH}.tmp`
-  writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8')
-  renameSync(tmp, STORE_PATH)
+  // Unique tmp name. The launcher runs N bots from the same cwd, all resolving
+  // this same path, so a shared `${STORE_PATH}.tmp` lets two concurrent writes
+  // interleave their bytes and get renamed into place as corrupt JSON — after
+  // which readStore returns an empty store and the next write makes it
+  // permanent. json-file-store carries the same fix for the same reason.
+  const tmp = `${STORE_PATH}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`
+  try {
+    writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8')
+    renameSync(tmp, STORE_PATH)
+  } catch (err) {
+    try { unlinkSync(tmp) } catch { /* best effort */ }
+    throw err
+  }
 }
 
 function isExpired(session: PairingSession): boolean {

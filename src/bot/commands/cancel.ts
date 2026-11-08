@@ -7,6 +7,27 @@ import { env } from '../../config/env.js'
 import { cancelActiveAgent } from '../vision/web-agent-store.js'
 import { isChannelEnabled } from '../../ai/channel/opt-in-store.js'
 import { channelInterrupt, isChannelRunning } from '../../ai/channel/channel-runner.js'
+import { emitResponseError } from '../../dashboard/response-broker.js'
+import { isRemoteOnly } from '../../auth/auth-service.js'
+
+/**
+ * Drop queued items and tell anyone waiting on another channel.
+ *
+ * clearQueue() discarded items carrying a dashboardCommandId without emitting
+ * anything, and the Jarvis page has no timeout — it clears its pending entry
+ * only on response_complete / response_error / socket close. So cancelling a
+ * spoken question left the page spinning forever with no TTS and no error, and
+ * leaked the pending entry.
+ */
+function clearQueueAndNotify(projectPath?: string): number {
+  const dropped = projectPath ? clearQueue(projectPath) : clearQueue()
+  for (const item of dropped) {
+    if (item.dashboardCommandId) {
+      emitResponseError(item.dashboardCommandId, '\u{5DF2}\u{53D6}\u{6D88}')
+    }
+  }
+  return dropped.length
+}
 
 export async function cancelCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -38,7 +59,7 @@ export async function cancelCommand(ctx: BotContext): Promise<void> {
     const cancelled = cancelAnyRunning(project.path)
     // Cancel means "stop everything I queued", not just the running turn —
     // otherwise queued prompts fire right after the kill.
-    const dropped = clearQueue(project.path).length
+    const dropped = clearQueueAndNotify(project.path)
     const droppedNote = dropped > 0 ? `（佇列中 ${dropped} 筆一併清除）` : ''
     if (cancelled) {
       await ctx.reply(`\u{1F6D1} \u{5DF2}\u{53D6}\u{6D88} *${project.name}* \u{7684}\u{7A0B}\u{5E8F}${droppedNote}`, { parse_mode: 'Markdown' })
@@ -48,9 +69,19 @@ export async function cancelCommand(ctx: BotContext): Promise<void> {
     return
   }
 
+  // A remote-only identity with no resolved project must NOT reach the global
+  // branch: cancelAnyRunning()/clearQueue() with no argument kills every runner
+  // and discards every queued prompt in every chat. A paired guest whose agent
+  // dropped off would tap /cancel to clear their own stuck state and take the
+  // owner's whole machine down with them.
+  if (!project && isRemoteOnly(chatId)) {
+    await ctx.reply('⚠️ 目前沒有進行中的遠端工作階段。')
+    return
+  }
+
   if (!project && isAnyRunning()) {
     cancelAnyRunning()
-    const dropped = clearQueue().length
+    const dropped = clearQueueAndNotify()
     await ctx.reply(`\u{1F6D1} \u{5DF2}\u{53D6}\u{6D88}\u{6240}\u{6709}\u{7A0B}\u{5E8F}\u{3002}${dropped > 0 ? `（佇列清除 ${dropped} 筆）` : ''}`)
     return
   }
@@ -58,7 +89,7 @@ export async function cancelCommand(ctx: BotContext): Promise<void> {
   // Nothing running, but prompts may still be queued (e.g. waiting on a lock)
   const pendingCount = project ? getQueueLength(project.path) : getQueueLength()
   if (pendingCount > 0) {
-    const dropped = project ? clearQueue(project.path).length : clearQueue().length
+    const dropped = project ? clearQueueAndNotify(project.path) : clearQueueAndNotify()
     await ctx.reply(`\u{1F9F9} 已清除佇列中的 ${dropped} 筆任務。`)
     return
   }
