@@ -1,13 +1,13 @@
 import { readFileSync, writeFileSync, renameSync } from 'node:fs'
-import { join } from 'node:path'
 import type { AIBackend } from './types.js'
 import { env } from '../config/env.js'
+import { statePath } from '../config/paths.js'
 
 /** Short bot identifier from token (last 6 chars) for session isolation. */
 const BOT_ID = env.BOT_TOKEN.slice(-6)
 const MY_PREFIX = `${BOT_ID}:`
 
-const SESSION_FILE = join(process.cwd(), '.sessions.json')
+const SESSION_FILE = statePath('.sessions.json')
 
 /** Sessions auto-expire after 4 hours of inactivity */
 const SESSION_TTL_MS = 4 * 60 * 60 * 1000

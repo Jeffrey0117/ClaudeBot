@@ -1,5 +1,5 @@
-import { resolve } from 'node:path'
 import { createJsonFileStore } from '../utils/json-file-store.js'
+import { statePath } from '../config/paths.js'
 
 export interface LearnedRule {
   readonly rule: string
@@ -12,7 +12,7 @@ const MAX_RULES = 5
 
 type RulesData = Record<string, LearnedRule[]>
 
-const store = createJsonFileStore<RulesData>(resolve('data/learned-rules.json'), () => ({}))
+const store = createJsonFileStore<RulesData>(statePath('data', 'learned-rules.json'), () => ({}))
 
 export function addLearnedRule(
   projectPath: string,

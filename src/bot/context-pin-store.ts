@@ -1,5 +1,5 @@
-import { resolve } from 'node:path'
 import { createJsonFileStore } from '../utils/json-file-store.js'
+import { statePath } from '../config/paths.js'
 
 export interface PinItem {
   readonly text: string
@@ -14,7 +14,7 @@ const STALE_DAYS = 7
 
 type PinData = Record<string, PinItem[]>
 
-const store = createJsonFileStore<PinData>(resolve('data/context-pins.json'), () => ({}))
+const store = createJsonFileStore<PinData>(statePath('data', 'context-pins.json'), () => ({}))
 
 export function addPin(projectPath: string, text: string): PinItem | null {
   const data = store.load()
