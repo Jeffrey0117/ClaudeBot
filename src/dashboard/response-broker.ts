@@ -1,4 +1,4 @@
-import { writeFile, readFile, unlink, readdir, mkdir, stat } from 'node:fs/promises'
+import { writeFile, readFile, unlink, readdir, mkdir, stat, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 
 const RESPONSE_DIR = join(process.cwd(), 'data', 'responses')
@@ -46,10 +46,30 @@ function eventFilePath(commandId: string): string {
 
 // --- Writer side (called from bot process / queue-processor) ---
 
+/**
+ * Write the event atomically.
+ *
+ * This used to write the target file in place while the reader polled it every
+ * 300ms, so the dashboard could JSON.parse a half-written file — handled only
+ * by the reader's catch, which silently lost that chunk. Writing to a unique
+ * temp file and renaming makes the swap atomic, as utils/json-file-store.ts
+ * already does for the same reason. The temp name includes pid + a counter so
+ * several bots (and concurrent writes) cannot interleave into one `.tmp`.
+ */
+let tmpCounter = 0
+
 async function writeEvent(event: ResponseEvent): Promise<void> {
   try {
     await ensureDir()
-    await writeFile(eventFilePath(event.commandId), JSON.stringify(event), 'utf-8')
+    const target = eventFilePath(event.commandId)
+    const tmp = `${target}.${process.pid}.${tmpCounter++}.tmp`
+    try {
+      await writeFile(tmp, JSON.stringify(event), 'utf-8')
+      await rename(tmp, target)
+    } catch (err) {
+      await unlink(tmp).catch(() => {})
+      throw err
+    }
   } catch {
     // best-effort
   }

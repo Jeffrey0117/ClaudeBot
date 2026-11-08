@@ -446,9 +446,19 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   setBotInstance(bot)
   botInstance = bot
 
-  // Start dashboard heartbeat writer + command reader
+  // The heartbeat is NOT dashboard-only plumbing despite the name: the launcher
+  // watchdog reads it to detect a wedged bot, and isBotIdle() uses it so
+  // /restart all and /deploy can wait for a bot to drain. Without it a graceful
+  // restart has no idle signal and sits out the full 10-minute force deadline,
+  // so it stays on unconditionally.
   startHeartbeat()
-  startCommandReader()
+
+  // The command reader is genuinely dashboard-only — it polls data/commands.json
+  // every 2s for prompts submitted from the web UI (~43k reads per bot per day)
+  // and has no other consumer.
+  if (env.DASHBOARD) {
+    startCommandReader()
+  }
 
   // Pre-spawn Sherpa ASR process (avoid cold start on first voice)
   if (isSherpaAvailable()) {

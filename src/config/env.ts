@@ -36,9 +36,13 @@ const envSchema = z.object({
   ROTATE_AT_TOKENS: z.coerce.number().int().positive().default(120000),
   /** Idle "tidbit" fillers (單字/冷知識, sometimes audio) the bot pushes
    *  silently during long Claude waits. Set false to stop them entirely. */
+  /** Default off: tidbits are sent during a wait and then deleted when the turn
+   *  finishes, so a 5-minute task spends ~18 Telegram calls (some of them audio
+   *  uploads) to deliver nothing the user keeps — while competing for the same
+   *  per-chat rate budget as the draft edits that do matter. */
   TIDBITS_ENABLED: z
     .enum(['true', 'false'])
-    .default('true')
+    .default('false')
     .transform((val) => val === 'true'),
   PLUGINS: z
     .string()
