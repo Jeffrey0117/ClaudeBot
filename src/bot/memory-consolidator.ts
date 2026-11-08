@@ -109,11 +109,24 @@ async function consolidate(projectPath: string): Promise<void> {
     const actions = JSON.parse(text) as ConsolidationAction[]
     if (!Array.isArray(actions) || actions.length === 0) return
 
-    // Execute actions in reverse order for DELETE (to preserve indices)
+    // Order matters, and it used to be backwards.
+    //
+    // DELETEs were sorted LAST, so at the pin cap every ADD was refused
+    // (addPin returns null silently) while the DELETE still went through —
+    // net memory loss, every 5 responses, unlogged. The prompt explicitly
+    // invites the model to delete stale pins before adding, which the old
+    // order made impossible.
+    //
+    // UPDATE first (index-stable, no length change), then DELETE descending
+    // (so earlier indices stay valid), then ADD last so it can use the slots
+    // the DELETEs just freed. All indices stay valid against the list the
+    // model was shown.
+    const rank = (t: ConsolidationAction['type']): number =>
+      t === 'UPDATE' ? 0 : t === 'DELETE' ? 1 : 2
+
     const sorted = [...actions].sort((a, b) => {
-      if (a.type === 'DELETE' && b.type !== 'DELETE') return 1
-      if (a.type !== 'DELETE' && b.type === 'DELETE') return -1
-      // For DELETEs, process higher indices first
+      const byType = rank(a.type) - rank(b.type)
+      if (byType !== 0) return byType
       if (a.type === 'DELETE' && b.type === 'DELETE') {
         return (b.index ?? 0) - (a.index ?? 0)
       }
@@ -123,7 +136,11 @@ async function consolidate(projectPath: string): Promise<void> {
     for (const action of sorted) {
       switch (action.type) {
         case 'ADD':
-          if (action.text) addPin(projectPath, action.text)
+          if (action.text && addPin(projectPath, action.text) === null) {
+            console.error(
+              `[memory] pin cap reached for ${projectPath}; consolidated memory dropped: ${action.text.slice(0, 80)}`,
+            )
+          }
           break
         case 'UPDATE':
           if (action.index !== undefined && action.text) {
