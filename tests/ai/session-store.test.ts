@@ -6,6 +6,11 @@ import {
   consumeExpiryNotice,
   getAISessionId,
   normalizeProjectKey,
+  setSessionTokens,
+  getSessionGrowth,
+  getReminderFacts,
+  needsNewReminder,
+  markNewReminded,
 } from '../../src/ai/session-store.js'
 
 /** Backslash without a literal escape, so the intent stays unambiguous. */
@@ -112,5 +117,77 @@ describe('session-store key normalization', () => {
 
   it('keeps a bare drive root intact', () => {
     expect(normalizeProjectKey('C:/')).toBe('C:/')
+  })
+})
+
+/**
+ * The /new suggestion used to trigger on ABSOLUTE per-turn occupancy
+ * (0.6 * ROTATE_AT_TOKENS = 72k). But the fixed cost of every turn — global
+ * rules, the bot's system prompt, project CLAUDE.md files, MCP tool
+ * definitions — is 25-35k tokens before the user says anything, so it fired on
+ * brand-new conversations where nothing had accumulated.
+ */
+describe('session-store /new reminder', () => {
+  it('does not nag a fresh session whose first turn is already huge', () => {
+    const path = p()
+    setAISessionId('claude', path, 'sid-huge')
+    setSessionTokens('claude', path, 80_000) // baseline: all fixed overhead
+    expect(needsNewReminder('claude', path)).toBe(false)
+  })
+
+  it('still does not nag when occupancy barely moves off a huge baseline', () => {
+    const path = p()
+    setAISessionId('claude', path, 'sid-flat')
+    setSessionTokens('claude', path, 80_000)
+    setSessionTokens('claude', path, 90_000)
+    expect(getSessionGrowth('claude', path)).toBe(10_000)
+    expect(needsNewReminder('claude', path)).toBe(false)
+  })
+
+  it('nags once the conversation itself has grown', () => {
+    const path = p()
+    setAISessionId('claude', path, 'sid-grown')
+    setSessionTokens('claude', path, 30_000)
+    setSessionTokens('claude', path, 80_000)
+    expect(getSessionGrowth('claude', path)).toBe(50_000)
+    expect(needsNewReminder('claude', path)).toBe(true)
+  })
+
+  it('nags at most once per session', () => {
+    const path = p()
+    setAISessionId('claude', path, 'sid-once')
+    setSessionTokens('claude', path, 10_000)
+    setSessionTokens('claude', path, 70_000)
+    expect(needsNewReminder('claude', path)).toBe(true)
+    markNewReminded('claude', path)
+    expect(needsNewReminder('claude', path)).toBe(false)
+    setSessionTokens('claude', path, 120_000)
+    expect(needsNewReminder('claude', path)).toBe(false)
+  })
+
+  it('clearing the session resets the baseline so the next one starts over', () => {
+    const path = p()
+    setAISessionId('claude', path, 'sid-reset')
+    setSessionTokens('claude', path, 20_000)
+    setSessionTokens('claude', path, 90_000)
+    expect(needsNewReminder('claude', path)).toBe(true)
+
+    clearAISession('claude', path)
+    setAISessionId('claude', path, 'sid-reset-2')
+    setSessionTokens('claude', path, 90_000) // fresh baseline, same big overhead
+    expect(getSessionGrowth('claude', path)).toBe(0)
+    expect(needsNewReminder('claude', path)).toBe(false)
+  })
+
+  it('reports the numbers it claims in the message', () => {
+    const path = p()
+    setAISessionId('claude', path, 'sid-facts')
+    setSessionTokens('claude', path, 25_000)
+    setAISessionId('claude', path, 'sid-facts')
+    setSessionTokens('claude', path, 61_000)
+    const facts = getReminderFacts('claude', path)
+    expect(facts.turns).toBe(2)
+    expect(facts.growth).toBe(36_000)
+    expect(facts.occupancy).toBe(61_000)
   })
 })
