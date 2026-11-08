@@ -1,7 +1,7 @@
 import type { Telegraf } from 'telegraf'
 import type { BotContext } from '../types/context.js'
 import type { QueueItem } from '../types/index.js'
-import { setProcessor, setLockNotify, enqueue } from '../claude/queue.js'
+import { setProcessor, setLockNotify, setSlotNotify, enqueue } from '../claude/queue.js'
 import { getRunner, cancelAnyRunning } from '../ai/registry.js'
 import { existsSync } from 'node:fs'
 import { Input, Markup } from 'telegraf'
@@ -550,6 +550,15 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       chatId,
       `\u{23F3} *[${projectName}]* \u{53E6}\u{4E00}\u{500B} bot (${holder}) \u{6B63}\u{5728}\u{64CD}\u{4F5C}\u{6B64}\u{5C08}\u{6848}\u{FF0C}\u{6392}\u{968A}\u{7B49}\u{5F85}\u{4E2D}...`,
       { parse_mode: 'Markdown' },
+    ).catch(() => {})
+  })
+
+  setSlotNotify((chatId, projectName, ahead) => {
+    if (chatId === 0) return
+    telegram.sendMessage(
+      chatId,
+      `\u{23F3} *[${projectName}]* \u{6392}\u{968A}\u{4E2D} \u{2014} \u{76EE}\u{524D}\u{6709} ${ahead} \u{500B}\u{4EFB}\u{52D9}\u{5728}\u{8DD1}，\u{8F2A}\u{5230}\u{5C31}\u{81EA}\u{52D5}\u{958B}\u{59CB}\u{3002}`,
+      { parse_mode: 'Markdown', disable_notification: true },
     ).catch(() => {})
   })
 

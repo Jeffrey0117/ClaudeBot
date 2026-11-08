@@ -1,10 +1,11 @@
 import type { BotContext } from '../../types/context.js'
 import { getUserState } from '../state.js'
-import { isProcessing, getQueueLength, getActiveProjectPaths } from '../../claude/queue.js'
+import { isProcessing, getQueueLength, getActiveProjectPaths, getRunningCount, getWaitingForSlotCount } from '../../claude/queue.js'
 import { getAISessionId, getSessionInfo } from '../../ai/session-store.js'
 import { getAnyElapsedMs } from '../../ai/registry.js'
 import { formatAILabel, resolveBackend } from '../../ai/types.js'
 import path from 'node:path'
+import { env } from '../../config/env.js'
 
 /** Humanize a duration in ms to a compact zh-TW string. */
 function humanizeMs(ms: number): string {
@@ -70,6 +71,12 @@ export async function statusCommand(ctx: BotContext): Promise<void> {
     activeList,
     ``,
     `\u{4F47}\u{5217}: ${totalQueue} \u{500B}\u{7B49}\u{5F85}\u{4E2D}`,
+    // Make the concurrency cap visible: without this, a turn held behind the
+    // cap looks identical to one that is simply slow.
+    `\u{4E26}\u{884C}: ${getRunningCount()}/${env.MAX_PARALLEL}` +
+      (getWaitingForSlotCount() > 0
+        ? ` | \u{6392}\u{968A}\u{7B49}\u{4F4D}: ${getWaitingForSlotCount()}`
+        : ''),
   ]
 
   await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' })

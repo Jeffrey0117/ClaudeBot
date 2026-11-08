@@ -1,9 +1,11 @@
 import type { QueueItem } from '../types/index.js'
 import { acquireLock, releaseLock, waitForLock } from './file-lock.js'
 import { isRemotePath } from '../remote/pairing-store.js'
+import { env } from '../config/env.js'
 
 type ProcessFn = (item: QueueItem) => Promise<void>
 type LockNotifyFn = (chatId: number, projectName: string, holder: string) => void
+type SlotNotifyFn = (chatId: number, projectName: string, ahead: number) => void
 
 const queues = new Map<string, QueueItem[]>()
 const processing = new Set<string>()
@@ -11,7 +13,48 @@ type CompletionFn = (projectPath: string) => void
 
 let processFn: ProcessFn = async () => {}
 let lockNotifyFn: LockNotifyFn = () => {}
+let slotNotifyFn: SlotNotifyFn = () => {}
 let completionFn: CompletionFn = () => {}
+
+// --- Global concurrency cap ---
+//
+// `processing` is per-project, so every distinct project path started its own
+// Claude CLI the instant an item was enqueued, with no ceiling: one reply
+// emitting four @run directives spawned four CLIs at once alongside the
+// originating turn. MAX_PARALLEL existed but was only ever consulted by
+// /parallel, never by the queue. On one machine that is the difference between
+// "fast" and "everything crawls".
+//
+// The slot is taken AFTER the file lock, deliberately. A project waiting on
+// another bot's lock is idle, and making it hold a slot for up to the stale
+// timeout would starve every other project for minutes.
+let runningCount = 0
+const slotWaiters: Array<() => void> = []
+
+async function acquireRunSlot(): Promise<void> {
+  // while, not if: a woken waiter re-checks in case another runner got in first
+  while (runningCount >= env.MAX_PARALLEL) {
+    await new Promise<void>((resolve) => {
+      slotWaiters.push(resolve)
+    })
+  }
+  runningCount++
+}
+
+function releaseRunSlot(): void {
+  runningCount = Math.max(0, runningCount - 1)
+  slotWaiters.shift()?.()
+}
+
+/** Turns currently executing (not counting items waiting for a lock or a slot). */
+export function getRunningCount(): number {
+  return runningCount
+}
+
+/** Turns holding a project but queued behind the concurrency cap. */
+export function getWaitingForSlotCount(): number {
+  return slotWaiters.length
+}
 
 export function setCompletionHook(fn: CompletionFn): void {
   completionFn = fn
@@ -23,6 +66,11 @@ export function setProcessor(fn: ProcessFn): void {
 
 export function setLockNotify(fn: LockNotifyFn): void {
   lockNotifyFn = fn
+}
+
+/** Told when a turn has to queue behind the global concurrency cap. */
+export function setSlotNotify(fn: SlotNotifyFn): void {
+  slotNotifyFn = fn
 }
 
 export function enqueue(item: QueueItem): void {
@@ -178,6 +226,7 @@ async function processNext(projectPath: string): Promise<void> {
 
   // Remote paths don't need cross-process file locks — each bot has its own pairing
   const needsLock = !isRemotePath(projectPath)
+  let slotHeld = false
 
   try {
     // Task summary for lock file (so other bots can show what we're doing)
@@ -201,13 +250,28 @@ async function processNext(projectPath: string): Promise<void> {
       }
     }
 
-    // Lock acquired — merge any prompts that accumulated during wait
+    // Wait for a global slot. processFn is what sends the "處理中" status, so
+    // without this notice a capped turn would sit completely silent.
+    if (runningCount >= env.MAX_PARALLEL) {
+      try {
+        slotNotifyFn(firstItem.chatId, firstItem.project.name, runningCount)
+      } catch {
+        // notification is best-effort
+      }
+    }
+    await acquireRunSlot()
+    slotHeld = true
+
+    // Slot acquired — merge any prompts that accumulated while waiting for the
+    // lock and the slot (more merging = fewer CLI runs)
     const mergedItem = drainAndMerge(projectPath, firstItem)
 
     await processFn(mergedItem)
   } catch (error) {
     console.error(`Queue processing failed for chat ${firstItem.chatId}, project ${projectPath}:`, error)
   } finally {
+    // Free the slot first so a waiting project can start immediately.
+    if (slotHeld) releaseRunSlot()
     // releaseLock must not throw out of finally (unhandled rejection), and the
     // follow-up drain is fire-and-forget — give it a catch.
     if (needsLock) {
