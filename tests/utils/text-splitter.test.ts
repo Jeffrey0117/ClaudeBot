@@ -81,3 +81,43 @@ describe('tailText', () => {
     expect(out.endsWith('a')).toBe(true)
   })
 })
+
+describe('splitText fence reserve', () => {
+  // balanceCodeFences prepends "```<lang>\n" (4 + lang) and appends "\n```" (4),
+  // so a reopened chunk grows by 8 + lang.length. The reserve must cover that
+  // for ANY language tag, not just short ones.
+  const LANGS = ['', 'ts', 'py', 'typescript', 'javascript', 'powershell', 'dockerfile']
+
+  it('never exceeds the Telegram limit when reopening a fence, for any language tag', () => {
+    // Unbroken content: no newline or space near the boundary forces a hard cut
+    // exactly at the reserve edge, which is where the overflow shows up.
+    const blob = 'a'.repeat(9000)
+    for (const lang of LANGS) {
+      const chunks = splitText('```' + lang + '\n' + blob + '\n```')
+      for (const c of chunks) {
+        expect(c.length, `lang="${lang}" produced a ${c.length}-char chunk`).toBeLessThanOrEqual(4096)
+      }
+    }
+  })
+
+  it('never exceeds an explicit maxLength when reopening a fence', () => {
+    const blob = 'b'.repeat(2000)
+    for (const lang of LANGS) {
+      const chunks = splitText('```' + lang + '\n' + blob + '\n```', 300)
+      for (const c of chunks) {
+        expect(c.length, `lang="${lang}" produced a ${c.length}-char chunk`).toBeLessThanOrEqual(300)
+      }
+    }
+  })
+
+  it('loses no code characters when reopening fences', () => {
+    const blob = 'c'.repeat(9000)
+    const chunks = splitText('```typescript\n' + blob + '\n```')
+    const recovered = chunks
+      .join('\n')
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('```'))
+      .join('')
+    expect(recovered).toBe(blob)
+  })
+})

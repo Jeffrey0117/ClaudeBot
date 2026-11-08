@@ -1,7 +1,28 @@
 const TELEGRAM_MAX_LENGTH = 4096
 
-/** Chars reserved per chunk for re-balancing code fences (close + reopen). */
-const FENCE_RESERVE = 16
+/**
+ * Chars a reopened chunk grows by: balanceCodeFences prepends the fence plus
+ * its language tag and a newline (4 + lang.length) and appends a newline plus
+ * the closing fence (4) — so 8 + lang.length.
+ *
+ * This used to be a flat 16, which under-reserves for any tag of 9+ chars
+ * (typescript, javascript, powershell, dockerfile): a hard cut at the reserve
+ * edge produced 4098-char chunks, which Telegram rejects with 400. The chunk
+ * was then dropped with only a console.error, silently truncating long code
+ * replies in the middle.
+ */
+const FENCE_OVERHEAD = 8
+
+/** Longest fence language tag in the text, so the reserve is exact. */
+function maxFenceLangLength(text: string): number {
+  let max = 0
+  const fenceRe = /^[ \t]*```([^\s`]*)/gm
+  let m: RegExpExecArray | null
+  while ((m = fenceRe.exec(text)) !== null) {
+    max = Math.max(max, (m[1] ?? '').length)
+  }
+  return max
+}
 
 export function splitText(text: string, maxLength = TELEGRAM_MAX_LENGTH): readonly string[] {
   if (text.length <= maxLength) {
@@ -9,7 +30,9 @@ export function splitText(text: string, maxLength = TELEGRAM_MAX_LENGTH): readon
   }
 
   const hasFences = text.includes('```')
-  const effectiveMax = hasFences ? maxLength - FENCE_RESERVE : maxLength
+  const effectiveMax = hasFences
+    ? maxLength - (FENCE_OVERHEAD + maxFenceLangLength(text))
+    : maxLength
 
   const chunks: string[] = []
   let remaining = text
