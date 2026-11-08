@@ -1,7 +1,7 @@
 import type { BotContext } from '../../types/context.js'
 import { getUserState } from '../state.js'
 import { isProcessing, getQueueLength, getActiveProjectPaths, getRunningCount, getWaitingForSlotCount } from '../../claude/queue.js'
-import { getAISessionId, getSessionInfo } from '../../ai/session-store.js'
+import { getAISessionId, getSessionInfo, getSessionGrowth } from '../../ai/session-store.js'
 import { getAnyElapsedMs } from '../../ai/registry.js'
 import { formatAILabel, resolveBackend } from '../../ai/types.js'
 import path from 'node:path'
@@ -42,8 +42,18 @@ export async function statusCommand(ctx: BotContext): Promise<void> {
     if (info.tokenFraction > 0) {
       const pct = Math.round(info.tokenFraction * 100)
       const bar = info.tokenFraction >= 0.9 ? '\u{1F534}' : info.tokenFraction >= 0.6 ? '\u{1F7E1}' : '\u{1F7E2}'
-      sessionLine += `\n\u{1F9E0} context \u{4F54}\u{7528}: ${bar} ${pct}%`
+      // Occupancy is ABSOLUTE and drives rotation, so it already includes the
+      // fixed per-turn cost (global rules + system prompt + CLAUDE.md files +
+      // MCP tool definitions) — 25-35k tokens before a word is typed. Labelling
+      // it plainly, and showing growth separately, is the difference between
+      // "this conversation is long" and "asking anything costs this much".
+      sessionLine += `\n\u{1F9E0} context \u{4F54}\u{7528}: ${bar} ${pct}%（\u{542B}\u{6BCF}\u{8F2A}\u{56FA}\u{5B9A}\u{958B}\u{9500}）`
       if (info.tokenFraction >= 0.6) sessionLine += `（\u{63A5}\u{8FD1}\u{4E0A}\u{9650}\u{6703}\u{81EA}\u{52D5}\u{5237}\u{65B0}，\u{6216}\u{6253} /new \u{5F9E}\u{982D}）`
+    }
+
+    const growth = getSessionGrowth(resolvedBackend, project.path)
+    if (growth > 0) {
+      sessionLine += `\n\u{1F4C8} \u{672C}\u{5C0D}\u{8A71}\u{6210}\u{9577}: ${Math.round(growth / 1000)}k tokens`
     }
   }
 

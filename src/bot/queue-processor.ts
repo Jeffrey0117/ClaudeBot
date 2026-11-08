@@ -61,7 +61,11 @@ interface ProcessorContext {
   readonly dashCmdId: string | null
   readonly resolvedAI: Readonly<AIModelSelection>
   readonly aiLabel: string
+  /** Live view of the status message — the send is fire-and-forget, so this is
+   *  null until it resolves. Await statusReady before relying on it. */
   readonly statusMsg: { readonly message_id: number } | null
+  /** Resolves when the status send has settled (immediately when there is none). */
+  readonly statusReady: Promise<void>
   readonly startTime: number
   readonly telegram: Telegraf<BotContext>['telegram']
   accumulated: string
@@ -249,7 +253,20 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
       ? ` | \u{1F527} ${ctx.toolCount} tools`
       : ''
 
-    if (ctx.statusMsg) {
+    // Run stats used to live in their own message, so every turn left a
+    // "✅ 完成 …" line sitting next to the answer. When there IS a text answer
+    // the stats ride along as its footer and the status message is removed, so
+    // a turn leaves one message instead of two. With no text answer (images or
+    // directives only) the status message is the sole feedback, so it stays.
+    const statsFooter =
+      `\n\n\u{2705} \`${ctx.aiLabel}\` \u{30FB} $${cost} \u{30FB} ${totalTime}\u{79D2}${toolSummary}`
+
+    // The status send is fire-and-forget; wait for it before deciding what to
+    // do with the message, or a fast turn would skip the cleanup entirely.
+    await ctx.statusReady
+    const foldStatsIntoAnswer = Boolean(responseText) && Boolean(ctx.statusMsg)
+
+    if (ctx.statusMsg && !foldStatsIntoAnswer) {
       ctx.telegram.editMessageText(
         ctx.item.chatId, ctx.statusMsg.message_id, undefined,
         `\u{2705} *[${ctx.tag}]* \u{5B8C}\u{6210} | \`${ctx.aiLabel}\` | $${cost} | ${totalTime}\u{79D2}${toolSummary}`,
@@ -292,7 +309,17 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
     const hasConfirmDirective = aiDirectives.some((d) => d.type === 'confirm')
 
     if (responseText) {
-      await sendResponseChunks(ctx, responseText, hasConfirmDirective)
+      await sendResponseChunks(
+        ctx,
+        responseText,
+        hasConfirmDirective,
+        foldStatsIntoAnswer ? statsFooter : '',
+      )
+      // Only now that the answer is actually out — a failed send must not leave
+      // the user with no feedback at all.
+      if (foldStatsIntoAnswer && ctx.statusMsg) {
+        ctx.telegram.deleteMessage(ctx.item.chatId, ctx.statusMsg.message_id).catch(() => {})
+      }
     }
 
     // Execute @file/@confirm/@notify AFTER finalize so buttons appear below response
@@ -377,6 +404,8 @@ async function sendResponseChunks(
   ctx: ProcessorContext,
   responseText: string,
   hasConfirmDirective = false,
+  /** Appended to the final message so the run stats need no message of their own. */
+  footer = '',
 ): Promise<void> {
   // Wait for any pending startDraft to resolve before checking draftActive.
   // Without this, fast responses cause a race: onResult fires before startDraft
@@ -427,7 +456,7 @@ async function sendResponseChunks(
       ctx.telegram,
       ctx.item.chatId,
       draftKeyFor(ctx.item.chatId, ctx.item.project.path, ctx.item.threadId),
-      botLabel + (draftCleaned || cleaned),
+      botLabel + (draftCleaned || cleaned) + footer,
     )
     ctx.draftActive = false
 
@@ -446,7 +475,7 @@ async function sendResponseChunks(
   } else {
     // No draft: send message chunks as usual
     const botLabel = `\`[${deriveBotId()}]\` `
-    const chunks = splitText(botLabel + cleaned, 4096)
+    const chunks = splitText(botLabel + cleaned + footer, 4096)
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]
       const isLast = i === chunks.length - 1
@@ -585,15 +614,21 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
 
     // A failed status send (e.g. 429) must not throw the whole prompt away —
     // run without the status message instead.
-    const statusMsg = isDashboard
-      ? null
-      : await telegram.sendMessage(
+    // Deliberately NOT awaited. This is a progress message, and blocking on a
+    // Telegram round-trip here delayed spawning the CLI by ~250ms on every
+    // single turn (worse under 429 or a slow link) — pure dead time before any
+    // work started. Every consumer already guards on statusMsg being null, and
+    // the completion/error paths await statusReady before touching it, so a
+    // fast turn cannot leave an orphaned "處理中" behind.
+    let statusMsg: { readonly message_id: number } | null = null
+    const statusReady: Promise<void> = isDashboard
+      ? Promise.resolve()
+      : telegram.sendMessage(
           item.chatId,
           `\u{1F680} *[${tag}]* \u{8655}\u{7406}\u{4E2D}...\n\`${aiLabel}\``,
           { parse_mode: 'Markdown' }
-        ).catch((err) => {
+        ).then((m) => { statusMsg = m }).catch((err) => {
           console.error('[queue] status message send failed:', err instanceof Error ? err.message : err)
-          return null
         })
 
     // One-time warning if project has no CLAUDE.md (slows down Claude significantly)
@@ -636,7 +671,8 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
       // Build processor context (shared state for result/error handlers)
       const ctx: ProcessorContext = {
         item, tag, isDashboard, dashCmdId, resolvedAI, aiLabel,
-        statusMsg, startTime, telegram,
+        get statusMsg() { return statusMsg },
+        statusReady, startTime, telegram,
         accumulated: '',
         draftText: '',
         toolCount: 0,
