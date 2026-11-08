@@ -92,6 +92,7 @@ import { onPairingConnect, onPairingDisconnect, getPairings, remoteProjectPath }
 import { remoteToolCall } from '../remote/relay-client.js'
 import { setUserProject, getActiveMachine, setActiveMachine } from './state.js'
 import { createTelegramProxy } from '../remote/telegram-proxy.js'
+import { publishBotCommands } from './publish-commands.js'
 
 /** Remote pairing codes we've already auto-provisioned agent-browser on
  *  (per bot process) — so we install at most once per connection. */
@@ -467,7 +468,7 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   // Inject all commands into system prompt so Claude knows what's available
   setAvailableCommands([...CORE_COMMANDS, ...pluginCommands])
 
-  bot.telegram.setMyCommands([...CORE_COMMANDS, ...pluginCommands]).catch(() => {})
+  void publishBotCommands(bot.telegram, [...CORE_COMMANDS, ...pluginCommands])
 
   // After restart, notify users who had active projects with a "Continue?" button
   scheduleRestartNotifications(bot)

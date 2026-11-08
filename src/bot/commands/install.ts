@@ -9,6 +9,7 @@ import {
 import { reloadPlugins } from '../../plugins/loader.js'
 import { getBotInstance, CORE_COMMANDS, wireReminderSendFn, wireSchedulerSendFn, wireTaskSendFn } from '../bot.js'
 import { setAvailableCommands } from '../../utils/system-prompt.js'
+import { publishBotCommands } from '../publish-commands.js'
 
 export async function installCommand(ctx: BotContext): Promise<void> {
   const raw = (ctx.message && 'text' in ctx.message) ? ctx.message.text : ''
@@ -70,7 +71,7 @@ async function reloadAndNotify(ctx: BotContext, name: string, action: string): P
       p.commands.map((cmd) => ({ command: cmd.name, description: cmd.description }))
     )
     setAvailableCommands([...CORE_COMMANDS, ...pluginCommands])
-    await bot.telegram.setMyCommands([...CORE_COMMANDS, ...pluginCommands]).catch(() => {})
+    await publishBotCommands(bot.telegram, [...CORE_COMMANDS, ...pluginCommands])
   }
 
   const loaded = plugins.find((p) => p.name === name)

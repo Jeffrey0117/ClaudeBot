@@ -227,10 +227,10 @@ ${article.content.slice(0, 300)}...
 
 async function writeNoteCommand(ctx: BotContext): Promise<void> {
   const text = (ctx.message && 'text' in ctx.message) ? ctx.message.text : ''
-  const topic = text.replace(/^\/write-note\s+/, '').trim()
+  const topic = text.replace(/^\/writenote\s+/, '').trim()
 
   if (!topic) {
-    await ctx.reply('用法：/write-note <主題>\n例如：/write-note Electron IPC timeout 問題')
+    await ctx.reply('用法：/writenote <主題>\n例如：/writenote Electron IPC timeout 問題')
     return
   }
 
@@ -325,7 +325,7 @@ const writePlugin: Plugin = {
       handler: writeCommand,
     },
     {
-      name: 'write-note',
+      name: 'writenote',
       description: '生成技術筆記 (notes/)',
       handler: writeNoteCommand,
     },
