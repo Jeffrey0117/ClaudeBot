@@ -291,7 +291,34 @@ function callAgentToolOnce(
   })
 }
 
-/** Retry wrapper: retries once on timeout, does NOT retry on disconnect errors. */
+/**
+ * Tools that are safe to re-send after a timeout.
+ *
+ * A timeout only drops OUR resolver — the agent is still executing and its
+ * reply is simply discarded. So retrying a tool that changes state runs it
+ * twice: a cold app launch past the 15s Jarvis budget opened two windows while
+ * the user was told "好" once, and a write, an install or a `git push` could
+ * genuinely execute twice. Read-only tools are the only ones where a duplicate
+ * is harmless.
+ */
+const RETRYABLE_TOOLS: ReadonlySet<string> = new Set([
+  'remote_read_file',
+  'remote_list_directory',
+  'remote_search_files',
+  'remote_grep',
+  'remote_system_info',
+  'remote_project_overview',
+  'remote_list_projects',
+  'remote_fetch_file',
+])
+// Deliberately absent: remote_write_file, remote_delete, remote_move_file,
+// remote_push_file, remote_write_archive, remote_fetch_archive,
+// remote_execute_command, remote_spawn_detached, remote_notify,
+// remote_ig_post, remote_userscript_run, remote_browser_eval — all change
+// state. remote_clipboard and remote_browse are excluded too: the former can
+// write the clipboard, the latter navigates a live page.
+
+/** Retry wrapper: retries once on timeout, and only for read-only tools. */
 export async function callAgentTool(
   code: string,
   tool: string,
@@ -302,8 +329,9 @@ export async function callAgentTool(
     return await callAgentToolOnce(code, tool, args, timeoutMs)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    // Only retry on timeout — disconnect errors won't succeed on retry
-    if (msg.includes('timeout')) {
+    // Only retry on timeout — disconnect errors won't succeed on retry — and
+    // only when re-running the tool cannot duplicate side effects.
+    if (msg.includes('timeout') && RETRYABLE_TOOLS.has(tool)) {
       return callAgentToolOnce(code, tool, args, timeoutMs)
     }
     throw err

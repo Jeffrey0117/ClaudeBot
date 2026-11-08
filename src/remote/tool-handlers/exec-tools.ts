@@ -187,15 +187,29 @@ export async function handleProjectOverview(
   const projectPath = args.path ? validatePath(String(args.path)) : baseDir
   const sections: string[] = []
 
-  const treeCmd = IS_WIN
-    ? `tree "${projectPath}" /F /A | findstr /N "^" | findstr /B "1: 2: 3: 4: 5: 6: 7: 8: 9: 10: 11: 12: 13: 14: 15: 16: 17: 18: 19: 20: 21: 22: 23: 24: 25: 26: 27: 28: 29: 30: 31: 32: 33: 34: 35: 36: 37: 38: 39: 40: 41: 42: 43: 44: 45: 46: 47: 48: 49: 50:"`
-    : `find "${projectPath}" -maxdepth 2 -not -path "*/node_modules/*" -not -path "*/.git/*" | head -50`
+  // argv form, not a shell string. This used to interpolate projectPath into a
+  // `cmd`/`sh` line, and validatePath only enforces CONTAINMENT — resolve()
+  // happily keeps `"`, `&`, `$()` and backticks inside a path component, so the
+  // quoting was the only barrier and a single `"` broke it, running commands
+  // the dangerous-command blacklist would have rejected. The 50-line cap moved
+  // into JS so there is nothing left to pipe through findstr/head.
+  const TREE_LINES = 50
+  const treeFile = IS_WIN ? 'tree' : 'find'
+  const treeArgs = IS_WIN
+    ? [projectPath, '/F', '/A']
+    : [projectPath, '-maxdepth', '2', '-not', '-path', '*/node_modules/*', '-not', '-path', '*/.git/*']
 
   try {
     const tree = await new Promise<string>((res) => {
-      exec(treeCmd, { timeout: 10_000, maxBuffer: 128 * 1024, windowsHide: true }, (_err, stdout) => {
-        res(stdout.trim() || '(empty)')
-      })
+      execFile(
+        treeFile,
+        treeArgs,
+        { timeout: 10_000, maxBuffer: 128 * 1024, windowsHide: true, shell: false },
+        (_err, stdout) => {
+          const lines = String(stdout).split(/\r?\n/).filter((l) => l.trim() !== '')
+          res(lines.slice(0, TREE_LINES).join('\n') || '(empty)')
+        },
+      )
     })
     sections.push(`[Directory Structure]\n${tree}`)
   } catch {
