@@ -6,7 +6,7 @@
  * Communicates with the renderer via IPC for UI updates.
  */
 
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import { resolve } from 'node:path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
@@ -75,6 +75,8 @@ interface ElectronConfig {
   readonly relayUrl?: string
   readonly discoveryUrl?: string
   readonly relayPasteId?: string
+  /** Last version we offered an update for, so we ask once per version. */
+  readonly lastNotifiedVersion?: string
 }
 
 // Injected at build time via esbuild --define (from RAWTXT_BASE in .env), so
@@ -717,7 +719,9 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: chatMode ? 420 : 600,
     height: chatMode ? 640 : 500,
-    title: chatMode ? 'ClaudeBot Chat' : 'ClaudeBot Remote Agent',
+    // Version in the title so "which build are you on?" is answerable without
+    // digging — the first question when a friend reports a bug.
+    title: `${chatMode ? 'ClaudeBot Chat' : 'ClaudeBot Remote Agent'} v${app.getVersion()}`,
     resizable: true,
     ...(iconPath ? { icon: iconPath } : {}),
     ...(chatMode ? { frame: false, titleBarStyle: 'hidden' as const } : {}),
@@ -777,9 +781,93 @@ function getParam(name: string): string | undefined {
 
 elog(`[electron] starting... argv=${process.argv.join(' ')}`)
 
+/**
+ * Compare two semver-ish strings. Returns true when `candidate` is newer.
+ * Prerelease suffixes are stripped, so 1.2.3-beta compares equal to 1.2.3 —
+ * deterministic, and errs towards NOT prompting rather than prompting wrongly.
+ */
+function isNewerVersion(candidate: string, current: string): boolean {
+  const parse = (v: string): number[] =>
+    v.replace(/^v/, '').split('-')[0].split('.').map((p) => Number.parseInt(p, 10) || 0)
+  const a = parse(candidate)
+  const b = parse(current)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0
+    const y = b[i] ?? 0
+    if (x !== y) return x > y
+  }
+  return false
+}
+
+/**
+ * Tell the user when a newer build exists.
+ *
+ * electron-builder already emits release/latest.yml, but nothing consumed it
+ * and there is no publish target, so anyone who installed the app stayed on
+ * that version forever — every fix meant hand-delivering a ~150MB installer
+ * again. A friend running a build from weeks ago will hit bugs that were
+ * already fixed and have no way to know.
+ *
+ * This is a notifier, not a silent self-updater: it reads the public GitHub
+ * releases feed and offers to open the release page. No extra dependency, so
+ * there is nothing that can fail to bundle — full background auto-update needs
+ * electron-updater plus a signed build and a real release to validate.
+ */
+async function checkForUpdate(): Promise<void> {
+  if (!app.isPackaged) return
+  try {
+    const res = await fetch(
+      'https://api.github.com/repos/Jeffrey0117/ClaudeBot/releases/latest',
+      {
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'ClaudeBot-Desktop' },
+        signal: AbortSignal.timeout(10_000),
+      },
+    )
+    if (!res.ok) {
+      elog(`[update] check skipped: HTTP ${res.status}`)
+      return
+    }
+    const rel = (await res.json()) as { tag_name?: string; html_url?: string; name?: string }
+    const latest = rel.tag_name ?? rel.name
+    if (!latest) return
+    const current = app.getVersion()
+    if (!isNewerVersion(latest, current)) {
+      elog(`[update] up to date (${current})`)
+      return
+    }
+    // Ask once per version. Nagging on every launch is how a friend learns to
+    // dismiss the dialog without reading it.
+    if (loadConfig().lastNotifiedVersion === latest) {
+      elog(`[update] ${latest} already offered — not asking again`)
+      return
+    }
+    saveConfig({ lastNotifiedVersion: latest })
+
+    elog(`[update] newer version available: ${latest} (running ${current})`)
+    const choice = await dialog.showMessageBox({
+      type: 'info',
+      title: 'ClaudeBot 有新版本',
+      message: `新版本 ${latest} 可以更新（你現在是 ${current}）`,
+      detail: '點「前往下載」會開啟下載頁面，裝好新版即可。',
+      buttons: ['前往下載', '稍後再說'],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (choice.response === 0 && rel.html_url) {
+      await shell.openExternal(rel.html_url)
+    }
+  } catch (err) {
+    // Never block startup on the update check
+    elog(`[update] check failed: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
 app.whenReady().then(async () => {
   elog('[electron] app ready, creating window...')
   createWindow()
+
+  // Non-blocking: the user can start working while this runs
+  void checkForUpdate()
 
   // Auto-connect if url and code provided (from /pair chat command)
   const cliUrl = getParam('url')

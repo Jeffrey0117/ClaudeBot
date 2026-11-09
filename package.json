@@ -1,6 +1,6 @@
 {
   "name": "claudebot-app",
-  "version": "0.3.1",
+  "version": "0.5.4",
   "description": "Telegram Bot to remotely control Claude Code CLI",
   "author": "Jeffrey0117",
   "type": "module",
