@@ -19,7 +19,7 @@ import { isDangerousCmd, registerPendingCmd } from './cmd-guard.js'
 import { dispatchPluginCommand, dispatchOutputHooks, isPluginCommand, getPluginModule } from '../plugins/loader.js'
 import { getCoreCommandHandler } from './bot.js'
 import { getRandomTidbit } from '../utils/idle-tidbits.js'
-import { getAISessionId, shouldRotateSession, rotateSession, setSessionTokens, needsNewReminder, markNewReminded, consumeExpiryNotice, getReminderFacts } from '../ai/session-store.js'
+import { getAISessionId, shouldRotateSession, rotateSession, setSessionTokens, needsNewReminder, markNewReminded, consumeExpiryNotice, getReminderFacts, getSessionGrowth } from '../ai/session-store.js'
 import { getActiveMachine } from './state.js'
 import { detectChoices } from '../utils/choice-detector.js'
 import { cleanMarkdown } from '../utils/markdown-cleaner.js'
@@ -42,8 +42,16 @@ import { env } from '../config/env.js'
 import { startDraft, updateDraft, finalizeDraft, cancelDraft, hasDraft, draftKeyFor } from './draft-sender.js'
 import path from 'node:path'
 import { isVirtualChat } from '../remote/virtual-chat-store.js'
+import { recordTurn } from './task-store.js'
 
 const TIMEOUT_MS = 30 * 60 * 1000
+
+/**
+ * How much a session must have grown past its own first-turn baseline before a
+ * `status: done` is treated as a task boundary worth rotating at. Below this
+ * the turn was cheap and the warm session is worth keeping.
+ */
+const TASK_ROTATE_GROWTH_TOKENS = 30_000
 
 // Track projects already warned about missing CLAUDE.md (once per bot lifetime)
 const claudeMdWarned = new Set<string>()
@@ -386,6 +394,30 @@ async function handleRunnerResult(ctx: ProcessorContext, result: AIResult): Prom
     // the PREVIOUS response's digest instead of the current one
     if (hookedText) {
       setContext(ctx.item.project.path, digestCleaned || hookedText, digest)
+    }
+
+    if (digest) {
+      // Fold this turn into the task's append-only decision log on disk.
+      recordTurn(ctx.item.project.path, digest)
+
+      // Task boundary = the natural place to start a clean session, which is
+      // the one idea worth taking from the phase-based spec-driven tools.
+      //
+      // But NOT on every `done`: the model marks most completed turns done,
+      // and rotating each time would open a fresh session per turn — exactly
+      // the bug that made this bot amnesiac in the first place, and it throws
+      // away prompt-cache reuse too. Only rotate once the session has actually
+      // accumulated, measured against its own first-turn baseline.
+      if (digest.status === 'done') {
+        const backend = resolveBackend(ctx.item.ai.backend)
+        const growth = getSessionGrowth(backend, ctx.item.project.path)
+        if (growth >= TASK_ROTATE_GROWTH_TOKENS) {
+          rotateSession(backend, ctx.item.project.path)
+          console.error(
+            `[task] done + grew ${Math.round(growth / 1000)}k — rotating so the next task starts clean`,
+          )
+        }
+      }
     }
 
     // Trigger background memory consolidation (non-blocking)

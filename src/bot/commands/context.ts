@@ -6,6 +6,7 @@ import { resolveBackend } from '../../ai/types.js'
 import { enqueue } from '../../claude/queue.js'
 import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
 import { channelReset } from '../../ai/channel/channel-runner.js'
+import { clearTask } from '../task-store.js'
 
 export async function contextCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -91,6 +92,7 @@ export async function contextCommand(ctx: BotContext): Promise<void> {
     clearAISession(resolvedBackend, projectPath)
     clearAISession('claude', projectPath)
     await channelReset(projectPath)
+    clearTask(projectPath)
 
     const pinCount = getPins(projectPath).length
     await ctx.reply(
@@ -111,6 +113,7 @@ export async function contextCommand(ctx: BotContext): Promise<void> {
     clearAISession(resolvedBackend, projectPath)
     clearAISession('claude', projectPath)
     await channelReset(projectPath)
+    clearTask(projectPath)
     const cleared = clearPins(projectPath)
 
     await ctx.reply(

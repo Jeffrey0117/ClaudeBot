@@ -3,6 +3,7 @@ import { getUserState } from '../state.js'
 import { clearAISession } from '../../ai/session-store.js'
 import { channelReset } from '../../ai/channel/channel-runner.js'
 import { getPairing, remoteProjectPath } from '../../remote/pairing-store.js'
+import { clearTask } from '../task-store.js'
 
 export async function newSessionCommand(ctx: BotContext): Promise<void> {
   const chatId = ctx.chat?.id
@@ -28,6 +29,7 @@ export async function newSessionCommand(ctx: BotContext): Promise<void> {
   clearAISession(resolvedBackend, project.path)
   clearAISession('claude', project.path)
   await channelReset(project.path)
+  clearTask(project.path)
 
   await ctx.reply(
     `🔄 已清除 *${project.name}* 的對話。\n下次傳訊將開始新對話。`,

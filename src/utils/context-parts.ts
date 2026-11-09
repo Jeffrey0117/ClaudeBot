@@ -2,6 +2,7 @@ import { getTodos } from '../bot/todo-store.js'
 import { formatPinsForPrompt, touchPins } from '../bot/context-pin-store.js'
 import { formatRulesForPrompt, touchLearnedRules } from '../bot/learned-rules-store.js'
 import { buildContextInjection } from '../bot/context-digest-store.js'
+import { buildTaskInjection } from '../bot/task-store.js'
 
 /**
  * Per-turn memory injection, shared by every AI backend.
@@ -82,6 +83,16 @@ export function buildDigestParts(input: DigestPartsInput): readonly string[] {
   const isShortRef = prompt.length <= 15 || (prompt.length <= 80 && affirmative)
   if (!isNewSession && !isShortRef) return []
 
+  const parts: string[] = []
+
+  // Current task state first: it is bounded (a few decisions, open, next, and
+  // a path) no matter how long the task has run, because the full decision log
+  // lives on disk. That is what keeps a long task from inflating every prompt.
+  const task = buildTaskInjection(contextKey)
+  if (task) parts.push(task)
+
   const injection = buildContextInjection(contextKey, affirmative)
-  return injection ? [injection] : []
+  if (injection) parts.push(injection)
+
+  return parts
 }
