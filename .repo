@@ -1,0 +1,12 @@
+{
+  "repo": 1,
+  "name": "ClaudeBot",
+  "what": "Telegram Bot to remotely control Claude Code CLI",
+  "kind": "service",
+  "work": {
+    "guide": "CLAUDE.md",
+    "run": "npm run dev",
+    "test": "npm test",
+    "build": "npm run build"
+  }
+}
