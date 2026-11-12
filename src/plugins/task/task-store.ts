@@ -14,7 +14,9 @@ export interface TaskItem {
   readonly notifiedEnd: boolean
 }
 
-const DATA_PATH = resolve('data/tasks.json')
+// Not data/tasks.json — that file belongs to the task-memory store
+// (src/bot/task-store.ts) and has a different shape.
+const DATA_PATH = resolve('data/task-schedule.json')
 
 type TaskData = Record<string, TaskItem[]>
 
@@ -95,6 +97,7 @@ export function getAllPendingTasks(): readonly TaskItem[] {
   const result: TaskItem[] = []
 
   for (const items of Object.values(data)) {
+    if (!Array.isArray(items)) continue
     for (const t of items) {
       if (t.date === today && !t.done) {
         result.push(t)
