@@ -79,6 +79,23 @@ async function main(): Promise<void> {
     startRelayServer(env.RELAY_PORT)
   }
 
+  // One speech recogniser for every bot: the main bot serves it on loopback
+  if (isMainBot) {
+    const { isSherpaAvailable, transcribeLocal } = await import('./asr/sherpa-client.js')
+    if (isSherpaAvailable()) {
+      const { startSharedAsrServer } = await import('./asr/shared-asr.js')
+      try {
+        await startSharedAsrServer(env.ASR_SHARE_PORT, transcribeLocal)
+        console.log(`[asr-share] serving the recogniser to other bots on 127.0.0.1:${env.ASR_SHARE_PORT}`)
+      } catch (error) {
+        console.error(
+          '[asr-share] could not start — other bots will load their own model:',
+          error instanceof Error ? error.message : error,
+        )
+      }
+    }
+  }
+
   // IG quick-post web (tunnel-exposed; refuses to start without a token)
   if (isMainBot && env.IG_WEB_TOKEN) {
     const { startIgWebServer } = await import('./dashboard/ig-web.js')

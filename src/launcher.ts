@@ -3,6 +3,7 @@ import { readdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
 import dotenv from 'dotenv'
+import { createRotatingLog, teeProcessOutput } from './utils/rotating-log.js'
 
 // --- P2: Admin notification via raw Telegram Bot API ---
 
@@ -46,6 +47,18 @@ function envFileToBotId(envFile: string): string {
 }
 
 const root = process.cwd()
+
+// The launcher writes data/launcher.log itself so the file can be rotated
+// (a file held open by a shell redirect cannot be moved aside on Windows).
+// In a terminal the output still shows on screen; started hidden at boot it
+// goes to the file only.
+const LOG_MAX_BYTES = 5 * 1024 * 1024
+const LOG_KEEP_FILES = 5
+teeProcessOutput(
+  createRotatingLog({ file: path.join(root, 'data', 'launcher.log'), maxBytes: LOG_MAX_BYTES, keep: LOG_KEEP_FILES }),
+  { passthrough: process.stdout.isTTY === true },
+)
+
 const PID_FILE = path.join(root, '.launcher.pid')
 // Localhost-only port held for the launcher's lifetime. Binding it is atomic at
 // the OS level, so it doubles as a race-free single-instance guard: two

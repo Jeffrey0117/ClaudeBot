@@ -18,7 +18,12 @@ interface MiniTelegram {
 
 function headCommit(cwd: string): string | null {
   try {
-    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd, encoding: 'utf-8' }).trim()
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd,
+      encoding: 'utf-8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim()
   } catch {
     return null
   }

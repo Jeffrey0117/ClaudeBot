@@ -14,8 +14,17 @@ import { existsSync, readdirSync } from 'node:fs'
 import { createInterface, type Interface } from 'node:readline'
 import { join } from 'node:path'
 import { env } from '../config/env.js'
+import { isSecondaryBot, requestSharedAsr, type AsrResult } from './shared-asr.js'
 
 const TIMEOUT_MS = 60_000
+
+/** Secondary bots borrow the main bot's recogniser instead of loading their own model. */
+const SECONDARY = isSecondaryBot()
+/** Extra time on top of TIMEOUT_MS for a shared request waiting behind another bot's. */
+const SHARED_QUEUE_GRACE_MS = 60_000
+/** How long a fallback recogniser on a secondary bot may sit idle before it is stopped. */
+const FALLBACK_IDLE_MS = 5 * 60_000
+let fallbackIdleTimer: ReturnType<typeof setTimeout> | null = null
 
 /** Try running a command — returns true if it exits successfully. */
 function canRun(cmd: string, args: readonly string[]): boolean {
@@ -191,7 +200,13 @@ function ensureProcess(): void {
     windowsHide: true,
   })
 
+  // Handlers act only while this is still the current process. Without the
+  // guard, the exit event of a process stopped on purpose (shutdownSherpa)
+  // scheduled a restart, and could null out a newer process.
+  const child = proc
+
   proc.on('error', (err) => {
+    if (proc !== child) return
     console.error('[sherpa] spawn error:', err.message)
     proc = null
     rl = null
@@ -237,6 +252,7 @@ function ensureProcess(): void {
   })
 
   proc.on('exit', (code) => {
+    if (proc !== child) return
     proc = null
     rl = null
     if (pending) {
@@ -291,9 +307,8 @@ function sendCommand(cmd: Record<string, unknown>): Promise<SherpaResponse> {
   })
 }
 
-export async function transcribeAudio(
-  wavPath: string,
-): Promise<{ readonly success: boolean; readonly text: string; readonly duration: number; readonly error?: string }> {
+/** Transcribe with this process's own recogniser (spawning it if needed). */
+export async function transcribeLocal(wavPath: string): Promise<AsrResult> {
   const res = await sendCommand({ action: 'transcribe', audio_path: wavPath })
   return {
     success: res.success,
@@ -301,6 +316,39 @@ export async function transcribeAudio(
     duration: res.duration ?? 0,
     error: res.error,
   }
+}
+
+function stopFallbackWhenIdle(): void {
+  if (fallbackIdleTimer) clearTimeout(fallbackIdleTimer)
+  fallbackIdleTimer = setTimeout(() => {
+    fallbackIdleTimer = null
+    if (pending || commandQueue.length > 0) {
+      stopFallbackWhenIdle()
+      return
+    }
+    console.error('[sherpa] fallback recogniser idle — stopping it')
+    shutdownSherpa()
+  }, FALLBACK_IDLE_MS)
+  fallbackIdleTimer.unref()
+}
+
+/**
+ * Transcribe a WAV file.
+ *
+ * The main bot uses its own recogniser. Secondary bots ask the main bot, so
+ * the model is loaded once for all of them; only if the main bot cannot be
+ * reached (it is restarting) do they start a temporary one of their own.
+ */
+export async function transcribeAudio(wavPath: string): Promise<AsrResult> {
+  if (!SECONDARY) return transcribeLocal(wavPath)
+
+  const shared = await requestSharedAsr(env.ASR_SHARE_PORT, wavPath, TIMEOUT_MS + SHARED_QUEUE_GRACE_MS)
+  if (shared) return shared
+
+  console.error('[sherpa] main bot recogniser unreachable — using a temporary local one')
+  const result = await transcribeLocal(wavPath)
+  stopFallbackWhenIdle()
+  return result
 }
 
 /**
@@ -333,6 +381,10 @@ export function isSherpaAvailable(): boolean {
 }
 
 export function warmupSherpa(): void {
+  if (SECONDARY) {
+    console.error('[sherpa] using the main bot recogniser — not loading a second model')
+    return
+  }
   try {
     ensureProcess()
     console.error('[sherpa] warmup OK — process spawned')

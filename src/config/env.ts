@@ -64,6 +64,8 @@ const envSchema = z.object({
   IG_WEB_PORT: z.coerce.number().int().positive().default(3105),
   IG_WEB_TOKEN: z.string().default(''),
   JARVIS_PORT: z.coerce.number().int().positive().default(3106),
+  // Loopback port where the main bot serves its speech recogniser to the other bots
+  ASR_SHARE_PORT: z.coerce.number().int().positive().default(3107),
   JARVIS_TOKEN: z.string().default(''),
   ANTHROPIC_ADMIN_KEY: z.string().default(''),
   GITHUB_TOKEN: z.string().default(''),

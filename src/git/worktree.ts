@@ -41,6 +41,10 @@ function git(args: readonly string[], cwd: string): string {
     timeout: GIT_TIMEOUT_MS,
     windowsHide: true,
     shell: false,
+    // Capture stderr. Left to inherit, git's own "fatal: not a git repository"
+    // went straight into the bot's log every time a non-repo folder was probed.
+    // On failure the text is still on the thrown error (err.stderr).
+    stdio: ['ignore', 'pipe', 'pipe'],
   }).trim()
 }
 
