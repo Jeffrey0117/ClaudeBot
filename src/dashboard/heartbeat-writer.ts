@@ -7,6 +7,7 @@ import { getAnyElapsedMs } from '../ai/registry.js'
 import { getActiveRunnerInfos } from './runner-tracker.js'
 import { getBotConnectedPairings } from '../remote/pairing-store.js'
 import type { BotHeartbeat, ConnectedMachine } from './types.js'
+import { touchActivity, getLastActivityAt } from './activity.js'
 
 const HEARTBEAT_INTERVAL_MS = 2_000
 const HEARTBEAT_DIR = join(process.cwd(), 'data', 'heartbeat')
@@ -57,15 +58,21 @@ async function writeHeartbeat(botId: string): Promise<void> {
     connectedSince: p.createdAt,
   }))
 
+  // Work in progress counts as activity, so a long task does not end in an
+  // immediate sleep the moment it finishes.
+  const queueLength = getQueueLength()
+  if (queueLength > 0 || runners.length > 0) touchActivity()
+
   const heartbeat: BotHeartbeat = {
     botId,
     pid: process.pid,
     updatedAt: Date.now(),
-    queueLength: getQueueLength(),
+    queueLength,
     queueByProject,
     activeRunners: runners,
     locksHeld,
     machines,
+    lastActivityAt: getLastActivityAt(),
   }
 
   await mkdir(HEARTBEAT_DIR, { recursive: true })

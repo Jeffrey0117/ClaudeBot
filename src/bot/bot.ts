@@ -33,6 +33,7 @@ import { storeCommand } from './commands/store.js'
 import { installCommand } from './commands/install.js'
 import { uninstallCommand } from './commands/uninstall.js'
 import { deployCommand } from './commands/deploy.js'
+import { touchActivity } from '../dashboard/activity.js'
 import { x1Command, repoCommand } from './commands/x1.js'
 import { detectDeployIntent, runDeployFromIntent } from './deploy-intent.js'
 import { detectOpsIntent, runOpsIntent } from './ops-intent.js'
@@ -214,6 +215,11 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
   bot.telegram = createTelegramProxy(bot.telegram)
 
   // Middleware (order matters)
+  // Every incoming update counts as activity (see dashboard/activity.ts)
+  bot.use((_ctx, next) => {
+    touchActivity()
+    return next()
+  })
   bot.use(errorHandler())
   bot.use(dedupMiddleware())
   bot.use(rateLimitMiddleware())

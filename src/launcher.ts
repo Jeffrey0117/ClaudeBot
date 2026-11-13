@@ -1,9 +1,10 @@
 import { spawn, execSync, type ChildProcess } from 'node:child_process'
-import { readdirSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs'
+import { readdirSync, writeFileSync, unlinkSync, readFileSync, mkdirSync } from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
 import dotenv from 'dotenv'
 import { createRotatingLog, teeProcessOutput } from './utils/rotating-log.js'
+import { isSleepCandidate, readBotEnv, sleepIdleMsFromEnv, startSleeper, type Sleeper } from './launcher-sleep.js'
 
 // --- P2: Admin notification via raw Telegram Bot API ---
 
@@ -222,11 +223,9 @@ const filesToLaunch = singleEnv ? [singleEnv] : envFiles
 
 console.log(`Launcher PID ${process.pid} — ${filesToLaunch.length} bot(s): ${filesToLaunch.join(', ')}`)
 
-// Invoke node + tsx CLI directly (no .cmd wrapper) so process tree kill works on Windows.
-// With shell:true, the tree is: launcher → cmd.exe → node.exe
-// taskkill /T kills cmd.exe but orphans node.exe, creating zombie pollers.
-// With shell:false + direct node invocation: launcher → node.exe (clean kill)
-const tsxCli = path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs')
+// Run each bot as ONE node process with tsx loaded in-process (`--import tsx`).
+// Going through the tsx CLI added a second ~55 MB wrapper process per bot;
+// going through a shell orphaned node.exe on tree kill (zombie pollers).
 const indexPath = path.join(root, 'src', 'index.ts')
 
 const children = new Map<string, ChildProcess>()
@@ -254,12 +253,21 @@ function isCrashLooping(envFile: string): boolean {
   return recent.length >= MAX_CRASHES
 }
 
-function spawnBot(envFile: string): void {
-  const label =
-    envFile === '.env' ? 'main' : envFile.replace('.env.', '')
+interface SpawnOptions {
+  /** Woken from sleep: let the bot receive the update that woke it, and skip the admin ping. */
+  readonly woken?: boolean
+}
 
-  const child = spawn(process.execPath, [tsxCli, indexPath, '--env', envFile], {
+function labelOf(envFile: string): string {
+  return envFile === '.env' ? 'main' : envFile.replace('.env.', '')
+}
+
+function spawnBot(envFile: string, opts: SpawnOptions = {}): void {
+  const label = labelOf(envFile)
+
+  const child = spawn(process.execPath, ['--import', 'tsx', indexPath, '--env', envFile], {
     cwd: root,
+    env: opts.woken ? { ...process.env, CLAUDEBOT_KEEP_PENDING: '1' } : process.env,
     shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
@@ -291,6 +299,14 @@ function spawnBot(envFile: string): void {
     const tag = intentionalRestart ? ' [重啟]' : wasKilled ? ' [被終止]' : ''
     console.log(`[${label}] 結束 (code ${code})${tag}`)
     children.delete(envFile)
+
+    // Stopped on purpose because it was idle — listen on its behalf instead of respawning
+    if (sleepRequested.delete(envFile) && !shuttingDown) {
+      setTimeout(() => {
+        if (!shuttingDown) putToSleep(envFile)
+      }, RESPAWN_DELAY_MS)
+      return
+    }
 
     if (shuttingDown) {
       // 啟動器正在關閉 — 不重啟
@@ -334,7 +350,7 @@ function spawnBot(envFile: string): void {
   hasLaunchedOnce.add(envFile)
   setTimeout(() => {
     // Verify child is still alive after 5s
-    if (children.get(envFile) === child && !child.killed) {
+    if (children.get(envFile) === child && !child.killed && !opts.woken) {
       const icon = isRespawn ? '✅' : '🟢'
       const verb = isRespawn ? '重新啟動成功' : '啟動成功'
       notifyAdmin(`${icon} <b>[${label}]</b> ${verb} (PID ${child.pid})`)
@@ -345,8 +361,122 @@ function spawnBot(envFile: string): void {
   spawnTimestamps.set(envFile, Date.now())
 }
 
+// --- Sleeping bots ---
+// With BOT_SLEEP_AFTER_MIN set, secondary bots do not run while nobody talks to
+// them: the launcher holds one long poll per sleeping bot and starts the real
+// process on the first update. The main bot (.env) never sleeps — it hosts the
+// relay, dashboard, schedulers and the shared speech recogniser.
+
+const SLEEP_IDLE_MS = singleEnv ? 0 : sleepIdleMsFromEnv(process.env.BOT_SLEEP_AFTER_MIN)
+const SLEEP_CHECK_INTERVAL_MS = 30_000
+const SLEEP_POLL_SECONDS = 25
+const SLEEP_RETRY_DELAY_MS = 5_000
+const SLEEP_MAX_FAILURES = 6
+const sleepers = new Map<string, Sleeper>() // envFile → listener for a sleeping bot
+const sleepRequested = new Set<string>() // envFiles being stopped in order to sleep
+const sleepHeartbeatDir = path.join(root, 'data', 'heartbeat')
+
+function canSleep(envFile: string): boolean {
+  return SLEEP_IDLE_MS > 0 && envFile !== '.env'
+}
+
+/** Keep the dashboard showing a sleeping bot as reachable (it is — it wakes on a message). */
+function writeSleepingHeartbeat(envFile: string): void {
+  try {
+    mkdirSync(sleepHeartbeatDir, { recursive: true })
+    const botId = envFileToBotId(envFile)
+    writeFileSync(
+      path.join(sleepHeartbeatDir, `${botId}.json`),
+      JSON.stringify(
+        { botId, pid: 0, updatedAt: Date.now(), queueLength: 0, queueByProject: {}, activeRunners: [], locksHeld: [], machines: [], sleeping: true },
+        null,
+        2,
+      ),
+      'utf-8',
+    )
+  } catch {
+    // cosmetic only
+  }
+}
+
+/** Tell the person who just wrote that something is happening while the bot starts. */
+function showTyping(apiBase: string, token: string, update: unknown): void {
+  const u = update as { message?: { chat?: { id?: number } }; callback_query?: { message?: { chat?: { id?: number } } } }
+  const chatId = u?.message?.chat?.id ?? u?.callback_query?.message?.chat?.id
+  if (typeof chatId !== 'number') return
+  fetch(`${apiBase}/bot${token}/sendChatAction`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, action: 'typing' }),
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => {})
+}
+
+function putToSleep(envFile: string): void {
+  if (sleepers.has(envFile) || children.has(envFile)) return
+  const label = labelOf(envFile)
+  const botEnv = readBotEnv(path.join(root, envFile))
+  if (!botEnv) {
+    console.warn(`[${label}] 讀不到 token，無法代聽 — 直接啟動`)
+    spawnBot(envFile)
+    return
+  }
+
+  const wake = (why: string, update?: unknown): void => {
+    sleepers.delete(envFile)
+    if (shuttingDown) return
+    console.log(`[${label}] 喚醒（${why}）`)
+    if (update !== undefined) showTyping(botEnv.apiBase, botEnv.token, update)
+    spawnBot(envFile, { woken: true })
+  }
+
+  console.log(`[${label}] 睡眠中 — 有訊息才啟動`)
+  writeSleepingHeartbeat(envFile)
+  sleepers.set(
+    envFile,
+    startSleeper({
+      ...botEnv,
+      pollSeconds: SLEEP_POLL_SECONDS,
+      retryDelayMs: SLEEP_RETRY_DELAY_MS,
+      maxFailures: SLEEP_MAX_FAILURES,
+      onWake: (update) => wake('收到訊息', update),
+      // Fail open: if listening does not work, run the bot the old way.
+      onGiveUp: (reason) => wake(`代聽失敗: ${reason}`),
+    }),
+  )
+}
+
+function startSleepManager(): void {
+  if (SLEEP_IDLE_MS <= 0) return
+  console.log(`[launcher] 副 bot 閒置 ${Math.round(SLEEP_IDLE_MS / 60_000)} 分鐘後睡眠，有訊息自動喚醒`)
+
+  setInterval(() => {
+    if (shuttingDown) return
+
+    for (const envFile of sleepers.keys()) writeSleepingHeartbeat(envFile)
+
+    for (const [envFile, child] of children) {
+      if (!canSleep(envFile) || sleepRequested.has(envFile) || gracefulPending.has(envFile)) continue
+      if (Date.now() - (spawnTimestamps.get(envFile) ?? 0) < STARTUP_GRACE_MS) continue
+      try {
+        const hb: unknown = JSON.parse(
+          readFileSync(path.join(sleepHeartbeatDir, `${envFileToBotId(envFile)}.json`), 'utf-8'),
+        )
+        if (!isSleepCandidate(hb, Date.now(), SLEEP_IDLE_MS)) continue
+      } catch {
+        continue
+      }
+      console.log(`[${labelOf(envFile)}] 閒置 ${Math.round(SLEEP_IDLE_MS / 60_000)} 分鐘 — 進入睡眠`)
+      sleepRequested.add(envFile)
+      child.kill('SIGTERM')
+    }
+  }, SLEEP_CHECK_INTERVAL_MS)
+}
+
 for (const envFile of filesToLaunch) {
-  spawnBot(envFile)
+  // Secondary bots start asleep; anything already waiting for them wakes them at once.
+  if (canSleep(envFile)) putToSleep(envFile)
+  else spawnBot(envFile)
 }
 
 // --- P1: Watchdog — kill stale bots whose heartbeat stopped updating ---
@@ -431,7 +561,8 @@ function startRestartAllWatcher(): void {
       setTimeout(() => {
         if (shuttingDown) return
         for (const envFile of filesToLaunch) {
-          if (!children.has(envFile)) {
+          // A sleeping bot is not missing — it picks up new code when it wakes.
+          if (!children.has(envFile) && !sleepers.has(envFile)) {
             console.log(`[launcher] reviving bot not in children: ${envFile}`)
             spawnBot(envFile)
           }
@@ -516,6 +647,7 @@ function startGracefulRestartWatcher(): void {
 }
 
 startGracefulRestartWatcher()
+startSleepManager()
 
 // Graceful shutdown: forward signal to all children, clean up PID file
 const shutdown = (signal: string) => {
@@ -532,6 +664,9 @@ const shutdown = (signal: string) => {
     sleepGuard.kill('SIGTERM')
     sleepGuard = null
   }
+
+  for (const sleeper of sleepers.values()) sleeper.stop()
+  sleepers.clear()
 
   for (const [, child] of children) {
     child.kill('SIGTERM')

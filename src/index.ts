@@ -58,7 +58,6 @@ async function main(): Promise<void> {
 
   const projects = scanProjects()
   console.log(`Found ${projects.length} projects in ${env.PROJECTS_BASE_DIR.join(', ')}`)
-  projects.forEach((p) => console.log(`  - ${p.name}`))
 
   const bot = await createBot()
 
@@ -129,7 +128,11 @@ async function main(): Promise<void> {
 
     // Fire-and-forget: bot.launch() never resolves (infinite polling loop)
     let launched = false
-    bot.launch({ dropPendingUpdates: true }).catch((error: Error) => {
+    // Normally a restart drops whatever queued up while the bot was down, so
+    // a backlog is never replayed. A bot the launcher woke from sleep is the
+    // exception: the pending update is the very message that woke it.
+    const dropPendingUpdates = process.env.CLAUDEBOT_KEEP_PENDING !== '1'
+    bot.launch({ dropPendingUpdates }).catch((error: Error) => {
       if (launched) {
         // Error AFTER the 3s check window — wait for Telegram to release
         // the polling session before exiting (prevents cascading 409 on respawn)

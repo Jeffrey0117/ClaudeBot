@@ -27,6 +27,10 @@ export interface BotHeartbeat {
   readonly activeRunners: readonly ActiveRunnerInfo[]
   readonly locksHeld: readonly string[]
   readonly machines: readonly ConnectedMachine[]
+  /** Last time this bot did anything for a user (ms). Lets the launcher sleep idle bots. */
+  readonly lastActivityAt?: number
+  /** Written by the launcher on behalf of a bot it has put to sleep. */
+  readonly sleeping?: boolean
 }
 
 export interface DashboardCommand {
