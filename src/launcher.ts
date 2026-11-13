@@ -4,6 +4,7 @@ import net from 'node:net'
 import path from 'node:path'
 import dotenv from 'dotenv'
 import { createRotatingLog, teeProcessOutput } from './utils/rotating-log.js'
+import { botIdFromEnvFile } from './config/bot-id.js'
 import { isSleepCandidate, readBotEnv, sleepIdleMsFromEnv, startSleeper, type Sleeper } from './launcher-sleep.js'
 
 // --- P2: Admin notification via raw Telegram Bot API ---
@@ -38,14 +39,9 @@ async function notifyAdmin(message: string): Promise<void> {
   }
 }
 
-function envFileToBotId(envFile: string): string {
-  // Must match the bot process's own deriveBotId() (heartbeat-writer.ts):
-  // '.env' → 'bot1'. The old 'main' mapping meant the launcher looked for
-  // data/heartbeat/main.json which never exists — so the watchdog silently
-  // never monitored the main bot, and graceful restart never saw it as idle
-  // (only the 10-min force deadline fired).
-  return envFile === '.env' ? 'bot1' : envFile.replace('.env.', '')
-}
+// Same function the bot process uses for its own id (config/bot-id.ts), so the
+// launcher always looks for the heartbeat file the bot actually writes.
+const envFileToBotId = botIdFromEnvFile
 
 const root = process.cwd()
 

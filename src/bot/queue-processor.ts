@@ -30,6 +30,7 @@ import { formatAILabel, resolveBackend } from '../ai/types.js'
 import type { AIModelSelection, AIResult } from '../ai/types.js'
 import { autoRoute } from '../ai/router.js'
 import { setActiveRunner, updateRunnerTool, removeActiveRunner } from '../dashboard/runner-tracker.js'
+import { deriveBotId } from '../config/bot-id.js'
 import { recordCost } from '../plugins/cost/index.js'
 import { recordActivity } from '../plugins/stats/activity-logger.js'
 import { emitResponseChunk, emitResponseComplete, emitResponseError } from '../dashboard/response-broker.js'
@@ -56,11 +57,6 @@ const TASK_ROTATE_GROWTH_TOKENS = 30_000
 // Track projects already warned about missing CLAUDE.md (once per bot lifetime)
 const claudeMdWarned = new Set<string>()
 
-function deriveBotId(): string {
-  const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
-  if (!envArg || envArg === '.env') return 'bot1'
-  return envArg.replace('.env.', '')
-}
 
 interface ProcessorContext {
   readonly item: QueueItem

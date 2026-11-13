@@ -66,6 +66,9 @@ const envSchema = z.object({
   JARVIS_PORT: z.coerce.number().int().positive().default(3106),
   // Loopback port where the main bot serves its speech recogniser to the other bots
   ASR_SHARE_PORT: z.coerce.number().int().positive().default(3107),
+  // Unload the speech model after this many idle minutes and load it again on the
+  // next voice message. 0 = keep it loaded from startup (fastest first reply).
+  ASR_IDLE_UNLOAD_MIN: z.coerce.number().min(0).default(0),
   JARVIS_TOKEN: z.string().default(''),
   ANTHROPIC_ADMIN_KEY: z.string().default(''),
   GITHUB_TOKEN: z.string().default(''),

@@ -6,6 +6,7 @@ import { clearAISession } from '../ai/session-store.js'
 import { findProject, scanProjects } from '../config/projects.js'
 import { setUserAI, setUserProject, getUserState, setActiveMachine } from '../bot/state.js'
 import { acquireCommandLock, releaseCommandLock } from './command-lock.js'
+import { deriveBotId, isSecondaryBot } from '../config/bot-id.js'
 import type { DashboardCommand } from './types.js'
 import type { AIModelSelection } from '../ai/types.js'
 
@@ -15,11 +16,6 @@ const MAX_COMMANDS_KEPT = 200
 
 let timer: ReturnType<typeof setInterval> | null = null
 
-function deriveBotId(): string {
-  const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
-  if (!envArg || envArg === '.env') return 'bot1'
-  return envArg.replace('.env.', '')
-}
 
 async function readCommands(): Promise<DashboardCommand[]> {
   try {
@@ -239,8 +235,7 @@ async function pollCommands(botId: string): Promise<void> {
       // so response-broker events fire in the same process as dashboard server.
       const isBrowserCmd = c.type === 'prompt'
         && (typeof c.payload.chatId !== 'number' || c.payload.chatId === 0)
-      const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
-      const isMainBot = !envArg || envArg === '.env'
+      const isMainBot = !isSecondaryBot()
       if (isBrowserCmd && !isMainBot) return false
       return true
     })

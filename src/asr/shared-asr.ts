@@ -27,11 +27,8 @@ const MAX_BODY_BYTES = 4096
 
 const requestSchema = z.object({ wavPath: z.string().min(1).max(1024) })
 
-/** True for `.env.botN` instances — the ones that borrow the main bot's recogniser. */
-export function isSecondaryBot(argv: readonly string[] = process.argv): boolean {
-  const envArg = argv.find((_, i, arr) => arr[i - 1] === '--env')
-  return !!envArg && envArg !== '.env'
-}
+// `.env.botN` instances are the ones that borrow the main bot's recogniser.
+export { isSecondaryBot } from '../config/bot-id.js'
 
 function failure(error: string): AsrResult {
   return { success: false, text: '', duration: 0, error }

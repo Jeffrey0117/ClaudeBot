@@ -1,5 +1,6 @@
 import { createBot } from './bot/bot.js'
 import { env } from './config/env.js'
+import { isSecondaryBot } from './config/bot-id.js'
 import { scanProjects } from './config/projects.js'
 import { startDashboardServer } from './dashboard/server.js'
 import { startRelayServer } from './remote/relay-server.js'
@@ -62,8 +63,7 @@ async function main(): Promise<void> {
   const bot = await createBot()
 
   // Start dashboard server in-process (main bot only) for response broker events
-  const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
-  const isMainBot = !envArg || envArg === '.env'
+  const isMainBot = !isSecondaryBot()
   if (env.DASHBOARD && isMainBot) {
     startDashboardServer(env.DASHBOARD_PORT, async (chatId, text, opts) => {
       await bot.telegram.sendMessage(chatId, text, {

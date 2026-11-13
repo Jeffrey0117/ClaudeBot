@@ -15,6 +15,7 @@ import { createInterface, type Interface } from 'node:readline'
 import { join } from 'node:path'
 import { env } from '../config/env.js'
 import { isSecondaryBot, requestSharedAsr, type AsrResult } from './shared-asr.js'
+import { createIdleTimer } from '../utils/idle-timer.js'
 
 const TIMEOUT_MS = 60_000
 
@@ -24,7 +25,8 @@ const SECONDARY = isSecondaryBot()
 const SHARED_QUEUE_GRACE_MS = 60_000
 /** How long a fallback recogniser on a secondary bot may sit idle before it is stopped. */
 const FALLBACK_IDLE_MS = 5 * 60_000
-let fallbackIdleTimer: ReturnType<typeof setTimeout> | null = null
+/** Main bot: unload the model after this long without a voice message (0 = never). */
+const MAIN_IDLE_MS = Math.round(env.ASR_IDLE_UNLOAD_MIN * 60_000)
 
 /** Try running a command — returns true if it exits successfully. */
 function canRun(cmd: string, args: readonly string[]): boolean {
@@ -309,7 +311,9 @@ function sendCommand(cmd: Record<string, unknown>): Promise<SherpaResponse> {
 
 /** Transcribe with this process's own recogniser (spawning it if needed). */
 export async function transcribeLocal(wavPath: string): Promise<AsrResult> {
+  idleUnload.touch()
   const res = await sendCommand({ action: 'transcribe', audio_path: wavPath })
+  idleUnload.touch()
   return {
     success: res.success,
     text: res.text ?? '',
@@ -318,19 +322,16 @@ export async function transcribeLocal(wavPath: string): Promise<AsrResult> {
   }
 }
 
-function stopFallbackWhenIdle(): void {
-  if (fallbackIdleTimer) clearTimeout(fallbackIdleTimer)
-  fallbackIdleTimer = setTimeout(() => {
-    fallbackIdleTimer = null
-    if (pending || commandQueue.length > 0) {
-      stopFallbackWhenIdle()
-      return
-    }
-    console.error('[sherpa] fallback recogniser idle — stopping it')
+/** Releases the model once nobody has used it for a while; the next request loads it again. */
+const idleUnload = createIdleTimer(
+  SECONDARY ? FALLBACK_IDLE_MS : MAIN_IDLE_MS,
+  () => {
+    if (!proc) return
+    console.error('[sherpa] idle — unloading the speech model (loads again on the next voice message)')
     shutdownSherpa()
-  }, FALLBACK_IDLE_MS)
-  fallbackIdleTimer.unref()
-}
+  },
+  () => pending !== null || commandQueue.length > 0,
+)
 
 /**
  * Transcribe a WAV file.
@@ -346,9 +347,7 @@ export async function transcribeAudio(wavPath: string): Promise<AsrResult> {
   if (shared) return shared
 
   console.error('[sherpa] main bot recogniser unreachable — using a temporary local one')
-  const result = await transcribeLocal(wavPath)
-  stopFallbackWhenIdle()
-  return result
+  return transcribeLocal(wavPath)
 }
 
 /**
@@ -385,6 +384,10 @@ export function warmupSherpa(): void {
     console.error('[sherpa] using the main bot recogniser — not loading a second model')
     return
   }
+  if (MAIN_IDLE_MS > 0) {
+    console.error(`[sherpa] speech model loads on the first voice message (unloads after ${env.ASR_IDLE_UNLOAD_MIN} idle min)`)
+    return
+  }
   try {
     ensureProcess()
     console.error('[sherpa] warmup OK — process spawned')
@@ -406,6 +409,7 @@ export function getSherpaStatus(): {
 }
 
 export function shutdownSherpa(): void {
+  idleUnload.cancel()
   if (restartTimer) {
     clearTimeout(restartTimer)
     restartTimer = null

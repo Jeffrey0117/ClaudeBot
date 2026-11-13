@@ -70,6 +70,31 @@ export function createRotatingLog(options: RotatingLogOptions): RotatingLog {
   return { write }
 }
 
+const pad = (n: number): string => String(n).padStart(2, '0')
+
+/**
+ * Returns a function that prefixes each line with the local date and time
+ * (`MM-DD HH:MM:SS `). It tracks whether the previous chunk ended mid-line, so
+ * a line split across writes is stamped once. Empty lines stay empty.
+ */
+export function createLineStamper(now: () => Date = () => new Date()): (text: string) => string {
+  let atLineStart = true
+
+  return (text: string): string => {
+    if (!text) return text
+    const d = now()
+    const stamp = `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} `
+
+    const parts = text.split('\n')
+    const out = parts.map((part, i) => {
+      const startsLine = i === 0 ? atLineStart : true
+      return startsLine && part.length > 0 ? stamp + part : part
+    })
+    atLineStart = text.endsWith('\n')
+    return out.join('\n')
+  }
+}
+
 type StreamWrite = typeof process.stdout.write
 
 /**
@@ -80,10 +105,14 @@ type StreamWrite = typeof process.stdout.write
  * reader would be a redirect file that nothing rotates.
  */
 export function teeProcessOutput(log: RotatingLog, opts: { readonly passthrough: boolean }): void {
+  // Timestamps go into the file only — the terminal view stays as it was.
+  // One stamper for both streams: they interleave into a single file.
+  const stamp = createLineStamper()
+
   for (const stream of [process.stdout, process.stderr]) {
     const original = stream.write.bind(stream) as StreamWrite
     const patched = (chunk: unknown, ...rest: unknown[]): boolean => {
-      log.write(typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString('utf-8'))
+      log.write(stamp(typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString('utf-8')))
       if (opts.passthrough) return (original as (...a: unknown[]) => boolean)(chunk, ...rest)
       const callback = rest.find((r): r is () => void => typeof r === 'function')
       if (callback) callback()

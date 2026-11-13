@@ -1,6 +1,6 @@
 import { writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { getQueueLength, getActiveProjectPaths } from '../claude/queue.js'
+import { getQueueLength, getActiveProjectPaths, isProcessing } from '../claude/queue.js'
 import { getLockHolder } from '../claude/file-lock.js'
 import { scanProjects } from '../config/projects.js'
 import { getAnyElapsedMs } from '../ai/registry.js'
@@ -8,18 +8,13 @@ import { getActiveRunnerInfos } from './runner-tracker.js'
 import { getBotConnectedPairings } from '../remote/pairing-store.js'
 import type { BotHeartbeat, ConnectedMachine } from './types.js'
 import { touchActivity, getLastActivityAt } from './activity.js'
+import { deriveBotId } from '../config/bot-id.js'
 
 const HEARTBEAT_INTERVAL_MS = 2_000
 const HEARTBEAT_DIR = join(process.cwd(), 'data', 'heartbeat')
 
 let timer: ReturnType<typeof setInterval> | null = null
 
-function deriveBotId(): string {
-  const envArg = process.argv.find((_, i, arr) => arr[i - 1] === '--env')
-  if (!envArg || envArg === '.env') return 'bot1'
-  // .env.bot2 → bot2
-  return envArg.replace('.env.', '')
-}
 
 async function writeHeartbeat(botId: string): Promise<void> {
   const activeProjectPaths = getActiveProjectPaths()
@@ -61,7 +56,7 @@ async function writeHeartbeat(botId: string): Promise<void> {
   // Work in progress counts as activity, so a long task does not end in an
   // immediate sleep the moment it finishes.
   const queueLength = getQueueLength()
-  if (queueLength > 0 || runners.length > 0) touchActivity()
+  if (queueLength > 0 || runners.length > 0 || isProcessing()) touchActivity()
 
   const heartbeat: BotHeartbeat = {
     botId,
