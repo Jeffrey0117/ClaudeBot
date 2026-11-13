@@ -1,4 +1,5 @@
 import { loadPipeConfig, pipeRequest } from '../utils/pipe-executor.js'
+import type { X1FindResult } from './x1-format.js'
 
 /**
  * Thin typed client over CloudPipe's admin API (`/api/_admin/deploy/*`).
@@ -123,6 +124,11 @@ export async function rollbackProject(
   id: string
 ): Promise<ClientResult<{ success?: boolean; message?: string }>> {
   return adminCall('POST', `/api/_admin/deploy/projects/${enc(id)}/rollback`)
+}
+
+/** X1: find which project can do a task, by what it does rather than its name. Read-only. */
+export async function findCapability(task: string, limit = 5): Promise<ClientResult<X1FindResult>> {
+  return adminCall('POST', '/api/gateway/find', { task, limit })
 }
 
 /** Aggregated automation + health telemetry across the whole ecosystem. */

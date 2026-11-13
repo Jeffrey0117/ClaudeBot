@@ -36,6 +36,8 @@ const CORE_HELP = `
 
 \u{2500}\u{2500}\u{2500} *部署 CloudPipe* \u{2500}\u{2500}\u{2500}
 /deploy \u{2014} commit + push + 部署追蹤
+/x1 \`<想做的事>\` \u{2014} 問 X1 哪個專案做得到（零 AI 額度）
+/repo \u{2014} 看目前專案的 .repo 自述
 直接打「部署 xxx」「重啟 xxx」「xxx log」「全部還好嗎」也通（零 AI 額度）`.trim()
 
 const REMOTE_HELP = `

@@ -1,5 +1,6 @@
 import type { BotContext } from '../../types/context.js'
 import { findProject } from '../../config/projects.js'
+import { readDotRepo, formatDotRepoIntro } from '../../config/dotrepo.js'
 import { validateProjectPath } from '../../utils/path-validator.js'
 import { getUserState, setUserProject, setUserAI, setActiveMachine, getActiveMachine } from '../state.js'
 import { addBookmark, removeBookmark, getBookmarks } from '../bookmarks.js'
@@ -99,7 +100,7 @@ async function handleProjectSelect(ctx: BotContext, chatId: number, name: string
   const state = getUserState(chatId, threadId)
 
   await ctx.editMessageText(
-    `\u{2705} \u{5DF2}\u{9078}\u{64C7}: *${project.name}*\n\u{6A21}\u{578B}: \`${formatAILabel(state.ai)}\`\n\n\u{50B3}\u{9001}\u{8A0A}\u{606F}\u{958B}\u{59CB}\u{5C0D}\u{8A71}\u{3002}`,
+    `\u{2705} \u{5DF2}\u{9078}\u{64C7}: *${project.name}*${formatDotRepoIntro(readDotRepo(project.path))}\n\u{6A21}\u{578B}: \`${formatAILabel(state.ai)}\`\n\n\u{50B3}\u{9001}\u{8A0A}\u{606F}\u{958B}\u{59CB}\u{5C0D}\u{8A71}\u{3002}`,
     { parse_mode: 'Markdown' }
   )
   await ctx.answerCbQuery()

@@ -33,6 +33,7 @@ import { storeCommand } from './commands/store.js'
 import { installCommand } from './commands/install.js'
 import { uninstallCommand } from './commands/uninstall.js'
 import { deployCommand } from './commands/deploy.js'
+import { x1Command, repoCommand } from './commands/x1.js'
 import { detectDeployIntent, runDeployFromIntent } from './deploy-intent.js'
 import { detectOpsIntent, runOpsIntent } from './ops-intent.js'
 import { handleOpsCallback } from './ops-callbacks.js'
@@ -134,6 +135,8 @@ export const CORE_COMMANDS = [
   { command: 'context', description: '上下文管理 (pin/list/clear)' },
   { command: 'restart', description: '重啟 Bot (all=全部)' },
   { command: 'deploy', description: '部署專案 (commit + push)' },
+  { command: 'x1', description: '問 X1 哪個專案做得到某件事 (跨專案能力索引)' },
+  { command: 'repo', description: '看目前專案的 .repo 自述 (是什麼/怎麼跑/提供什麼)' },
   { command: 'sync', description: '同步所有 worktree' },
   { command: 'land', description: '把 bot 改動併回 master' },
   { command: 'fabric', description: '打包專案投遞到遠端機器跑' },
@@ -262,6 +265,8 @@ export async function createBot(): Promise<Telegraf<BotContext>> {
     ['context', contextCommand],
     ['reload', reloadCommand],
     ['deploy', deployCommand],
+    ['x1', x1Command],
+    ['repo', repoCommand],
     ['sync', syncCommand],
     ['land', landCommand],
     ['fabric', fabricCommand],
