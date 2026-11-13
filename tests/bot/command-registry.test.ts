@@ -3,19 +3,19 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 /**
- * Registry-drift guard.
+ * Registry guard.
  *
- * bot.ts keeps TWO parallel lists:
- *   - `coreEntries`    — the commands that actually have a handler
- *   - `CORE_COMMANDS`  — the commands advertised to Telegram autocomplete and
- *                        injected into Claude's system prompt
+ * bot.ts used to keep TWO parallel hand-synced lists — handlers and advertised
+ * descriptions — and they drifted in both directions. They are now one table
+ * (`CORE_COMMAND_TABLE`): a command cannot be advertised without a handler,
+ * and leaving `description` off is the only way to hide one.
  *
- * They are hand-synced, so they drift. Drift is invisible in both directions:
- * an advertised command with no handler does nothing when tapped, and a handler
- * that is never advertised is a capability Claude never learns it has.
+ * What still needs guarding is the hidden set: adding a handler without
+ * advertising it must be a deliberate edit here, or it is a capability Claude
+ * never learns it has.
  *
- * This test reads bot.ts as text on purpose — `coreEntries` is function-local and
- * importing bot.ts would construct a live Telegraf bot.
+ * This test reads bot.ts as text on purpose — importing bot.ts pulls in the
+ * whole bot and its live configuration.
  */
 
 const SRC = readFileSync(resolve('src/bot/bot.ts'), 'utf-8')
@@ -23,23 +23,28 @@ const SRC = readFileSync(resolve('src/bot/bot.ts'), 'utf-8')
 function sliceBlock(marker: string): string {
   const i = SRC.indexOf(marker)
   if (i === -1) throw new Error(`marker not found in bot.ts: ${marker}`)
-  const j = SRC.indexOf('\n  ]', i)
+  const j = SRC.indexOf('\n]', i)
   if (j === -1) throw new Error(`end of block not found for: ${marker}`)
   return SRC.slice(i, j)
 }
 
-const advertised: readonly string[] = [
-  ...sliceBlock('export const CORE_COMMANDS = [').matchAll(/\{\s*command:\s*'([^']+)'/g),
-].map((m) => m[1])
+interface Entry {
+  readonly command: string
+  readonly handler: string
+  readonly advertised: boolean
+}
 
-const handlers: readonly string[] = [
-  ...sliceBlock('const coreEntries:').matchAll(/\[\s*'([^']+)'\s*,/g),
-].map((m) => m[1])
+const entries: readonly Entry[] = [
+  ...sliceBlock('const CORE_COMMAND_TABLE: readonly CoreCommand[] = [').matchAll(
+    /\{\s*command:\s*'([^']+)',\s*handler:\s*(\w+)(,\s*description:\s*'[^']+')?\s*\}/g,
+  ),
+].map((m) => ({ command: m[1], handler: m[2], advertised: m[3] !== undefined }))
+
+const names = entries.map((e) => e.command)
 
 /**
  * Commands that intentionally have a handler but are NOT advertised:
  * auth/lifecycle plumbing and numbered aliases of /last.
- * Adding a handler without advertising it must be a deliberate edit here.
  */
 const INTENTIONALLY_HIDDEN = [
   'start', 'login', 'logout', 'license',
@@ -48,26 +53,28 @@ const INTENTIONALLY_HIDDEN = [
 ].sort()
 
 describe('bot command registry', () => {
-  it('parses both registries out of bot.ts', () => {
-    expect(handlers.length).toBeGreaterThan(50)
-    expect(advertised.length).toBeGreaterThan(50)
+  it('parses the command table out of bot.ts', () => {
+    expect(entries.length).toBeGreaterThan(50)
   })
 
-  it('every advertised command has a handler (no dead autocomplete entries)', () => {
-    const missing = advertised.filter((c) => !handlers.includes(c))
-    expect(missing).toEqual([])
+  it('every row of the table was understood (nothing silently skipped)', () => {
+    const rows = sliceBlock('const CORE_COMMAND_TABLE: readonly CoreCommand[] = [')
+      .split('\n')
+      .filter((line) => line.trim().startsWith('{'))
+    expect(entries.length).toBe(rows.length)
   })
 
-  it('advertises no duplicates', () => {
-    expect([...new Set(advertised)].length).toBe(advertised.length)
+  it('there is one list, not two', () => {
+    expect(SRC).not.toContain('const coreEntries')
+    expect(SRC).toContain('for (const { command, handler } of CORE_COMMAND_TABLE)')
   })
 
-  it('registers no duplicate handlers', () => {
-    expect([...new Set(handlers)].length).toBe(handlers.length)
+  it('lists no command twice', () => {
+    expect([...new Set(names)].length).toBe(names.length)
   })
 
   it('hidden commands are exactly the intended set', () => {
-    const hidden = handlers.filter((c) => !advertised.includes(c)).sort()
+    const hidden = entries.filter((e) => !e.advertised).map((e) => e.command).sort()
     expect(hidden).toEqual(INTENTIONALLY_HIDDEN)
   })
 })

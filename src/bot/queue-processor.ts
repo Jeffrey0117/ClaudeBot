@@ -784,7 +784,7 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         if (ctx.resolved || isDashboard) return
         telegram.sendMessage(
           item.chatId,
-          `\u{26A0}\u{FE0F} *[${tag}]* \u{5DF2}\u{904B}\u{884C}\u{8D85}\u{904E} 2 \u{5206}\u{9418}\u{FF0C}\u{53EF}\u{7528} /cancel \u{53D6}\u{6D88}`,
+          `\u{23F3} *[${tag}]* 還在處理中。如果要取消任務，傳 /cancel`,
           { parse_mode: 'Markdown', disable_notification: true },
         ).catch(() => {})
       }, LONG_RUN_MS)
@@ -846,13 +846,9 @@ export function setupQueueProcessor(bot: Telegraf<BotContext>): void {
         // No prepend here — rotation clears the session, so freshSessionId below
         // comes back null and claude-runner injects the [CTX] digest itself
         // (single injection path; previously this double-injected on short replies).
-        if (!isDashboard) {
-          telegram.sendMessage(
-            item.chatId,
-            `\u{1F504} *[${tag}]* Session \u{5DF2}\u{81EA}\u{52D5}\u{5237}\u{65B0}\u{FF08}context \u{63A5}\u{8FD1}\u{4E0A}\u{9650}\u{FF0C}\u{5DF2}\u{7528}\u{6458}\u{8981}\u{63A5}\u{7E8C}\u{FF0C}${count} \u{6B21}\u{5C0D}\u{8A71}\u{FF09}\u{FF0C}\u{4FDD}\u{6301}\u{56DE}\u{61C9}\u{901F}\u{5EA6}`,
-            { parse_mode: 'Markdown', disable_notification: true },
-          ).catch(() => {})
-        }
+        // Not announced in the chat: it is routine housekeeping that continues
+        // from the digest, and the notice was showing up constantly. Log only.
+        console.error(`[session] ${tag}: auto-rotated after ${count} turns (context near limit) — continuing from digest`)
       }
 
       // Re-fetch session ID at execution time (not the stale one from enqueue time)

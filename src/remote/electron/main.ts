@@ -6,12 +6,15 @@
  * Communicates with the renderer via IPC for UI updates.
  */
 
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { resolve } from 'node:path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { WebSocket } from 'ws'
+import { discoverRelayUrl as findRelayUrl } from './relay-discovery.js'
+import { checkForUpdate } from './update-check.js'
+import { createElectronConfigStore } from './electron-config.js'
 
 // --- GPU workaround: remote desktop / VM environments hang on GPU init ---
 app.disableHardwareAcceleration()
@@ -67,100 +70,26 @@ let toolDispatcher: ToolDispatcher | null = null
 
 // --- Electron config (projectsBaseDir etc.) ---
 
-const CONFIG_PATH = resolve(DATA_DIR, 'electron-config.json')
-
-interface ElectronConfig {
-  readonly projectsBaseDir?: string
-  readonly licenseKey?: string
-  readonly relayUrl?: string
-  readonly discoveryUrl?: string
-  readonly relayPasteId?: string
-  /** Last version we offered an update for, so we ask once per version. */
-  readonly lastNotifiedVersion?: string
-}
+const { load: loadConfig, save: saveConfig } = createElectronConfigStore(DATA_DIR)
 
 // Injected at build time via esbuild --define (from RAWTXT_BASE in .env), so
 // the private host isn't hardcoded in the public source. Empty in dev builds →
 // URL auto-discovery is skipped and the user pastes the Server URL from /pair.
 const RAWTXT_BASE = process.env.RAWTXT_BASE || ''
 
-/** Try fetching text from a URL with timeout. */
-async function fetchText(url: string, timeoutMs = 8_000): Promise<string | null> {
-  try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), timeoutMs)
-    const res = await fetch(url, { signal: controller.signal })
-    clearTimeout(timeout)
-    if (!res.ok) return null
-    return (await res.text()).trim()
-  } catch {
-    return null
-  }
-}
-
-/**
- * Discover the current relay URL by trying multiple sources:
- * 1. rawtxt paste via saved paste ID (public, works from any network)
- * 2. Current tunnel's HTTP /relay-url (works if tunnel still alive)
- * 3. Scan all rawtxt pastes for the newest wss:// URL (handles paste ID rotation)
- */
-async function discoverRelayUrl(): Promise<string | null> {
+/** Look up the relay's current address (see relay-discovery.ts). */
+function discoverRelayUrl(): Promise<string | null> {
   const config = loadConfig()
-
-  // 1. Scan rawtxt for the NEWEST wss:// paste — this is authoritative and
-  //    handles URL rotation. The server keeps OLD pastes alive (with now-dead
-  //    URLs), so a saved paste ID is unreliable: it would return a stale-but-
-  //    valid-looking URL. The newest paste is the current relay.
-  try {
-    const listText = await fetchText(`${RAWTXT_BASE}/api/pastes`, 10_000)
-    if (listText) {
-      const json = JSON.parse(listText) as { success?: boolean; data?: Array<{ id: string; sizeBytes: number }> }
-      if (json.success && json.data) {
-        // Pastes are sorted newest-first; relay URLs are typically 40-80 bytes
-        const candidates = json.data.filter(p => p.sizeBytes >= 30 && p.sizeBytes <= 120)
-        for (const paste of candidates) {
-          const raw = await fetchText(`${RAWTXT_BASE}/${paste.id}/raw`, 5_000)
-          if (raw && (raw.startsWith('wss://') || raw.startsWith('ws://'))) {
-            log(`Discovered relay URL from rawtxt scan (paste: ${paste.id})`)
-            saveConfig({ relayPasteId: paste.id })
-            return raw.trim()
-          }
-        }
-      }
-    }
-  } catch { /* scan is best-effort — fall through */ }
-
-  // 2. Fallback: saved paste ID (fast path when the scan endpoint is down)
-  const pasteId = config.relayPasteId
-  if (pasteId) {
-    const text = await fetchText(config.discoveryUrl || `${RAWTXT_BASE}/${pasteId}/raw`)
-    if (text && (text.startsWith('wss://') || text.startsWith('ws://'))) return text.trim()
-  }
-
-  // 3. Fallback: current tunnel's HTTP /relay-url endpoint
-  if (agentRelayUrl) {
-    const httpUrl = agentRelayUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:')
-    const text = await fetchText(`${httpUrl}/relay-url`)
-    if (text && (text.startsWith('wss://') || text.startsWith('ws://'))) return text.trim()
-  }
-
-  return null
-}
-
-function loadConfig(): ElectronConfig {
-  try {
-    return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'))
-  } catch {
-    return {}
-  }
-}
-
-function saveConfig(patch: Partial<ElectronConfig>): ElectronConfig {
-  const current = loadConfig()
-  const updated = { ...current, ...patch }
-  mkdirSync(DATA_DIR, { recursive: true })
-  writeFileSync(CONFIG_PATH, JSON.stringify(updated, null, 2), 'utf-8')
-  return updated
+  return findRelayUrl({
+    rawtxtBase: RAWTXT_BASE,
+    savedPasteId: config.relayPasteId,
+    discoveryUrl: config.discoveryUrl,
+    currentRelayUrl: agentRelayUrl,
+    onPasteFound: (pasteId) => {
+      saveConfig({ relayPasteId: pasteId })
+    },
+    log,
+  })
 }
 
 function getProjectsBaseDir(): string {
@@ -781,93 +710,18 @@ function getParam(name: string): string | undefined {
 
 elog(`[electron] starting... argv=${process.argv.join(' ')}`)
 
-/**
- * Compare two semver-ish strings. Returns true when `candidate` is newer.
- * Prerelease suffixes are stripped, so 1.2.3-beta compares equal to 1.2.3 —
- * deterministic, and errs towards NOT prompting rather than prompting wrongly.
- */
-function isNewerVersion(candidate: string, current: string): boolean {
-  const parse = (v: string): number[] =>
-    v.replace(/^v/, '').split('-')[0].split('.').map((p) => Number.parseInt(p, 10) || 0)
-  const a = parse(candidate)
-  const b = parse(current)
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const x = a[i] ?? 0
-    const y = b[i] ?? 0
-    if (x !== y) return x > y
-  }
-  return false
-}
-
-/**
- * Tell the user when a newer build exists.
- *
- * electron-builder already emits release/latest.yml, but nothing consumed it
- * and there is no publish target, so anyone who installed the app stayed on
- * that version forever — every fix meant hand-delivering a ~150MB installer
- * again. A friend running a build from weeks ago will hit bugs that were
- * already fixed and have no way to know.
- *
- * This is a notifier, not a silent self-updater: it reads the public GitHub
- * releases feed and offers to open the release page. No extra dependency, so
- * there is nothing that can fail to bundle — full background auto-update needs
- * electron-updater plus a signed build and a real release to validate.
- */
-async function checkForUpdate(): Promise<void> {
-  if (!app.isPackaged) return
-  try {
-    const res = await fetch(
-      'https://api.github.com/repos/Jeffrey0117/ClaudeBot/releases/latest',
-      {
-        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'ClaudeBot-Desktop' },
-        signal: AbortSignal.timeout(10_000),
-      },
-    )
-    if (!res.ok) {
-      elog(`[update] check skipped: HTTP ${res.status}`)
-      return
-    }
-    const rel = (await res.json()) as { tag_name?: string; html_url?: string; name?: string }
-    const latest = rel.tag_name ?? rel.name
-    if (!latest) return
-    const current = app.getVersion()
-    if (!isNewerVersion(latest, current)) {
-      elog(`[update] up to date (${current})`)
-      return
-    }
-    // Ask once per version. Nagging on every launch is how a friend learns to
-    // dismiss the dialog without reading it.
-    if (loadConfig().lastNotifiedVersion === latest) {
-      elog(`[update] ${latest} already offered — not asking again`)
-      return
-    }
-    saveConfig({ lastNotifiedVersion: latest })
-
-    elog(`[update] newer version available: ${latest} (running ${current})`)
-    const choice = await dialog.showMessageBox({
-      type: 'info',
-      title: 'ClaudeBot 有新版本',
-      message: `新版本 ${latest} 可以更新（你現在是 ${current}）`,
-      detail: '點「前往下載」會開啟下載頁面，裝好新版即可。',
-      buttons: ['前往下載', '稍後再說'],
-      defaultId: 0,
-      cancelId: 1,
-    })
-    if (choice.response === 0 && rel.html_url) {
-      await shell.openExternal(rel.html_url)
-    }
-  } catch (err) {
-    // Never block startup on the update check
-    elog(`[update] check failed: ${err instanceof Error ? err.message : String(err)}`)
-  }
-}
-
 app.whenReady().then(async () => {
   elog('[electron] app ready, creating window...')
   createWindow()
 
   // Non-blocking: the user can start working while this runs
-  void checkForUpdate()
+  void checkForUpdate({
+    getLastNotifiedVersion: () => loadConfig().lastNotifiedVersion,
+    setLastNotifiedVersion: (version) => {
+      saveConfig({ lastNotifiedVersion: version })
+    },
+    log: elog,
+  })
 
   // Auto-connect if url and code provided (from /pair chat command)
   const cliUrl = getParam('url')

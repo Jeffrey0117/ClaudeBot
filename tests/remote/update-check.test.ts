@@ -2,25 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-/**
- * Mirror of isNewerVersion in src/remote/electron/main.ts.
- *
- * That module cannot be imported here — it calls electron APIs at module load.
- * The guard below asserts the two stay identical, so this copy cannot silently
- * drift from the one that ships.
- */
-function isNewerVersion(candidate: string, current: string): boolean {
-  const parse = (v: string): number[] =>
-    v.replace(/^v/, '').split('-')[0].split('.').map((p) => Number.parseInt(p, 10) || 0)
-  const a = parse(candidate)
-  const b = parse(current)
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const x = a[i] ?? 0
-    const y = b[i] ?? 0
-    if (x !== y) return x > y
-  }
-  return false
-}
+import { isNewerVersion } from '../../src/remote/electron/version-compare.js'
 
 describe('desktop update check', () => {
   it('detects a newer release', () => {
@@ -59,10 +41,10 @@ describe('desktop update check', () => {
     expect(isNewerVersion('v0.5.3', pkg.version)).toBe(false)
   })
 
-  it('the shipped comparator matches the one tested here', () => {
-    const src = readFileSync(resolve('src/remote/electron/main.ts'), 'utf-8')
-    // the exact parse line is the part that matters
-    expect(src).toContain("v.replace(/^v/, '').split('-')[0].split('.')")
-    expect(src).toContain('function isNewerVersion(')
+  it('the desktop app uses this comparator, not a private copy', () => {
+    const main = readFileSync(resolve('src/remote/electron/main.ts'), 'utf-8')
+    const check = readFileSync(resolve('src/remote/electron/update-check.ts'), 'utf-8')
+    expect(main).not.toContain('function isNewerVersion(')
+    expect(check).toContain("from './version-compare.js'")
   })
 })
